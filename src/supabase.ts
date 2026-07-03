@@ -6,10 +6,17 @@
 import { createClient } from "@supabase/supabase-js";
 import { UserProfile, Prediction, League, SportType, Match } from "./types";
 
-// Retrieve environment variables represented safely
+// Retrieve environment variables and clean them of common copy-paste errors
 const metaEnv = (import.meta as any).env || {};
-const supabaseUrl = metaEnv.VITE_SUPABASE_URL || "";
-const supabaseAnonKey = metaEnv.VITE_SUPABASE_ANON_KEY || "";
+
+// Clean the string: remove [, ], (, ), and trim whitespace
+const supabaseUrl = (metaEnv.VITE_SUPABASE_URL || "")
+  .replace(/[\[\]\(\)]/g, "") 
+  .trim();
+
+const supabaseAnonKey = (metaEnv.VITE_SUPABASE_ANON_KEY || "")
+  .replace(/[\[\]\(\)]/g, "") 
+  .trim();
 
 // Initialize client if configured
 export const isSupabaseConfigured = () => {
