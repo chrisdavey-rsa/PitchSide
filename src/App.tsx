@@ -15,6 +15,7 @@ import Dashboard from './components/Dashboard';
 import RulesInfo from './components/RulesInfo';
 import AdminPanel from './components/AdminPanel';
 import AccountPortal from './components/AccountPortal';
+import ResetPassword from './components/ResetPassword';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
@@ -23,6 +24,7 @@ export default function App() {
   const [showAdmin, setShowAdmin] = useState(false);
   const [showAccount, setShowAccount] = useState(false);
   const [externalLeagueSelection, setExternalLeagueSelection] = useState<string | null>(null);
+  const [passwordRecoveryMode, setPasswordRecoveryMode] = useState(false);
 
   const [registeredUsers, setRegisteredUsers] = useState<UserProfile[]>([]);
 
@@ -69,6 +71,19 @@ export default function App() {
       }
     };
     testSupabaseConnection();
+  }, []);
+
+  // Listen for PASSWORD_RECOVERY event from Supabase reset email links
+  useEffect(() => {
+    if (!supabase) return;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setPasswordRecoveryMode(true);
+        setCurrentUser(null);
+        localStorage.removeItem('pitchside_logged_in');
+      }
+    });
+    return () => subscription.unsubscribe();
   }, []);
 
   // Fetch registered players from Supabase relational DB
@@ -271,7 +286,10 @@ export default function App() {
               <div className="sparkling-light-particle top-[80%] left-[35%] text-sm text-purple-400" style={{ animationDelay: '3.1s' }}>✨</div>
             </div>
 
-            {currentUser ? (
+            {passwordRecoveryMode ? (
+              /* Password Reset Flow (triggered via Supabase email link) */
+              <ResetPassword onComplete={() => setPasswordRecoveryMode(false)} />
+            ) : currentUser ? (
               /* Authenticated Platform Dashboard */
               <Dashboard
                 user={currentUser}
