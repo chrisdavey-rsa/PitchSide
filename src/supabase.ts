@@ -145,7 +145,7 @@ export async function dbFetchPredictions(userId: string): Promise<Record<string,
   const result: Record<string, { home: number; away: number; submitted: boolean }> = {};
   if (data) {
     data.forEach((p: any) => {
-      result[p.match_id] = { home: p.predicted_home_score, away: p.predicted_away_score, submitted: p.submitted ?? true };
+      result[p.match_id] = { home: p.predicted_home_score, away: p.predicted_away_score, submitted: p.submitted ?? false };
     });
   }
   return result;

@@ -16,8 +16,6 @@ import {
   ChevronRight,
   Sparkles,
   Zap,
-  Play,
-  RotateCcw,
   Check,
   Award,
   Lock,
@@ -209,18 +207,6 @@ export default function Dashboard({
     const saved = localStorage.getItem(`points_${user?.id || "guest"}`);
     return saved ? parseInt(saved, 10) : 0;
   });
-
-  // State to handle simulated match results synced from Firestore or LocalStorage
-  const [simulatedResults, setSimulatedResults] = useState<
-    Record<
-      string,
-      { home: number; away: number; played: boolean; pointsWon?: number }
-    >
-  >(() => {
-    const saved = localStorage.getItem(`simulated_${user?.id || "guest"}`);
-    return saved ? JSON.parse(saved) : {};
-  });
-  const [simulationActive, setSimulationActive] = useState(false);
 
   // Live sorted leaderboard lists from database
   const [leaderboardList, setLeaderboardList] = useState<any[]>([]);
@@ -806,100 +792,6 @@ export default function Dashboard({
     }
   };
 
-  // Run the match simulation
-  const simulateMatchPlay = async (match: Match) => {
-    const pred = predictions[match.id];
-    if (!pred || !pred.submitted) {
-      triggerToast("⚠️ Please enter and submit a score prediction first!");
-      return;
-    }
-
-    setSimulationActive(true);
-
-    // Simulate outcome with beautiful timed response
-    setTimeout(async () => {
-      let actualHomeScore = Math.floor(Math.random() * 4);
-      let actualAwayScore = Math.floor(Math.random() * 4);
-
-      if (match.sport === SportType.RUGBY) {
-        actualHomeScore = Math.floor(Math.random() * 25) + 10;
-        actualAwayScore = Math.floor(Math.random() * 25) + 10;
-      }
-
-      // Calculate points earned
-      const points = calculatePoints(
-        match.sport,
-        pred.home,
-        pred.away,
-        actualHomeScore,
-        actualAwayScore,
-      );
-
-      const nextSimulatedResults = {
-        ...simulatedResults,
-        [match.id]: {
-          home: actualHomeScore,
-          away: actualAwayScore,
-          played: true,
-          pointsWon: points,
-        },
-      };
-
-      setSimulatedResults(nextSimulatedResults);
-      localStorage.setItem(
-        `simulated_${user.id}`,
-        JSON.stringify(nextSimulatedResults),
-      );
-
-      const newPts = userPoints + points;
-      setUserPoints(newPts);
-      localStorage.setItem(`points_${user.id}`, newPts.toString());
-
-      setSimulationActive(false);
-
-      if (points === 5) {
-        triggerToast("🔥 INCREDIBLE! PERFECT SCORE - earned 5 points!");
-      } else if (points > 0) {
-        triggerToast(`🎉 Good prediction! You earned ${points} point(s)!`);
-      } else {
-        triggerToast("💔 Tough luck! 0 points awarded. Try another match!");
-      }
-
-      try {
-        await dbSavePrediction(
-          user.id,
-          match.id,
-          match.sport,
-          match.competitionId,
-          pred.home,
-          pred.away,
-          true,
-        );
-      } catch (dbErr) {
-        console.error("Simulation results sync error:", dbErr);
-      }
-    }, 1200);
-  };
-
-  const resetAllSimulations = async () => {
-    try {
-      setPredictions({});
-      setSimulatedResults({});
-      setUserPoints(0);
-      localStorage.removeItem(`predictions_${user.id}`);
-      localStorage.removeItem(`points_${user.id}`);
-      localStorage.removeItem(`simulated_${user.id}`);
-      triggerToast("♻️ Scores and schedules successfully reset.");
-
-      if (supabase) {
-        await supabase.from("predictions").delete().eq("user_id", user.id);
-      }
-    } catch (e) {
-      console.error("Error during resets:", e);
-      triggerToast("⚠️ Error resetting local state.");
-    }
-  };
-
   // Get active sport competitions
   const filteredCompetitions = getCompetitions().filter((c) => c.sport === selectedSport);
   const selectedCompetition = getCompetitions().find(
@@ -1002,23 +894,14 @@ export default function Dashboard({
   const totalPredicted = Object.keys(predictions).filter(
     (k) => predictions[k].submitted,
   ).length;
-  const perfectPredictions = Object.keys(simulatedResults).filter(
-    (k) => simulatedResults[k].pointsWon === 5,
-  ).length;
 
-  const currentCalendarYear = new Date().getFullYear();
-
-  // Lifetime summaries: based on simulated/played games
-  const lifetimePlayed = Object.keys(simulatedResults).filter(
-    (k) => simulatedResults[k].played,
-  ).length;
-  const lifetimePerfect = Object.keys(simulatedResults).filter(
-    (k) => simulatedResults[k].pointsWon === 5,
-  ).length;
-  const lifetimeAccuracy =
-    lifetimePlayed > 0
-      ? Math.round((lifetimePerfect / lifetimePlayed) * 100)
-      : 0;
+  const perfectPredictions = Object.keys(predictions).filter((k) => {
+    const pred = predictions[k];
+    if (!pred.submitted) return false;
+    const match = allMatches.find((m) => m.id === k);
+    if (!match || match.status !== "completed") return false;
+    return match.homeScore === pred.home && match.awayScore === pred.away;
+  }).length;
 
   // Live leaderboard computation from Supabase data with absolutely no mock merging
   const displayLeaderboard = useMemo(() => {
@@ -1042,25 +925,6 @@ export default function Dashboard({
       rank: index + 1,
     }));
   }, [leaderboardList, globalLeaderboardSport]);
-
-  // Seasonal summaries: based on simulated/played games starting in the current calendar year
-  const seasonalPlayedMatches = Object.keys(simulatedResults).filter(
-    (matchId) => {
-      if (!simulatedResults[matchId].played) return false;
-      const match = allMatches.find((m) => m.id === matchId);
-      if (!match) return false;
-      const matchYear = new Date(match.matchDate).getFullYear();
-      return matchYear === currentCalendarYear;
-    },
-  );
-  const seasonalPlayedCount = seasonalPlayedMatches.length;
-  const seasonalPerfectCount = seasonalPlayedMatches.filter(
-    (matchId) => simulatedResults[matchId].pointsWon === 5,
-  ).length;
-  const seasonalAccuracy =
-    seasonalPlayedCount > 0
-      ? Math.round((seasonalPerfectCount / seasonalPlayedCount) * 100)
-      : 0;
 
   const isUserInAnyLeague = userLeagues.length > 0;
 
@@ -1510,20 +1374,15 @@ export default function Dashboard({
                               </div>
 
                               <div className="text-center sm:text-right flex-shrink-0">
-                                {match.status === "completed" ||
-                                simulatedResults[match.id]?.played ? (
+                                {match.status === "completed" ? (
                                   <div className="space-y-0.5">
                                     <span className="text-[9px] text-slate-500 uppercase tracking-wider font-mono block">
                                       FINAL SCORE
                                     </span>
                                     <span className="font-extrabold text-sm text-yellow-500 font-serif">
-                                      {match.status === "completed"
-                                        ? match.homeScore
-                                        : simulatedResults[match.id].home}{" "}
+                                      {match.homeScore}{" "}
                                       -{" "}
-                                      {match.status === "completed"
-                                        ? match.awayScore
-                                        : simulatedResults[match.id].away}
+                                      {match.awayScore}
                                     </span>
                                   </div>
                                 ) : (
@@ -1557,22 +1416,17 @@ export default function Dashboard({
                                   const actualHome =
                                     match.status === "completed"
                                       ? match.homeScore
-                                      : simulatedResults[match.id]?.played
-                                        ? simulatedResults[match.id].home
-                                        : undefined;
+                                      : undefined;
                                   const actualAway =
                                     match.status === "completed"
                                       ? match.awayScore
-                                      : simulatedResults[match.id]?.played
-                                        ? simulatedResults[match.id].away
-                                        : undefined;
+                                      : undefined;
                                   const actualTime = new Date(
                                     match.matchDate,
                                   ).getTime();
                                   const isKickedOff =
                                     match.status === "completed" ||
                                     match.status === "live" ||
-                                    simulatedResults[match.id]?.played ||
                                     actualTime < Date.now();
                                   const hasPlayed =
                                     actualHome !== undefined &&
@@ -1686,18 +1540,18 @@ export default function Dashboard({
                 <div className="flex flex-col gap-1.5 text-left sm:text-right text-[11px] text-slate-400 font-mono">
                   <div className="flex items-center justify-between sm:justify-end gap-3">
                     <span className="text-slate-500 font-sans">
-                      Season's Accuracy ({currentCalendarYear}):
+                      Predictions Locked:
                     </span>
                     <span className="font-bold text-white font-mono bg-slate-950/60 px-1.5 py-0.5 rounded border border-slate-800/60">
-                      {seasonalAccuracy}%
+                      {totalPredicted}
                     </span>
                   </div>
                   <div className="flex items-center justify-between sm:justify-end gap-3">
                     <span className="text-slate-500 font-sans">
-                      Lifetime Accuracy:
+                      Perfect Hits:
                     </span>
                     <span className="font-bold text-emerald-400 font-mono bg-slate-950/60 px-1.5 py-0.5 rounded border border-slate-800/60">
-                      {lifetimeAccuracy}%
+                      {perfectPredictions}
                     </span>
                   </div>
                 </div>
@@ -2801,14 +2655,6 @@ export default function Dashboard({
                       </p>
                     </div>
 
-                    <button
-                      id="reset-simulation-btn"
-                      onClick={resetAllSimulations}
-                      className="text-[10px] font-mono border border-slate-800 hover:border-slate-700 px-3 py-1.5 rounded-md hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5 text-slate-400" /> Reset
-                      State
-                    </button>
                   </div>
 
                   {activeMatches.length === 0 ? (
@@ -2836,8 +2682,6 @@ export default function Dashboard({
                         const isMatchStarted =
                           new Date() > new Date(match.matchDate);
                         const isLocked = isSubmitted || isMatchStarted;
-                        const simResult = simulatedResults[match.id];
-
                         return (
                           <React.Fragment key={match.id}>
                             {showDateSeparator && (
@@ -2849,11 +2693,9 @@ export default function Dashboard({
                             )}
                             <div
                               className={`relative p-5 rounded-2xl border transition-all ${
-                                simResult?.played
-                                  ? "bg-slate-950/80 border-slate-800 shadow-xs"
-                                  : isLocked
-                                    ? "bg-slate-900 border-blue-900/30"
-                                    : "bg-slate-900/40 border-slate-800/40"
+                                isLocked
+                                  ? "bg-slate-900 border-blue-900/30"
+                                  : "bg-slate-900/40 border-slate-800/40"
                               }`}
                             >
                               {/* Top Row: Date, Time, Action Button */}
@@ -2884,37 +2726,10 @@ export default function Dashboard({
                                         Lock Guess{" "}
                                         <Zap className="w-3.5 h-3.5 stroke-2" />
                                       </button>
-                                    ) : !simResult?.played ? (
-                                      <button
-                                        id={`sim-match-btn-${match.id}`}
-                                        onClick={() => simulateMatchPlay(match)}
-                                        disabled={simulationActive}
-                                        className="w-full sm:w-auto bg-blue-500 hover:bg-blue-600 border border-blue-400/30 text-white font-bold font-display uppercase text-xs px-5 py-3 rounded-xl cursor-pointer flex items-center justify-center gap-1.5 transition-all"
-                                      >
-                                        <Play className="w-3.5 h-3.5" />{" "}
-                                        {simulationActive
-                                          ? "Playing..."
-                                          : "Simulate Match"}
-                                      </button>
                                     ) : (
-                                      <div className="w-full sm:w-auto p-2 bg-slate-950 rounded-xl border border-slate-800 flex items-center gap-3 text-xs">
-                                        <div>
-                                          <span className="text-[9px] text-slate-500 block uppercase tracking-wider font-mono">
-                                            Actual Result
-                                          </span>
-                                          <span className="font-serif font-black text-amber-500">
-                                            {match.homeTeam} {simResult.home} -{" "}
-                                            {simResult.away} {match.awayTeam}
-                                          </span>
-                                        </div>
-                                        <div className="border-l border-slate-800 pl-3">
-                                          <span className="text-[9px] text-slate-500 block uppercase tracking-wider font-mono">
-                                            Score Earned
-                                          </span>
-                                          <span className="font-mono font-extrabold text-emerald-400">
-                                            +{simResult.pointsWon} Pts
-                                          </span>
-                                        </div>
+                                      <div className="w-full sm:w-auto flex items-center gap-2 text-xs font-mono text-slate-500 bg-slate-950/60 border border-slate-800 px-4 py-2.5 rounded-xl">
+                                        <MetallicTickWithLightning />
+                                        <span>{isSubmitted ? "Prediction Locked" : "Match Started"}</span>
                                       </div>
                                     )}
                                   </div>
