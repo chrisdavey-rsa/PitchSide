@@ -2797,8 +2797,7 @@ export default function Dashboard({
                         {selectedCompetition?.name} Match Day Predicter
                       </h4>
                       <p className="text-xs text-slate-400">
-                        Input your guessed scores below. Press SUBMIT to
-                        register, then trigger SIMULATE to verify points.
+                        Input your predictions below.
                       </p>
                     </div>
 
