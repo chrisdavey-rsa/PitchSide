@@ -187,7 +187,7 @@ function AdminPredictionsDashboard() {
         return;
       }
 
-      const { data, error } = await supabase
+      let query = supabase
         .from('predictions')
         .select(`
           id,
@@ -204,12 +204,18 @@ function AdminPredictionsDashboard() {
             status, sport
           ),
           profiles:user_id (
-            id, nickname, firstName, surname
+            id, username, first_name, surname
           )
         `)
         .in('match_id', ids)
-        .eq('submitted', true)
         .order('created_at', { ascending: false });
+
+      // For upcoming matches, only show predictions the player has actually locked in
+      if (statusFilter === 'upcoming') {
+        query = query.eq('submitted', true);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
       setPredictions(data || []);
@@ -228,10 +234,11 @@ function AdminPredictionsDashboard() {
   const filtered = predictions.filter((p) => {
     if (!searchTerm) return true;
     const q = searchTerm.toLowerCase();
-    const nickname = ((p.profiles as any)?.nickname || '').toLowerCase();
+    const username = ((p.profiles as any)?.username || '').toLowerCase();
+    const firstName = ((p.profiles as any)?.first_name || '').toLowerCase();
     const home = ((p.matches as any)?.home_team || '').toLowerCase();
     const away = ((p.matches as any)?.away_team || '').toLowerCase();
-    return nickname.includes(q) || home.includes(q) || away.includes(q);
+    return username.includes(q) || firstName.includes(q) || home.includes(q) || away.includes(q);
   });
 
   return (
@@ -330,11 +337,11 @@ function AdminPredictionsDashboard() {
                     >
                       <td className="py-3 px-4">
                         <span className="font-bold text-white text-[11px]">
-                          {profile.nickname || 'Unknown'}
+                          {profile.username || 'Unknown'}
                         </span>
-                        {(profile.firstName || profile.surname) && (
+                        {(profile.first_name || profile.surname) && (
                           <span className="text-slate-500 text-[10px] block">
-                            {profile.firstName} {profile.surname}
+                            {profile.first_name} {profile.surname}
                           </span>
                         )}
                       </td>
@@ -438,9 +445,9 @@ function AdminPredictionsDashboard() {
                 <div className="space-y-3">
                   <div className="bg-slate-950 rounded-xl p-4 space-y-1">
                     <div className="text-[9px] text-slate-500 font-mono uppercase tracking-widest mb-1">Player</div>
-                    <div className="font-bold text-white text-base">{profile.nickname || 'Unknown'}</div>
-                    {(profile.firstName || profile.surname) && (
-                      <div className="text-xs text-slate-400">{profile.firstName} {profile.surname}</div>
+                    <div className="font-bold text-white text-base">{profile.username || 'Unknown'}</div>
+                    {(profile.first_name || profile.surname) && (
+                      <div className="text-xs text-slate-400">{profile.first_name} {profile.surname}</div>
                     )}
                     <div className="text-[10px] text-slate-600 font-mono truncate">{p.user_id}</div>
                   </div>
