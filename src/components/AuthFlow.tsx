@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Mail, 
@@ -23,7 +23,7 @@ import {
   Eye,
   EyeOff
 } from 'lucide-react';
-import { UserProfile } from '../types';
+import { UserProfile, SportType } from '../types';
 import PitchSideLogo from './PitchSideLogo';
 import { dbCreatePlayer, dbFetchPlayers, isSupabaseConfigured, supabase } from '../supabase';
 
@@ -153,7 +153,20 @@ export default function AuthFlow({ onAuthSuccess, onOpenRules, registeredUsers, 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [teamSearch, setTeamSearch] = useState('');
   const [isTeamDropdownOpen, setIsTeamDropdownOpen] = useState(false);
+  const [preferredSport, setPreferredSport] = useState<SportType>(SportType.FOOTBALL);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+
+  // Auto-derive preferred sport from the selected supported team
+  useEffect(() => {
+    if (supportedTeam) {
+      const team = MAJOR_TEAMS_LIST.find(
+        (t) => t.name.toLowerCase() === supportedTeam.toLowerCase()
+      );
+      if (team) {
+        setPreferredSport(team.sport === 'Rugby' ? SportType.RUGBY : SportType.FOOTBALL);
+      }
+    }
+  }, [supportedTeam]);
 
   // Masking toggles for passwords
   const [isPasswordMasked, setIsPasswordMasked] = useState(true);
@@ -247,6 +260,7 @@ export default function AuthFlow({ onAuthSuccess, onOpenRules, registeredUsers, 
             agreedToTerms: true,
             nationality: userProfileData.nationality || 'Global',
             supportedTeam: userProfileData.supported_team || 'Unknown',
+            preferredSport: (userProfileData.preferred_sport as SportType) || undefined,
           };
         } else {
           // Fallback minimal profile if the db profile isn't found
@@ -439,7 +453,8 @@ export default function AuthFlow({ onAuthSuccess, onOpenRules, registeredUsers, 
               phone: phone.trim(),
               nationality: selectedNationality,
               dob: dob,
-              supported_team: supportedTeam.trim()
+              supported_team: supportedTeam.trim(),
+              preferred_sport: preferredSport,
             }
           }
         });
@@ -463,6 +478,7 @@ export default function AuthFlow({ onAuthSuccess, onOpenRules, registeredUsers, 
         nickname: nickname.trim(),
         nationality: selectedNationality,
         supportedTeam: supportedTeam.trim(),
+        preferredSport,
         createdAt: new Date().toISOString(),
         emailVerified: false,
         isAdmin: false, // Strictly enforced
@@ -1012,6 +1028,40 @@ export default function AuthFlow({ onAuthSuccess, onOpenRules, registeredUsers, 
                     </>
                   )}
                 </AnimatePresence>
+              </div>
+
+              {/* Preferred Sport */}
+              <div>
+                <label className="block text-[10px] font-semibold text-slate-300 uppercase tracking-wider mb-1 font-mono flex items-center justify-between">
+                  <span>Preferred Sport</span>
+                  <span className="text-[10px] text-blue-400 font-mono normal-case">
+                    {preferredSport === SportType.FOOTBALL ? '⚽ Auto-detected' : '🏉 Auto-detected'}
+                  </span>
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPreferredSport(SportType.FOOTBALL)}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-bold transition-all border cursor-pointer ${
+                      preferredSport === SportType.FOOTBALL
+                        ? 'bg-blue-500/15 border-blue-500/40 text-blue-300'
+                        : 'bg-slate-950/60 border-slate-800 text-slate-500 hover:text-slate-300'
+                    }`}
+                  >
+                    <span>⚽</span> Football
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreferredSport(SportType.RUGBY)}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-bold transition-all border cursor-pointer ${
+                      preferredSport === SportType.RUGBY
+                        ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                        : 'bg-slate-950/60 border-slate-800 text-slate-500 hover:text-slate-300'
+                    }`}
+                  >
+                    <span>🏉</span> Rugby
+                  </button>
+                </div>
               </div>
 
               {/* Email Address */}

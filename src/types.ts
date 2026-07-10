@@ -18,6 +18,7 @@ export interface UserProfile {
   nationality?: string;
   phone?: string;
   supportedTeam?: string;
+  preferredSport?: SportType;
   password?: string;
   isProfilePublic?: boolean;
   suspendedUntil?: string;

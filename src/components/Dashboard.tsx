@@ -176,7 +176,7 @@ export default function Dashboard({
   const authStatus = useAuthStatus();
   const isSandbox =
     !user || !user.id || user.id.startsWith("usr_") || user.id === "user-admin";
-  const [selectedSport, setSelectedSport] = useState<SportType | null>(null);
+  const [selectedSport, setSelectedSport] = useState<SportType | null>(user?.preferredSport ?? null);
   const [globalLeaderboardSport, setGlobalLeaderboardSport] = useState<SportType>(SportType.FOOTBALL);
   const [selectedCompId, setSelectedCompId] = useState<string | null>(null);
   

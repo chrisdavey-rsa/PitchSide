@@ -1,0 +1,2 @@
+- [AdminPanel feature-slice architecture](admin-panel-architecture.md) — AdminPanel.tsx refactored into `src/components/admin/` slices; thin entry + useAdminData hook pattern.
+- [preferredSport field](preferred-sport-field.md) — preferredSport added to UserProfile; auto-derived from supportedTeam in AuthFlow signup, stored as `preferred_sport` in Supabase profiles table.

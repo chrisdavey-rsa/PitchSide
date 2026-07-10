@@ -85,6 +85,7 @@ export async function dbFetchPlayers(): Promise<UserProfile[]> {
     agreedToTerms: true,
     nationality: d.nationality || "United Kingdom",
     supportedTeam: d.supported_team || "None",
+    preferredSport: d.preferred_sport as SportType | undefined,
   }));
 
   return mapped.filter((item) => !MOCK_NICKNAMES_FILTER.includes(item.nickname.toLowerCase()));
@@ -101,6 +102,7 @@ export async function dbCreatePlayer(profile: UserProfile): Promise<void> {
     dob: profile.dob,
     nationality: profile.nationality || "United Kingdom",
     supported_team: profile.supportedTeam || "None",
+    preferred_sport: profile.preferredSport || null,
     is_admin: Boolean(profile.isAdmin),
     is_verified: profile.emailVerified,
     created_at: profile.createdAt || new Date().toISOString(),
