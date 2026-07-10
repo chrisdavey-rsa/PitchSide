@@ -1,8 +1,3 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import React from "react";
 import { motion } from "motion/react";
 import { UserProfile } from "../../types";
@@ -11,9 +6,7 @@ interface WelcomeHeaderProps {
   user: UserProfile;
   userPoints: number;
   totalPredicted: number;
-  perfectPredictions?: number;
-  seasonalAccuracy?: number;
-  lifetimeAccuracy?: number;
+  perfectPredictions: number;
   isUserInAnyLeague: boolean;
 }
 
@@ -21,13 +14,9 @@ export default function WelcomeHeader({
   user,
   userPoints,
   totalPredicted,
-  perfectPredictions = 0,
-  seasonalAccuracy = 0,
-  lifetimeAccuracy = 0,
+  perfectPredictions,
   isUserInAnyLeague,
 }: WelcomeHeaderProps) {
-  const currentCalendarYear = new Date().getFullYear();
-
   return (
     <motion.div
       transition={{ duration: 0.5, ease: "easeInOut" }}
@@ -41,9 +30,7 @@ export default function WelcomeHeader({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800/60">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-slate-500 text-xs font-mono">
-              Live Season 1
-            </span>
+            <span className="text-slate-500 text-xs font-mono">Live Season 1</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold font-display text-white tracking-tight flex items-baseline">
             <span className="mr-2">Hello,</span>
@@ -53,26 +40,22 @@ export default function WelcomeHeader({
           </h1>
         </div>
 
-        {/* Micro Accuracies side-board */}
         <div className="flex flex-col gap-1.5 text-left sm:text-right text-[11px] text-slate-400 font-mono">
           <div className="flex items-center justify-between sm:justify-end gap-3">
-            <span className="text-slate-500 font-sans">
-              Season's Accuracy ({currentCalendarYear}):
-            </span>
+            <span className="text-slate-500 font-sans">Predictions Locked:</span>
             <span className="font-bold text-white font-mono bg-slate-950/60 px-1.5 py-0.5 rounded border border-slate-800/60">
-              {seasonalAccuracy}%
+              {totalPredicted}
             </span>
           </div>
           <div className="flex items-center justify-between sm:justify-end gap-3">
-            <span className="text-slate-500 font-sans">Lifetime Accuracy:</span>
+            <span className="text-slate-500 font-sans">Perfect Hits:</span>
             <span className="font-bold text-emerald-400 font-mono bg-slate-950/60 px-1.5 py-0.5 rounded border border-slate-800/60">
-              {lifetimeAccuracy}%
+              {perfectPredictions}
             </span>
           </div>
         </div>
       </div>
 
-      {/* Connected Game Record metrics row */}
       <div className="grid grid-cols-3 gap-3 pt-4 text-center">
         <div className="p-2.5 bg-slate-950/40 rounded-xl border border-slate-800/60 flex flex-col justify-center">
           <span className="text-2xl font-black font-display text-emerald-400 text-transparent bg-clip-text bg-linear-to-r from-emerald-400 to-teal-400">

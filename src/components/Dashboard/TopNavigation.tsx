@@ -1,12 +1,7 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import React, { useState, useEffect } from "react";
 import { motion } from "motion/react";
 import { UserCheck, HelpCircle, Lock, LogOut } from "lucide-react";
-import { UserProfile } from "../../types"; // Adjust path if your types are elsewhere
+import { UserProfile } from "../../types";
 import PitchSideLogo from "../PitchSideLogo";
 
 interface TopNavigationProps {
@@ -15,6 +10,7 @@ interface TopNavigationProps {
   onOpenRules: () => void;
   onOpenAdmin: () => void;
   onOpenAccount: () => void;
+  onResetState: () => void;
 }
 
 export default function TopNavigation({
@@ -23,14 +19,16 @@ export default function TopNavigation({
   onOpenRules,
   onOpenAdmin,
   onOpenAccount,
+  onResetState,
 }: TopNavigationProps) {
   const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
 
-  // Checks for unread notifications specific to the user
   useEffect(() => {
     const checkUnread = () => {
-      const stored = JSON.parse(localStorage.getItem('pitchside_messages') || '[]');
-      const myMessages = stored.filter((m: any) => m.receiverId === user?.id || m.receiverId === 'all');
+      const stored = JSON.parse(localStorage.getItem("pitchside_messages") || "[]");
+      const myMessages = stored.filter(
+        (m: any) => m.receiverId === user?.id || m.receiverId === "all"
+      );
       setUnreadMessagesCount(myMessages.filter((m: any) => !m.read).length);
     };
 
@@ -42,8 +40,7 @@ export default function TopNavigation({
   return (
     <div className="bg-slate-900/80 backdrop-blur-md rounded-2xl border border-slate-800/80 p-4 sm:px-6 flex items-center justify-between shadow-xl">
       <div className="flex items-center gap-3">
-        {/* We removed the reset state onClick here because that's now handled by the dashboard router */}
-        <div className="cursor-pointer">
+        <div onClick={onResetState} className="cursor-pointer">
           <PitchSideLogo size="md" autoplay={false} />
         </div>
         {user.isAdmin && (
@@ -63,7 +60,7 @@ export default function TopNavigation({
           <UserCheck className="w-4 h-4 text-emerald-450" />
           <span>Account</span>
           {unreadMessagesCount > 0 && (
-            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse border-2 border-slate-900"></span>
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse border-2 border-slate-900" />
           )}
         </motion.button>
 
@@ -77,7 +74,6 @@ export default function TopNavigation({
           <span className="hidden sm:inline">Rules Guide</span>
         </motion.button>
 
-        {/* Admin Toggle Switch */}
         {user.isAdmin && (
           <button
             id="nav-admin-toggle-btn"

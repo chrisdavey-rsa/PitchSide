@@ -58,6 +58,10 @@ import {
   RUGBY_COMPETITIONS,
 } from "../data";
 import { calculatePoints } from "../utils";
+import TopNavigation from './Dashboard/TopNavigation';
+import WelcomeHeader from './Dashboard/WelcomeHeader';
+import { default as Leaderboard } from './Dashboard/Leaderboard';
+import type { LeaderboardItem } from './Dashboard/Leaderboard';
 
 interface DashboardProps {
   user: UserProfile;
@@ -930,73 +934,18 @@ export default function Dashboard({
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6 animate-fade-in pb-20 md:pb-0">
-      {/* Branded Navigation Bar */}
-      <div className="bg-slate-900/80 backdrop-blur-md rounded-2xl border border-slate-800/80 p-4 sm:px-6 flex items-center justify-between shadow-xl">
-        <div className="flex items-center gap-3">
-          <div
-            onClick={() => {
-              setActiveLeagueId(null);
-              setSelectedSport(null);
-              setSelectedCompId(null);
-            }}
-            className="cursor-pointer"
-          >
-            <PitchSideLogo size="md" autoplay={false} />
-          </div>
-          {user.isAdmin && (
-            <span className="bg-purple-500/15 border border-purple-500/30 text-purple-400 font-mono text-[9px] px-2 py-0.5 rounded-full uppercase font-bold tracking-wider">
-              ADMINISTRATOR
-            </span>
-          )}
-        </div>
-
-        <div className="hidden md:flex items-center gap-2 sm:gap-4">
-          <motion.button
-            layoutId="nav-account-btn"
-            id="nav-account-btn"
-            onClick={onOpenAccount}
-            className="text-xs text-slate-300 hover:text-white bg-slate-800/60 p-2 sm:px-3 sm:py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-1.5 font-medium relative"
-          >
-            <UserCheck className="w-4 h-4 text-emerald-450" />
-            <span>Account</span>
-            {unreadMessagesCount > 0 && (
-              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse border-2 border-slate-900"></span>
-            )}
-          </motion.button>
-
-          <motion.button
-            layoutId="nav-rules-btn"
-            id="nav-rules-btn"
-            onClick={onOpenRules}
-            className="text-xs text-slate-300 hover:text-white bg-slate-800/60 p-2 sm:px-3 sm:py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-1.5 font-medium"
-          >
-            <HelpCircle className="w-4 h-4 text-blue-400" />
-            <span className="hidden sm:inline">Rules Guide</span>
-          </motion.button>
-
-          {/* Admin Toggle Switch */}
-          {user.isAdmin && (
-            <button
-              id="nav-admin-toggle-btn"
-              onClick={onOpenAdmin}
-              className="text-xs text-white bg-purple-600 hover:bg-purple-700 active:translate-y-[0.5px] border border-purple-500 py-1.5 px-3 rounded-lg flex items-center gap-1.5 font-semibold transition-all shadow-[0_4px_12px_rgba(147,51,234,0.3)] cursor-pointer"
-            >
-              <Lock className="w-3.5 h-3.5 text-white" />
-              <span>Admin Area</span>
-            </button>
-          )}
-
-          <button
-            id="nav-logout-btn"
-            onClick={onLogout}
-            className="text-xs text-slate-400 hover:text-red-400 bg-slate-950/60 p-2 rounded-lg cursor-pointer transition-colors"
-            title="Log out from PitchSide"
-          >
-            <LogOut className="w-4.5 h-4.5" />
-          </button>
-        </div>
-      </div>
-
+      <TopNavigation
+        user={user}
+        onLogout={onLogout}
+        onOpenRules={onOpenRules}
+        onOpenAdmin={onOpenAdmin}
+        onOpenAccount={onOpenAccount}
+        onResetState={() => {
+          setActiveLeagueId(null);
+          setSelectedSport(null);
+          setSelectedCompId(null);
+        }}
+      />
       {/* Global Alerts Feed */}
       <AnimatePresence>
         {toastMessage && (
@@ -1513,79 +1462,13 @@ export default function Dashboard({
             transition={{ duration: 0.5, ease: "easeInOut" }}
             className={`grid grid-cols-1 gap-6 ${isUserInAnyLeague ? "md:grid-cols-3" : ""}`}
           >
-            {/* Card 1: User welcome greeting & Game Record merged! */}
-            <motion.div
-              transition={{ duration: 0.5, ease: "easeInOut" }}
-              className={`${isUserInAnyLeague ? "md:col-span-2" : ""} bg-slate-900/60 rounded-2xl border border-slate-800/70 p-6 flex flex-col justify-between relative overflow-hidden backdrop-blur-xs min-h-[180px]`}
-            >
-              <div className="absolute top-0 right-0 w-36 h-36 bg-blue-500/5 rounded-full blur-2xl" />
-              <div className="absolute bottom-0 left-0 w-36 h-24 bg-green-500/5 rounded-full blur-2xl" />
-
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800/60">
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-slate-500 text-xs font-mono">
-                      Live Season 1
-                    </span>
-                  </div>
-                  <h1 className="text-2xl sm:text-3xl font-extrabold font-display text-white tracking-tight flex items-baseline">
-                    <span className="mr-2">Hello,</span>
-                    <span className="font-extrabold font-display text-2xl sm:text-3xl text-slate-300">
-                      {user.nickname}
-                    </span>
-                  </h1>
-                </div>
-
-                {/* Micro Accuracies side-board */}
-                <div className="flex flex-col gap-1.5 text-left sm:text-right text-[11px] text-slate-400 font-mono">
-                  <div className="flex items-center justify-between sm:justify-end gap-3">
-                    <span className="text-slate-500 font-sans">
-                      Predictions Locked:
-                    </span>
-                    <span className="font-bold text-white font-mono bg-slate-950/60 px-1.5 py-0.5 rounded border border-slate-800/60">
-                      {totalPredicted}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between sm:justify-end gap-3">
-                    <span className="text-slate-500 font-sans">
-                      Perfect Hits:
-                    </span>
-                    <span className="font-bold text-emerald-400 font-mono bg-slate-950/60 px-1.5 py-0.5 rounded border border-slate-800/60">
-                      {perfectPredictions}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Connected Game Record metrics row */}
-              <div className="grid grid-cols-3 gap-3 pt-4 text-center">
-                <div className="p-2.5 bg-slate-950/40 rounded-xl border border-slate-800/60 flex flex-col justify-center">
-                  <span className="text-2xl font-black font-display text-emerald-400 text-transparent bg-clip-text bg-linear-to-r from-emerald-400 to-teal-400">
-                    {userPoints}
-                  </span>
-                  <p className="text-[9px] text-slate-500 uppercase font-mono tracking-widest mt-0.5">
-                    Total Points
-                  </p>
-                </div>
-                <div className="p-2.5 bg-slate-950/40 rounded-xl border border-slate-800/60 flex flex-col justify-center">
-                  <span className="text-2xl font-black font-display text-blue-400">
-                    {totalPredicted}
-                  </span>
-                  <p className="text-[9px] text-slate-500 uppercase font-mono tracking-widest mt-0.5">
-                    Guesses Lock
-                  </p>
-                </div>
-                <div className="p-2.5 bg-slate-950/40 rounded-xl border border-slate-800/60 flex flex-col justify-center">
-                  <span className="text-2xl font-black font-display text-yellow-400">
-                    {perfectPredictions}
-                  </span>
-                  <p className="text-[9px] text-slate-500 uppercase font-mono tracking-widest mt-0.5">
-                    Perfect Hits
-                  </p>
-                </div>
-              </div>
-            </motion.div>
-
+            <WelcomeHeader
+              user={user}
+              userPoints={userPoints}
+              totalPredicted={totalPredicted}
+              perfectPredictions={perfectPredictions}
+              isUserInAnyLeague={isUserInAnyLeague}
+            />
             {/* Card 2: Closed Private Leagues Console */}
             <motion.div
               transition={{ duration: 0.5, ease: "easeInOut" }}
@@ -3044,108 +2927,14 @@ export default function Dashboard({
             </motion.div>
           )}
 
-          {/* PERSISTENT LEADERBOARD SECTION FOR USER COMPETITION */}
-          <div className="bg-slate-900/60 rounded-3xl border border-slate-800 p-6 shadow-xl">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 border-b border-slate-800/80 pb-3">
-              <div className="flex items-center gap-2">
-                <Trophy className="w-5 h-5 text-yellow-500" />
-                <h3 className="text-sm font-bold font-display text-white uppercase tracking-wider">
-                  Consolidated PitchSide Leaderboard
-                </h3>
-              </div>
-              <div className="flex items-center gap-2 bg-slate-950/50 p-1 rounded-lg border border-slate-800">
-                <button
-                  onClick={() => setGlobalLeaderboardSport(SportType.FOOTBALL)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${globalLeaderboardSport === SportType.FOOTBALL ? "bg-slate-800 text-white shadow-sm" : "text-slate-500 hover:text-slate-300 hover:bg-slate-900/50"}`}
-                >
-                  <span className="text-sm">⚽</span> Football
-                </button>
-                <button
-                  onClick={() => setGlobalLeaderboardSport(SportType.RUGBY)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${globalLeaderboardSport === SportType.RUGBY ? "bg-slate-800 text-white shadow-sm" : "text-slate-500 hover:text-slate-300 hover:bg-slate-900/50"}`}
-                >
-                  <span className="text-sm">🏉</span> Rugby
-                </button>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs font-sans">
-                <thead>
-                  <tr className="border-b border-slate-800 font-mono text-slate-500 text-[10px] uppercase">
-                    <th className="py-2.5 px-3">Rank</th>
-                    <th className="py-2.5 px-3">Player</th>
-                    <th className="py-2.5 px-3 text-center">Guesses Saved</th>
-                    <th className="py-2.5 px-3 text-center">
-                      Prediction Accuracy
-                    </th>
-                    <th className="py-2.5 px-3 text-right">Overall Points</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayLeaderboard.map((item) => {
-                    const isYou =
-                      item.isCurrentUser || item.playerId === user.id;
-                    return (
-                      <tr
-                        key={item.playerId}
-                        className={`transition-colors border-b border-slate-800/40 ${
-                          isYou
-                            ? "bg-emerald-500/5 hover:bg-emerald-500/10"
-                            : "hover:bg-slate-950/20"
-                        }`}
-                      >
-                        <td className="py-3 px-3">
-                          {isYou ? (
-                            <span className="flex items-center justify-center w-5.5 h-5.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold text-[10px]">
-                              ★
-                            </span>
-                          ) : (
-                            <span className="font-mono text-slate-400">
-                              #{item.rank}
-                            </span>
-                          )}
-                        </td>
-                        <td
-                          className={`py-3 px-3 font-semibold flex items-center gap-1.5 ${isYou ? "text-white" : "text-slate-200"}`}
-                        >
-                          <button
-                            onClick={() => {
-                              if (item.isProfilePublic) {
-                                setViewingProfile(item);
-                              } else {
-                                triggerToast("🔒 This player's profile is private.");
-                              }
-                            }}
-                            className="hover:underline cursor-pointer"
-                          >
-                            {item.nickname}
-                          </button>
-                          <span
-                            className="text-sm shrink-0 font-sans"
-                            title={item.nationality || "United Kingdom"}
-                          >
-                            {getCountryFlag(item.nationality)}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3 text-center font-mono text-slate-300">
-                          {item.displayPredictions}
-                        </td>
-                        <td className="py-3 px-3 text-center font-mono text-slate-300">
-                          {item.displayAccuracy}
-                        </td>
-                        <td
-                          className={`py-3 px-3 text-right font-display font-semibold text-sm ${isYou ? "text-emerald-400" : "text-slate-300"}`}
-                        >
-                          {item.displayPoints}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <Leaderboard
+            user={user}
+            displayLeaderboard={displayLeaderboard}
+            globalLeaderboardSport={globalLeaderboardSport}
+            setGlobalLeaderboardSport={setGlobalLeaderboardSport}
+            onViewProfile={(player) => setViewingProfile(player)}
+            triggerToast={triggerToast}
+          />
         </>
       )}
 
