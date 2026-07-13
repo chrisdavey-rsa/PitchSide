@@ -11,6 +11,9 @@ export interface LeaderboardItem {
   displayPredictions: number;
   displayAccuracy: string;
   displayPoints: number;
+  displayGhostPoints: number;
+  displayDropsUsed: number;
+  displayDropsAllowed: number;
   isCurrentUser: boolean;
   isProfilePublic: boolean;
 }
@@ -73,13 +76,19 @@ export default function Leaderboard({
               <th className="py-2.5 px-3">Player</th>
               <th className="py-2.5 px-3 text-center">Guesses Saved</th>
               <th className="py-2.5 px-3 text-center">Prediction Accuracy</th>
+              <th
+                className="py-2.5 px-3 text-right"
+                title="Total points if your worst weeks weren't dropped."
+              >
+                Ghost Points
+              </th>
               <th className="py-2.5 px-3 text-right">Overall Points</th>
             </tr>
           </thead>
           <tbody>
             {displayLeaderboard.length === 0 ? (
               <tr>
-                <td colSpan={5} className="py-10 text-center text-slate-500 text-xs font-sans">
+                <td colSpan={6} className="py-10 text-center text-slate-500 text-xs font-sans">
                   No predictions recorded yet for this sport. Be the first to lock a prediction!
                 </td>
               </tr>
@@ -127,12 +136,37 @@ export default function Leaderboard({
                       >
                         {getCountryFlag(item.nationality)}
                       </span>
+                      {item.displayDropsAllowed > 0 ? (
+                        <span
+                          className={`shrink-0 rounded-full border px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider ${
+                            item.displayDropsAllowed - item.displayDropsUsed > 0
+                              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                              : "border-slate-700 bg-slate-800/60 text-slate-500"
+                          }`}
+                          title={`Forgiveness drops remaining for this sport. Your worst results are removed from your total, up to ${item.displayDropsAllowed} for the competitions you've entered.`}
+                        >
+                          Drops: {item.displayDropsAllowed - item.displayDropsUsed}
+                        </span>
+                      ) : (
+                        <span
+                          className="shrink-0 rounded-full border border-slate-800 bg-slate-900/60 px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-slate-600"
+                          title="This sport's competitions don't allow any dropped results."
+                        >
+                          No drops
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 px-3 text-center font-mono text-slate-300">
                       {item.displayPredictions}
                     </td>
                     <td className="py-3 px-3 text-center font-mono text-slate-300">
                       {item.displayAccuracy}
+                    </td>
+                    <td
+                      className="py-3 px-3 text-right font-mono text-slate-600"
+                      title="Total points if your worst weeks weren't dropped."
+                    >
+                      {item.displayGhostPoints}
                     </td>
                     <td
                       className={`py-3 px-3 text-right font-display font-semibold text-sm ${

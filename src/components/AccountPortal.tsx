@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { supabase, dbFetchLeagues, dbFetchUserLeagues } from '../supabase';
-import { UserProfile, League } from '../types';
+import { UserProfile } from '../types';
 import { getCompetitions } from '../competitions';
+import { useUnreadMessages } from '../hooks/useUnreadMessages';
+import { useLeaguesQuery, useUserLeaguesQuery } from '../hooks/usePitchsideQueries';
 
 import { SidebarNav } from './AccountPortal/SidebarNav';
 import { GeneralSettings } from './AccountPortal/GeneralSettings';
@@ -13,7 +14,6 @@ import { HistoricScores } from './AccountPortal/HistoricScores';
 import { MyLeagues } from './AccountPortal/MyLeagues';
 import { DeleteAccount } from './AccountPortal/DeleteAccount';
 import { Messages } from './AccountPortal/Messages';
-import { SiteMessage } from '../types';
 
 export interface AccountPortalProps {
   user: UserProfile;
@@ -25,38 +25,10 @@ export interface AccountPortalProps {
 
 export default function AccountPortal({ user, registeredUsers, onClose, onUpdateUser, onSelectLeague }: AccountPortalProps) {
   const [activeTab, setActiveTab] = useState<'general' | 'change-email' | 'change-password' | 'historic-scores' | 'leagues' | 'messages' | 'delete-account'>('leagues');
-  
-  const [realLeagues, setRealLeagues] = useState<League[]>([]);
-  const [userLeagues, setUserLeagues] = useState<League[]>([]);
-  const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
 
-  useEffect(() => {
-    // Check unread messages
-    const checkUnread = () => {
-      const stored = JSON.parse(localStorage.getItem('pitchside_messages') || '[]');
-      const myMessages = stored.filter((m: SiteMessage) => m.receiverId === user.id || m.receiverId === 'all');
-      setUnreadMessagesCount(myMessages.filter((m: SiteMessage) => !m.read).length);
-    };
-
-    checkUnread();
-    const interval = setInterval(checkUnread, 5000);
-
-    const loadRealLeagues = async () => {
-      try {
-        const leagues = await dbFetchLeagues();
-        setRealLeagues(leagues || []);
-        if (user && user.id) {
-          const uLeagues = await dbFetchUserLeagues(user.id);
-          setUserLeagues(uLeagues || []);
-        }
-      } catch (err) {
-        console.warn('Failed to load global league db entries:', err);
-      }
-    };
-    loadRealLeagues();
-
-    return () => clearInterval(interval);
-  }, [user]);
+  const { data: realLeagues = [] } = useLeaguesQuery();
+  const { data: userLeagues = [] } = useUserLeaguesQuery(user.id);
+  const unreadMessagesCount = useUnreadMessages(user.id);
 
   const [statusMsg, setStatusMsg] = useState<{ text: string; mode: 'success' | 'error' | 'none' }>({ text: '', mode: 'none' });
 

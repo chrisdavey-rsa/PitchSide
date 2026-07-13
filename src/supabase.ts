@@ -5,6 +5,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { UserProfile, Prediction, League, SportType, Match } from "./types";
+import { calculatePoints } from "./utils";
 
 // Retrieve environment variables and clean them of common copy-paste errors
 const metaEnv = (import.meta as any).env || {};
@@ -360,4 +361,259 @@ export async function dbSaveUnsubscribedEmail(email: string, details: any): Prom
   };
   const { error } = await supabase.from("unsubscribed_emails").upsert(payload, { onConflict: "email" });
   if (error) throw error;
+}
+
+// ==========================================
+// LEADERBOARD (RPC with client-side fallback)
+// ==========================================
+
+export interface LeaderboardRecord {
+  playerId: string;
+  nickname: string;
+  nationality: string;
+  points: number;
+  pointsFootball: number;
+  pointsRugby: number;
+  predictionsMade: number;
+  predictionsFootball: number;
+  predictionsRugby: number;
+  accuracy: string;
+  accuracyFootball: string;
+  accuracyRugby: string;
+  isCurrentUser: boolean;
+  isProfilePublic: boolean;
+  // Dynamic "Drops" forgiveness mechanic. Ghost points are the ungoverned
+  // totals (before any worst weeks are dropped); drops are how many worst
+  // results were excluded per sport, and the allowance is the total drops
+  // permitted across the competitions the player took part in.
+  ghostPoints: number;
+  ghostPointsFootball: number;
+  ghostPointsRugby: number;
+  dropsUsed: number;
+  dropsUsedFootball: number;
+  dropsUsedRugby: number;
+  dropsAllowed: number;
+  dropsAllowedFootball: number;
+  dropsAllowedRugby: number;
+  predictions: Record<string, { home: number; away: number; submitted: boolean }>;
+}
+
+// Per-competition drop allowance. Mirrors public.pitchside_competition_drops()
+// in supabase/migrations/20260713130000_leaderboard_best34.sql. Keep the two in
+// sync: EPL = 4, Championship = 6, everything else (rugby / cups) = 0.
+const COMPETITION_DROPS_ALLOWED: Record<string, number> = {
+  "f-epl": 4,
+  "f-championship": 6,
+};
+
+export function dropsAllowedForCompetition(competitionId?: string | null): number {
+  if (!competitionId) return 0;
+  return COMPETITION_DROPS_ALLOWED[competitionId] ?? 0;
+}
+
+// Applies the dynamic drops mechanic to one competition's settled scores.
+// Drops the worst results, up to the competition's allowance, but never more
+// than would leave the player with fewer kept games than the allowance.
+function applyCompetitionDrops(
+  scores: number[],
+  dropsAllowed: number,
+): { best: number; ghost: number; dropsUsed: number } {
+  const ghost = scores.reduce((sum, s) => sum + s, 0);
+  const dropsUsed = Math.min(dropsAllowed, Math.max(0, scores.length - dropsAllowed));
+  const droppedTotal = [...scores]
+    .sort((a, b) => a - b)
+    .slice(0, dropsUsed)
+    .reduce((sum, s) => sum + s, 0);
+  return { best: ghost - droppedTotal, ghost, dropsUsed };
+}
+
+// Aggregates one sport's per-competition settled scores into sport totals,
+// applying each competition's own drop allowance.
+function aggregateSportDrops(scoresByComp: Record<string, number[]>): {
+  best: number;
+  ghost: number;
+  dropsUsed: number;
+  dropsAllowed: number;
+} {
+  let best = 0;
+  let ghost = 0;
+  let dropsUsed = 0;
+  let dropsAllowed = 0;
+
+  for (const [competitionId, scores] of Object.entries(scoresByComp)) {
+    const allowance = dropsAllowedForCompetition(competitionId);
+    const comp = applyCompetitionDrops(scores, allowance);
+    best += comp.best;
+    ghost += comp.ghost;
+    dropsUsed += comp.dropsUsed;
+    dropsAllowed += allowance;
+  }
+
+  return { best, ghost, dropsUsed, dropsAllowed };
+}
+
+function formatAccuracy(points: number, predictions: number): string {
+  if (predictions <= 0) return "0%";
+  return `${Math.round((points / (predictions * 5)) * 100)}%`;
+}
+
+async function computeLeaderboardClientSide(
+  currentUserId?: string,
+  matches: Match[] = [],
+): Promise<LeaderboardRecord[]> {
+  const playersList = await dbFetchPlayers();
+
+  return Promise.all(
+    playersList.map(async (profile) => {
+      let predictionsFootball = 0;
+      let predictionsRugby = 0;
+      // Settled scores grouped per competition so drops can be applied per comp.
+      const footballScoresByComp: Record<string, number[]> = {};
+      const rugbyScoresByComp: Record<string, number[]> = {};
+
+      const userPredictions = await dbFetchPredictions(profile.id);
+      const submittedMatchIds = Object.keys(userPredictions).filter(
+        (matchId) => userPredictions[matchId].submitted,
+      );
+
+      submittedMatchIds.forEach((matchId) => {
+        const pred = userPredictions[matchId];
+        const matchedMatch = matches.find((match) => match.id === matchId);
+
+        if (!matchedMatch) return;
+
+        if (matchedMatch.sport === SportType.FOOTBALL) {
+          predictionsFootball++;
+        } else if (matchedMatch.sport === SportType.RUGBY) {
+          predictionsRugby++;
+        }
+
+        if (
+          matchedMatch.status === "completed" &&
+          matchedMatch.homeScore !== undefined &&
+          matchedMatch.awayScore !== undefined
+        ) {
+          const pts = calculatePoints(
+            matchedMatch.sport,
+            pred.home,
+            pred.away,
+            matchedMatch.homeScore,
+            matchedMatch.awayScore,
+          );
+
+          const compId = matchedMatch.competitionId || "unknown";
+          if (matchedMatch.sport === SportType.FOOTBALL) {
+            (footballScoresByComp[compId] ??= []).push(pts);
+          } else if (matchedMatch.sport === SportType.RUGBY) {
+            (rugbyScoresByComp[compId] ??= []).push(pts);
+          }
+        }
+      });
+
+      const football = aggregateSportDrops(footballScoresByComp);
+      const rugby = aggregateSportDrops(rugbyScoresByComp);
+
+      const pointsFootball = football.best;
+      const pointsRugby = rugby.best;
+      const totalPoints = pointsFootball + pointsRugby;
+      const totalPredictions = predictionsFootball + predictionsRugby;
+
+      return {
+        playerId: profile.id,
+        nickname: profile.nickname,
+        nationality: profile.nationality || "United Kingdom",
+        points: totalPoints,
+        pointsFootball,
+        pointsRugby,
+        predictionsMade: totalPredictions,
+        predictionsFootball,
+        predictionsRugby,
+        accuracy: formatAccuracy(totalPoints, totalPredictions),
+        accuracyFootball: formatAccuracy(pointsFootball, predictionsFootball),
+        accuracyRugby: formatAccuracy(pointsRugby, predictionsRugby),
+        isCurrentUser: profile.id === currentUserId,
+        isProfilePublic: profile.isProfilePublic ?? true,
+        ghostPoints: football.ghost + rugby.ghost,
+        ghostPointsFootball: football.ghost,
+        ghostPointsRugby: rugby.ghost,
+        dropsUsed: football.dropsUsed + rugby.dropsUsed,
+        dropsUsedFootball: football.dropsUsed,
+        dropsUsedRugby: rugby.dropsUsed,
+        dropsAllowed: football.dropsAllowed + rugby.dropsAllowed,
+        dropsAllowedFootball: football.dropsAllowed,
+        dropsAllowedRugby: rugby.dropsAllowed,
+        predictions: userPredictions,
+      };
+    }),
+  );
+}
+
+function mapRpcLeaderboardRow(
+  row: Record<string, unknown>,
+  currentUserId?: string,
+): LeaderboardRecord {
+  const pointsFootball = Number(row.points_football ?? 0);
+  const pointsRugby = Number(row.points_rugby ?? 0);
+  const predictionsFootball = Number(row.predictions_football ?? 0);
+  const predictionsRugby = Number(row.predictions_rugby ?? 0);
+  const totalPoints = Number(row.total_points ?? pointsFootball + pointsRugby);
+  const totalPredictions = predictionsFootball + predictionsRugby;
+
+  const ghostPointsFootball = Number(row.ghost_points_football ?? pointsFootball);
+  const ghostPointsRugby = Number(row.ghost_points_rugby ?? pointsRugby);
+  const ghostPoints = Number(row.ghost_points ?? ghostPointsFootball + ghostPointsRugby);
+  const dropsUsedFootball = Number(row.drops_used_football ?? 0);
+  const dropsUsedRugby = Number(row.drops_used_rugby ?? 0);
+  const dropsUsed = Number(row.drops_used ?? dropsUsedFootball + dropsUsedRugby);
+  const dropsAllowedFootball = Number(row.drops_allowed_football ?? 0);
+  const dropsAllowedRugby = Number(row.drops_allowed_rugby ?? 0);
+  const dropsAllowed = Number(row.drops_allowed ?? dropsAllowedFootball + dropsAllowedRugby);
+
+  return {
+    playerId: String(row.player_id),
+    nickname: String(row.nickname ?? "Contestant"),
+    nationality: String(row.nationality ?? "United Kingdom"),
+    points: totalPoints,
+    pointsFootball,
+    pointsRugby,
+    predictionsMade: totalPredictions,
+    predictionsFootball,
+    predictionsRugby,
+    accuracy: formatAccuracy(totalPoints, totalPredictions),
+    accuracyFootball: formatAccuracy(pointsFootball, predictionsFootball),
+    accuracyRugby: formatAccuracy(pointsRugby, predictionsRugby),
+    isCurrentUser: String(row.player_id) === currentUserId,
+    isProfilePublic: row.is_profile_public !== false,
+    ghostPoints,
+    ghostPointsFootball,
+    ghostPointsRugby,
+    dropsUsed,
+    dropsUsedFootball,
+    dropsUsedRugby,
+    dropsAllowed,
+    dropsAllowedFootball,
+    dropsAllowedRugby,
+    predictions: {},
+  };
+}
+
+export async function dbFetchGlobalLeaderboard(
+  currentUserId?: string,
+  matches: Match[] = [],
+): Promise<LeaderboardRecord[]> {
+  if (!supabase) return [];
+
+  const { data, error } = await supabase.rpc("get_global_leaderboard", {
+    p_current_user_id: currentUserId ?? null,
+  });
+
+  if (!error && Array.isArray(data)) {
+    return data.map((row) => mapRpcLeaderboardRow(row as Record<string, unknown>, currentUserId));
+  }
+
+  if (error) {
+    console.warn("Leaderboard RPC unavailable, using client fallback:", error.message);
+  }
+
+  return computeLeaderboardClientSide(currentUserId, matches);
 }

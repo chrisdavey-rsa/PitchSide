@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
 import { motion } from "motion/react";
 import { UserCheck, HelpCircle, Lock, LogOut } from "lucide-react";
 import { UserProfile } from "../../types";
 import PitchSideLogo from "../PitchSideLogo";
+import { useUnreadMessages } from "../../hooks/useUnreadMessages";
 
 interface TopNavigationProps {
   user: UserProfile;
@@ -21,21 +22,7 @@ export default function TopNavigation({
   onOpenAccount,
   onResetState,
 }: TopNavigationProps) {
-  const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
-
-  useEffect(() => {
-    const checkUnread = () => {
-      const stored = JSON.parse(localStorage.getItem("pitchside_messages") || "[]");
-      const myMessages = stored.filter(
-        (m: any) => m.receiverId === user?.id || m.receiverId === "all"
-      );
-      setUnreadMessagesCount(myMessages.filter((m: any) => !m.read).length);
-    };
-
-    checkUnread();
-    const interval = setInterval(checkUnread, 5000);
-    return () => clearInterval(interval);
-  }, [user?.id]);
+  const unreadMessagesCount = useUnreadMessages(user?.id);
 
   return (
     <div className="bg-slate-900/80 backdrop-blur-md rounded-2xl border border-slate-800/80 p-4 sm:px-6 flex items-center justify-between shadow-xl">
@@ -50,7 +37,7 @@ export default function TopNavigation({
         )}
       </div>
 
-      <div className="hidden md:flex items-center gap-2 sm:gap-4">
+      <div id="tour-nav-buttons" className="hidden md:flex items-center gap-2 sm:gap-4">
         <motion.button
           layoutId="nav-account-btn"
           id="nav-account-btn"

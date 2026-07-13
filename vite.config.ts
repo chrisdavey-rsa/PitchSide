@@ -13,7 +13,7 @@ export default defineConfig(() => {
       },
     },
     server: {
-      host: '0.0.0.0',
+      host: '127.0.0.1',
       port: 5000,
       allowedHosts: true as true,
       hmr: process.env.DISABLE_HMR !== 'true',
