@@ -10,7 +10,9 @@ type RealtimeTable =
   | 'leagues'
   | 'league_members';
 
-const TABLE_QUERY_MAP: Record<RealtimeTable, readonly (string | ReturnType<typeof queryKeys.predictions>)[]> = {
+type QueryKeyLike = readonly unknown[];
+
+const TABLE_QUERY_MAP: Record<RealtimeTable, readonly QueryKeyLike[]> = {
   profiles: [queryKeys.leaderboard, queryKeys.players],
   predictions: [queryKeys.leaderboard],
   matches: [queryKeys.matches, queryKeys.leaderboard],
@@ -29,7 +31,7 @@ export function useSupabaseRealtime(userId?: string) {
     const invalidate = (table: RealtimeTable) => {
       const keys = TABLE_QUERY_MAP[table];
       keys.forEach((key) => {
-        queryClient.invalidateQueries({ queryKey: key as string[] });
+        queryClient.invalidateQueries({ queryKey: key });
       });
 
       if (table === 'predictions' && userId) {

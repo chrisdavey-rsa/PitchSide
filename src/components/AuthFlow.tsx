@@ -8,12 +8,10 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Mail, 
   User, 
-  Shield, 
   KeyRound, 
   Calendar, 
   CheckSquare, 
   Sparkles, 
-  LogIn, 
   ArrowRight, 
   Play, 
   Info,
@@ -121,10 +119,12 @@ interface AuthFlowProps {
   onOpenRules: () => void;
   registeredUsers: UserProfile[];
   onAddNewUser: (user: UserProfile) => void;
+  onSwitchToLogin: () => void;
+  onLogoClick?: () => void;
 }
 
-export default function AuthFlow({ onAuthSuccess, onOpenRules, registeredUsers, onAddNewUser }: AuthFlowProps) {
-  const [mode, setMode] = useState<'login' | 'signup' | 'awaiting_email_confirmation' | 'recovery_request' | 'recovery_confirmation'>('login');
+export default function AuthFlow({ onAuthSuccess, onOpenRules, registeredUsers, onAddNewUser, onSwitchToLogin, onLogoClick }: AuthFlowProps) {
+  const [mode, setMode] = useState<'signup' | 'awaiting_email_confirmation'>('signup');
 
   // Form states
   const [firstName, setFirstName] = useState('');
@@ -172,18 +172,8 @@ export default function AuthFlow({ onAuthSuccess, onOpenRules, registeredUsers, 
   // Masking toggles for passwords
   const [isPasswordMasked, setIsPasswordMasked] = useState(true);
   const [isConfirmPasswordMasked, setIsConfirmPasswordMasked] = useState(true);
-  const [isLoginPasswordMasked, setIsLoginPasswordMasked] = useState(true);
-
-  // Login states
-  const [loginIdentifier, setLoginIdentifier] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
-
-  // Password recovery states
-  const [recoveryInput, setRecoveryInput] = useState('');
-  const [currentUserDraft, setCurrentUserDraft] = useState<UserProfile | null>(null);
 
   const [errorMessage, setErrorMessage] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
 
   // Auto fill for simple play testing
   const fillSampleData = () => {
@@ -199,182 +189,6 @@ export default function AuthFlow({ onAuthSuccess, onOpenRules, registeredUsers, 
     setSupportedTeam('Arsenal');
     setAgreedToTerms(true);
     setErrorMessage('');
-  };
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMessage('');
-    setSuccessMessage('');
-
-    if (!loginIdentifier.trim()) {
-      setErrorMessage('Please enter your username or email address.');
-      return;
-    }
-
-    // Standard profile resolution
-    const sanitizedIdentifier = loginIdentifier.trim();
-    const isEmailInput = sanitizedIdentifier.includes('@');
-    const supabaseKeysSet = isSupabaseConfigured() && supabase;
-
-    let loginEmail = isEmailInput ? sanitizedIdentifier : '';
-
-    // If it's a nickname, attempt to securely resolve the email
-    if (supabaseKeysSet && !isEmailInput) {
-      // Use RPC to bypass RLS for this specific lookup
-      const { data: rpcEmail, error: rpcError } = await supabase.rpc('get_email_by_nickname', {
-        search_nickname: sanitizedIdentifier
-      });
-      
-      if (rpcEmail) {
-        loginEmail = rpcEmail;
-      } else {
-        setErrorMessage('Username not found. Please verify your details or sign up.');
-        return;
-      }
-    }
-
-    try {
-      if (supabaseKeysSet) {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: loginEmail,
-          password: loginPassword,
-        });
-
-        if (error) throw error;
-
-        // Fetch their profile explicitly after authenticating just in case RLS blocked the global fetch
-        let authProfile;
-        const { data: userProfileData } = await supabase.from('profiles').select('*').eq('id', data.user?.id).single();
-        if (userProfileData) {
-          authProfile = {
-            id: userProfileData.id,
-            firstName: userProfileData.first_name || '',
-            surname: userProfileData.surname || '',
-            email: userProfileData.email || loginEmail,
-            phone: userProfileData.phone || '',
-            dob: userProfileData.dob || '1990-01-01',
-            nickname: userProfileData.username || userProfileData.nickname || 'Contestant',
-            createdAt: userProfileData.created_at || new Date().toISOString(),
-            emailVerified: !!data.user?.email_confirmed_at,
-            emailConfirmedAt: data.user?.email_confirmed_at || null,
-            isAdmin: userProfileData.is_admin || false,
-            agreedToTerms: true,
-            nationality: userProfileData.nationality || 'Global',
-            supportedTeam: userProfileData.supported_team || 'Unknown',
-            preferredSport: (userProfileData.preferred_sport as SportType) || undefined,
-          };
-        } else {
-          // Fallback minimal profile if the db profile isn't found
-          authProfile = {
-            id: data.user?.id || '',
-            firstName: 'Player',
-            surname: '',
-            email: data.user?.email || loginEmail,
-            phone: '',
-            dob: '1990-01-01',
-            nickname: data.user?.email?.split('@')[0] || 'Player',
-            nationality: 'Global',
-            supportedTeam: 'Unknown',
-            createdAt: new Date().toISOString(),
-            emailVerified: !!data.user?.email_confirmed_at,
-            emailConfirmedAt: data.user?.email_confirmed_at || null,
-            isAdmin: false,
-            agreedToTerms: true
-          };
-        }
-        
-        const profile: UserProfile = {
-          id: data.user?.id || authProfile.id,
-          firstName: authProfile.firstName,
-          surname: authProfile.surname,
-          email: authProfile.email,
-          phone: authProfile.phone,
-          dob: authProfile.dob,
-          nickname: authProfile.nickname,
-          nationality: authProfile.nationality,
-          supportedTeam: authProfile.supportedTeam || 'None',
-          createdAt: authProfile.createdAt,
-          emailVerified: !!data.user?.email_confirmed_at,
-          emailConfirmedAt: data.user?.email_confirmed_at || null,
-          isAdmin: authProfile.isAdmin,
-          agreedToTerms: authProfile.agreedToTerms || true,
-        };
-
-        onAddNewUser(profile);
-        onAuthSuccess(profile);
-        setSuccessMessage(`Welcome back, ${profile.nickname}!`);
-        return;
-      }
-
-      // Offline Sandbox Mode fallback logic - check password if defined on local mock profile
-      const players = await dbFetchPlayers();
-      let targetMatch = players.find(
-        (u) =>
-          u.nickname.toLowerCase() === sanitizedIdentifier.toLowerCase() ||
-          u.email.toLowerCase() === sanitizedIdentifier.toLowerCase()
-      );
-
-      if (!targetMatch) {
-        setErrorMessage('User does not exist in the database. Please verify your username/email, or switch to Create Account.');
-        return;
-      }
-      
-      if (targetMatch.password && loginPassword !== targetMatch.password) {
-        setErrorMessage('Incorrect password. Click the "Forgot Password?" link below to safely recover your account.');
-         return;
-      }
-
-      const profile: UserProfile = {
-        ...targetMatch,
-        emailVerified: true
-      };
-      onAddNewUser(profile);
-      onAuthSuccess(profile);
-      setSuccessMessage(`Welcome back, ${profile.nickname}! [Sandbox Mode]`);
-
-    } catch (sbError: any) {
-      console.error('PostgreSQL Signup failed:', sbError);
-      
-      // 1. Extract the message safely
-      let errorText = sbError?.message;
-      
-      // 2. Intercept the literal "{}" string bug from Supabase
-      if (!errorText || errorText === '{}' || errorText === '[object Object]') {
-        errorText = 'Registration failed due to a backend database error. Please check the console.';
-      }
-      
-      // 3. Route to the correct UI state
-      if (sbError?.code === '23505' || String(errorText).includes('duplicate key')) {
-        setErrorMessage('This email or nickname is already in use in the database.');
-      } else if (String(errorText).includes('fetch')) {
-        setErrorMessage('Network error connecting to the database. Please check your Supabase credentials.');
-      } else {
-        setErrorMessage(String(errorText));
-      }
-    }
-  };
-
-  // Password Recovery Handlers
-  const handleRecoveryRequest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMessage('');
-    setSuccessMessage('');
-
-    if (!recoveryInput.trim()) {
-      setErrorMessage('Please enter your registered username or email.');
-      return;
-    }
-
-    if (isSupabaseConfigured() && supabase) {
-      const { error } = await supabase.auth.resetPasswordForEmail(recoveryInput.trim().toLowerCase());
-      if (error) {
-        setErrorMessage('Failed to send a recovery link. Make sure this is a registered email account');
-        return;
-      }
-    }
-
-    setMode('recovery_confirmation');
-    setSuccessMessage(`A password reset link has been sent to your email. Please click it to define a new password.`);
   };
 
   const handleSignupSubmit = async (e: React.FormEvent) => {
@@ -438,15 +252,12 @@ export default function AuthFlow({ onAuthSuccess, onOpenRules, registeredUsers, 
 
     // --- THE NEW UPDATED TRY/CATCH BLOCK STARTS HERE ---
     try {
-      let finalUid = isSupabaseConfigured()
-        ? `usr_${Math.random().toString(36).substring(2, 12)}`
-        : `usr_local_${Math.random().toString(36).substring(2, 11)}`;
-
       if (isSupabaseConfigured() && supabase) {
-        const { data, error } = await supabase.auth.signUp({
+        const { error } = await supabase.auth.signUp({
           email: email.trim().toLowerCase(),
           password: password,
           options: {
+            emailRedirectTo: window.location.origin,
             data: {
               first_name: firstName.trim(),
               surname: surname.trim(),
@@ -463,35 +274,9 @@ export default function AuthFlow({ onAuthSuccess, onOpenRules, registeredUsers, 
         if (error) {
           throw error;
         }
-
-        if (data?.user?.id) {
-          finalUid = data.user.id;
-        }
       }
 
-      const draftUser: UserProfile = {
-        id: finalUid,
-        firstName: firstName.trim(),
-        surname: surname.trim(),
-        email: email.trim().toLowerCase(),
-        phone: phone.trim(),
-        dob,
-        nickname: nickname.trim(),
-        nationality: selectedNationality,
-        supportedTeam: supportedTeam.trim(),
-        preferredSport,
-        createdAt: new Date().toISOString(),
-        emailVerified: false,
-        isAdmin: false, // Strictly enforced
-        agreedToTerms: true,
-      };
-
-      setCurrentUserDraft(draftUser);
-
-
-
       setMode('awaiting_email_confirmation');
-      setSuccessMessage(`Account successfully created! Please check your email inbox and click the verification link to activate your account.`);
     } catch (sbError: any) {
       console.error('PostgreSQL Signup failed:', sbError?.message || (typeof sbError === 'object' ? JSON.stringify(sbError) : String(sbError)));
       
@@ -513,260 +298,42 @@ export default function AuthFlow({ onAuthSuccess, onOpenRules, registeredUsers, 
 
   return (
     <div className="w-full max-w-md mx-auto relative z-10">
-      {/* Dynamic Header */}
       <div className="text-center mb-8">
-        <PitchSideLogo size="lg" autoplay={true} />
+        <div onClick={onLogoClick} className={onLogoClick ? 'cursor-pointer inline-block' : 'inline-block'}>
+          <PitchSideLogo size="lg" autoplay={true} />
+        </div>
         <p className="text-xs text-slate-400 font-mono mt-2 uppercase tracking-widest">
           Play. Predict. Prevail.
         </p>
       </div>
 
       <div className="bg-slate-900/85 backdrop-blur-md rounded-2xl border border-slate-800 p-6 shadow-2xl relative">
-        {/* Highlight Accent */}
         <div className="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-blue-500 via-green-500 to-red-500 rounded-t-2xl" />
 
-        {/* Tab Controls */}
-        {(mode === 'login' || mode === 'signup') && (
+        {mode === 'signup' && (
           <div className="flex border-b border-slate-800 mb-6 pb-1">
             <button
-              id="switch-login-btn"
-              onClick={() => {
-                setMode('login');
-                setErrorMessage('');
-                setSuccessMessage('');
-              }}
-              className={`flex-1 pb-3 text-sm font-semibold font-display tracking-wide uppercase transition-colors relative cursor-pointer ${
-                mode === 'login' ? 'text-white' : 'text-slate-400 hover:text-slate-200'
-              }`}
+              type="button"
+              onClick={onSwitchToLogin}
+              className="flex-1 pb-3 text-sm font-semibold font-display tracking-wide uppercase text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
             >
               Login
-              {mode === 'login' && (
-                <motion.div layoutId="authTabId" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500" />
-              )}
             </button>
-            <button
-              id="switch-signup-btn"
-              onClick={() => {
-                setMode('signup');
-                setErrorMessage('');
-                setSuccessMessage('');
-              }}
-              className={`flex-1 pb-3 text-sm font-semibold font-display tracking-wide uppercase transition-colors relative cursor-pointer ${
-                mode === 'signup' ? 'text-white' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
+            <span className="flex-1 pb-3 text-sm font-semibold font-display tracking-wide uppercase text-white relative">
               Create Account
-              {mode === 'signup' && (
-                <motion.div layoutId="authTabId" className="absolute bottom-0 left-0 right-0 h-0.5 bg-green-500" />
-              )}
-            </button>
+              <motion.div layoutId="authTabId" className="absolute bottom-0 left-0 right-0 h-0.5 bg-green-500" />
+            </span>
           </div>
         )}
 
-        {/* Messages */}
         {errorMessage && (
-          <div className="mb-4 p-3 bg-red-950/40 border border-red-500/30 rounded-lg text-xs text-red-300 flex flex-col gap-1.5">
-            <div className="flex items-start gap-2">
-              <Info className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>{String(errorMessage)}</span>
-            </div>
-            {String(errorMessage).toLowerCase().includes('password') && !mode.startsWith('recovery_') && (
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('recovery_request');
-                  setErrorMessage('');
-                  if (loginIdentifier) {
-                    setRecoveryInput(loginIdentifier);
-                  }
-                }}
-                className="text-left text-blue-400 hover:text-blue-300 underline font-semibold flex items-center gap-1 ml-6 cursor-pointer"
-              >
-                Click here to recover password <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-        )}
-
-        {successMessage && (
-          <div className="mb-4 p-3 bg-green-950/40 border border-green-500/30 rounded-lg text-xs text-green-300 flex items-start gap-2">
+          <div className="mb-4 p-3 bg-red-950/40 border border-red-500/30 rounded-lg text-xs text-red-300 flex items-start gap-2">
             <Info className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>{successMessage}</span>
+            <span>{String(errorMessage)}</span>
           </div>
         )}
 
-        {/* AUTH CONTENT SCREENS */}
         <AnimatePresence mode="wait">
-          {mode === 'login' && (
-            <motion.form
-              key="login-form"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              onSubmit={handleLogin}
-              className="space-y-4"
-            >
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5 font-mono">
-                  Username or Email
-                </label>
-                <div className="relative">
-                  <User className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                  <input
-                    id="login-identifier-input"
-                    type="text"
-                    required
-                    placeholder="username"
-                    value={loginIdentifier}
-                    onChange={(e) => setLoginIdentifier(e.target.value)}
-                    className="w-full bg-slate-950/60 border border-slate-800 focus:border-blue-500 rounded-lg py-2 pl-10 pr-4 text-sm text-white placeholder:text-slate-600 outline-hidden transition-colors"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <div className="flex justify-between items-center mb-1.5">
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono">
-                    Password
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMode('recovery_request');
-                      setErrorMessage('');
-                      setSuccessMessage('');
-                      if (loginIdentifier) {
-                        setRecoveryInput(loginIdentifier);
-                      }
-                    }}
-                    className="text-[10px] text-blue-400 hover:text-blue-300 hover:underline cursor-pointer font-semibold font-mono uppercase tracking-wide"
-                  >
-                    Forgot Password?
-                  </button>
-                </div>
-                <div className="relative">
-                  <KeyRound className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                  <input
-                    id="login-password-input"
-                    type={isLoginPasswordMasked ? "password" : "text"}
-                    placeholder="Enter password"
-                    value={loginPassword}
-                    onChange={(e) => setLoginPassword(e.target.value)}
-                    className="w-full bg-slate-950/60 border border-slate-800 focus:border-blue-500 rounded-lg py-2 pl-10 pr-10 text-sm text-white placeholder:text-slate-600 outline-hidden transition-colors"
-                  />
-                  <button
-                    type="button"
-                    tabIndex={-1}
-                    onMouseDown={() => setIsLoginPasswordMasked(false)}
-                    onMouseUp={() => setIsLoginPasswordMasked(true)}
-                    onMouseLeave={() => setIsLoginPasswordMasked(true)}
-                    onTouchStart={() => setIsLoginPasswordMasked(false)}
-                    onTouchEnd={() => setIsLoginPasswordMasked(true)}
-                    onClick={() => setIsLoginPasswordMasked(!isLoginPasswordMasked)}
-                    className="absolute right-3 top-2.5 text-slate-500 hover:text-slate-300 cursor-pointer"
-                  >
-                    {isLoginPasswordMasked ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4 text-white" />}
-                  </button>
-                </div>
-              </div>
-
-              <button
-                id="login-submit-btn"
-                type="submit"
-                className="group relative w-full overflow-hidden bg-blue-500 hover:bg-blue-600 active:translate-y-[1px] transition-all text-white font-semibold font-display tracking-wide rounded-lg py-2.5 text-xs uppercase flex items-center justify-center gap-1.5 cursor-pointer shadow-[0_4px_12px_rgba(59,130,246,0.3)]"
-              >
-                <span className="relative z-10 flex items-center gap-1.5">Enter</span>
-                <div className="absolute inset-0 -translate-x-[150%] bg-linear-to-r from-transparent via-white/40 to-transparent group-hover:animate-[shimmer_0.75s_ease-in-out_1]" />
-              </button>
-            </motion.form>
-          )}
-
-          {mode === 'recovery_request' && (
-            <motion.form
-              key="recovery-request-form"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              onSubmit={handleRecoveryRequest}
-              className="space-y-4"
-            >
-              <div className="text-center py-1">
-                <Shield className="w-10 h-10 text-blue-400 mx-auto mb-2" />
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">Account Password Recovery</h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  Enter your registered username or email to verify your identity.
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5 font-mono">
-                  Registered Username or Email
-                </label>
-                <div className="relative">
-                  <User className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                  <input
-                    id="recovery-identifier-input"
-                    type="text"
-                    required
-                    placeholder="username"
-                    value={recoveryInput}
-                    onChange={(e) => setRecoveryInput(e.target.value)}
-                    className="w-full bg-slate-950/60 border border-slate-800 focus:border-blue-500 rounded-lg py-2 pl-10 pr-4 text-sm text-white placeholder:text-slate-600 outline-hidden transition-colors font-sans"
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-2.5">
-                <button
-                  id="recovery-request-back-btn"
-                  type="button"
-                  onClick={() => {
-                    setMode('login');
-                    setErrorMessage('');
-                    setSuccessMessage('');
-                  }}
-                  className="flex-1 bg-slate-950 text-slate-400 hover:text-white border border-slate-800 hover:border-slate-700 font-semibold rounded-lg py-2 text-xs uppercase cursor-pointer transition-all font-sans"
-                >
-                  Cancel
-                </button>
-                <button
-                  id="recovery-request-submit-btn"
-                  type="submit"
-                  className="flex-2 bg-blue-500 hover:bg-blue-600 text-white font-semibold font-display tracking-wide rounded-lg py-2 text-xs uppercase flex items-center justify-center gap-1.5 cursor-pointer shadow-[0_4px_12px_rgba(59,130,246,0.3)] transition-all"
-                >
-                  Verify Account <ArrowRight className="w-4 h-4" />
-                </button>
-              </div>
-            </motion.form>
-          )}
-
-          {mode === 'recovery_confirmation' && (
-            <motion.div
-              key="recovery-confirmation"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="text-center py-6 space-y-4"
-            >
-              <Mail className="w-12 h-12 text-blue-500 mx-auto" />
-              <h3 className="text-lg font-bold text-white uppercase tracking-wider font-mono">Check Your Email</h3>
-              <p className="text-sm text-slate-300 px-4">
-                A password reset link has been sent to your email address. Please click the link to securely define a new password.
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('login');
-                  setErrorMessage('');
-                  setSuccessMessage('');
-                }}
-                className="mt-6 bg-slate-950 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 font-semibold rounded-lg py-2.5 px-6 text-xs uppercase cursor-pointer transition-all"
-              >
-                Return to Login
-              </button>
-            </motion.div>
-          )}
-
           {mode === 'signup' && (
             <motion.form
               key="signup-form"
@@ -1330,9 +897,8 @@ export default function AuthFlow({ onAuthSuccess, onOpenRules, registeredUsers, 
               <button
                 type="button"
                 onClick={() => {
-                  setMode('login');
+                  onSwitchToLogin();
                   setErrorMessage('');
-                  setSuccessMessage('');
                 }}
                 className="mt-6 bg-slate-950 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 font-semibold rounded-lg py-2.5 px-6 text-xs uppercase cursor-pointer transition-all"
               >

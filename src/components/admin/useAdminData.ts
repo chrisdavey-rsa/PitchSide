@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { dbFetchMatches, dbFetchLeagues, dbFetchArchivedPlayers } from '../../supabase';
+import { dbFetchMatches, dbFetchLeagues, dbFetchLeaguesMembership, dbFetchArchivedPlayers } from '../../supabase';
 import { League, Match } from '../../types';
 
 export interface AdminDataState {
@@ -41,7 +41,13 @@ export function useAdminData(activeTab: string): AdminDataState {
     setLoadingLeagues(true);
     try {
       const data = await dbFetchLeagues();
-      setLeagues(data);
+      // The legacy `members` JSONB column on `leagues` is deprecated and must be
+      // ignored entirely — real membership lives in the `league_members` table.
+      // Hydrate each league strictly from league_members so counts and the audit
+      // modal reflect live data.
+      const membership = await dbFetchLeaguesMembership(data.map((l) => l.id));
+      const hydrated = data.map((l) => ({ ...l, members: membership[l.id] || [] }));
+      setLeagues(hydrated);
     } catch (e) {
       console.warn('useAdminData: Failed to fetch leagues', e);
     } finally {

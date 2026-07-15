@@ -4,7 +4,6 @@ import {
   Users,
   Trophy,
   Database,
-  Mail,
   AlertTriangle,
   CheckCircle2,
   X,
@@ -16,7 +15,6 @@ export type AdminTab =
   | 'fixtures'
   | 'competitions'
   | 'backups'
-  | 'communications'
   | 'leagues'
   | 'predictions';
 
@@ -33,12 +31,11 @@ interface AdminLayoutProps {
 }
 
 const TABS: { id: AdminTab; label: (counts: { fixture: number; player: number; archive: number }) => string; icon: React.FC<any>; color: 'purple' | 'blue' | 'emerald' }[] = [
-  { id: 'dashboard',      label: () => 'Dashboard',                               icon: AlertTriangle, color: 'purple' },
+  { id: 'dashboard',      label: () => 'Game Health Analytics',                    icon: AlertTriangle, color: 'purple' },
   { id: 'players',        label: ({ player }) => `Players (${player})`,            icon: Users,         color: 'purple' },
   { id: 'fixtures',       label: ({ fixture }) => `Fixtures & Scoring (${fixture})`, icon: Trophy,      color: 'blue' },
   { id: 'competitions',   label: () => 'Competitions',                             icon: Trophy,        color: 'blue' },
   { id: 'backups',        label: ({ archive }) => `Archived Backups (${archive})`, icon: Database,      color: 'emerald' },
-  { id: 'communications', label: () => 'Communications',                           icon: Mail,          color: 'blue' },
   { id: 'leagues',        label: () => 'Mini-Leagues',                             icon: Users,         color: 'purple' },
   { id: 'predictions',    label: () => 'Predictions',                              icon: Database,      color: 'purple' },
 ];

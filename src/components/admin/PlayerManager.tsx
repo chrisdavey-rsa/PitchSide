@@ -7,11 +7,8 @@ import {
   Shield,
   Database,
   List,
-  MessageSquare,
-  Lock,
   CheckCircle2,
   AlertTriangle,
-  Mail,
   X,
 } from 'lucide-react';
 import { supabase } from '../../supabase';
@@ -56,19 +53,7 @@ export default function PlayerManager({
 }: PlayerManagerProps) {
   const [playerSearchQuery, setPlayerSearchQuery] = useState('');
   const [editingPlayer, setEditingPlayer] = useState<UserProfile | null>(null);
-  const [editPlayerForm, setEditPlayerForm] = useState({
-    nickname: '',
-    firstName: '',
-    surname: '',
-    dob: '',
-    nationality: '',
-  });
-  const [auditTab, setAuditTab] = useState<'identity' | 'security' | 'ledger' | 'communications'>('identity');
-  const [manualPointAdjust, setManualPointAdjust] = useState({ amount: 0, reason: '' });
-  const [showPointAdjust, setShowPointAdjust] = useState(false);
-  const [directMessage, setDirectMessage] = useState({ subject: '', body: '' });
-  const [showSuspendForm, setShowSuspendForm] = useState(false);
-  const [suspendForm, setSuspendForm] = useState({ until: '', adminPassword: '' });
+  const [auditTab, setAuditTab] = useState<'identity' | 'security' | 'ledger'>('identity');
   const [playerLedger, setPlayerLedger] = useState<any[]>([]);
   const [loadingLedger, setLoadingLedger] = useState(false);
   const [predFilterType, setPredFilterType] = useState<'upcoming' | 'completed'>('upcoming');
@@ -88,58 +73,36 @@ export default function PlayerManager({
 
   const openAuditModal = async (player: UserProfile) => {
     setEditingPlayer(player);
-    setEditPlayerForm({
-      nickname: player.nickname || '',
-      firstName: player.firstName || '',
-      surname: player.surname || '',
-      dob: player.dob || '',
-      nationality: player.nationality || '',
-    });
     setAuditTab('identity');
-    setShowPointAdjust(false);
-    setManualPointAdjust({ amount: 0, reason: '' });
-    setDirectMessage({ subject: '', body: '' });
-    setShowSuspendForm(false);
-    setSuspendForm({ until: '', adminPassword: '' });
     setLoadingLedger(true);
     setPlayerLedger([]);
     try {
-      const { data, error } = await supabase
+      // predictions.match_id has no FK to matches.id, so a PostgREST embed
+      // (`matches:match_id(*)`) fails. Fetch predictions, then hydrate the
+      // related matches in a second query and merge client-side.
+      const { data: predRows, error } = await supabase
         .from('predictions')
-        .select(`
-          id, match_id, predicted_home_score, predicted_away_score, points_won, created_at,
-          matches:match_id ( id, home_team, away_team, kickoff_time, actual_home_score, actual_away_score, status, sport )
-        `)
+        .select('id, match_id, predicted_home_score, predicted_away_score, points_won, created_at')
         .eq('user_id', player.id)
         .order('created_at', { ascending: false });
       if (error) throw error;
-      setPlayerLedger(data || []);
+
+      const preds = predRows || [];
+      const matchIds = Array.from(new Set(preds.map((p: any) => p.match_id).filter(Boolean)));
+      const matchMap: Record<string, any> = {};
+      if (matchIds.length > 0) {
+        const { data: matchRows } = await supabase
+          .from('matches')
+          .select('id, home_team, away_team, kickoff_time, actual_home_score, actual_away_score, status, sport')
+          .in('id', matchIds);
+        (matchRows || []).forEach((m: any) => { matchMap[m.id] = m; });
+      }
+
+      setPlayerLedger(preds.map((p: any) => ({ ...p, matches: matchMap[p.match_id] || null })));
     } catch (err: any) {
       onError(`Failed to fetch player ledger: ${err.message || 'Unknown error'}`);
     } finally {
       setLoadingLedger(false);
-    }
-  };
-
-  const handleUpdatePlayerInfo = async () => {
-    if (!editingPlayer) return;
-    try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          nickname: editPlayerForm.nickname,
-          firstName: editPlayerForm.firstName,
-          surname: editPlayerForm.surname,
-          dob: editPlayerForm.dob,
-          nationality: editPlayerForm.nationality,
-        })
-        .eq('id', editingPlayer.id);
-      if (error) throw error;
-      onSuccess('Player profile updated successfully.');
-      setEditingPlayer(null);
-      onRefresh();
-    } catch (err: any) {
-      onError(`Failed to update profile: ${err.message || 'Unknown error'}`);
     }
   };
 
@@ -282,7 +245,6 @@ export default function PlayerManager({
                     { key: 'identity', icon: User, label: 'Identity Overview', activeColor: 'blue' },
                     { key: 'security', icon: Shield, label: 'Access & Security', activeColor: 'purple' },
                     { key: 'ledger', icon: List, label: 'Predictions', activeColor: 'emerald' },
-                    { key: 'communications', icon: MessageSquare, label: 'Communications', activeColor: 'amber' },
                   ] as const
                 ).map(({ key, icon: Icon, label, activeColor }) => (
                   <button
@@ -383,26 +345,6 @@ export default function PlayerManager({
                             )}
                           </div>
                         </div>
-                        <div className="flex flex-col gap-2 w-full sm:w-auto">
-                          {!editingPlayer.emailVerified && (
-                            <button
-                              onClick={() => {
-                                onSuccess(`Manually verified email for ${editingPlayer.nickname}.`);
-                              }}
-                              className="bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 px-4 py-2 rounded-lg text-xs font-bold transition-colors"
-                            >
-                              Manually Verify Email
-                            </button>
-                          )}
-                          <button
-                            onClick={() => {
-                              onSuccess(`Secure password reset link dispatched to ${editingPlayer.email}.`);
-                            }}
-                            className="bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 border border-purple-500/30 px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2"
-                          >
-                            <Lock className="w-3.5 h-3.5" /> Force Password Reset
-                          </button>
-                        </div>
                       </div>
                     </div>
 
@@ -426,82 +368,6 @@ export default function PlayerManager({
                           {editingPlayer.isAdmin ? 'Revoke Admin' : 'Grant Admin'}
                         </button>
                       </div>
-
-                      <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-5 mt-4">
-                        <div className="flex items-center justify-between mb-4">
-                          <div>
-                            <span className="block text-sm font-bold text-white mb-1">Suspension Status</span>
-                            <p className="text-[10px] text-slate-500">Temporarily lock this user out of the platform.</p>
-                          </div>
-                          {editingPlayer.suspendedUntil && new Date(editingPlayer.suspendedUntil) > new Date() ? (
-                            <button
-                              onClick={() => {
-                                onSuccess(`User ${editingPlayer.nickname} has had gaming rights restored.`);
-                                setEditingPlayer({ ...editingPlayer, suspendedUntil: undefined });
-                              }}
-                              className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 px-4 py-2 rounded-lg text-xs font-bold transition-colors"
-                            >
-                              Restore Gaming Rights
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => setShowSuspendForm(!showSuspendForm)}
-                              className="bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 px-4 py-2 rounded-lg text-xs font-bold transition-colors"
-                            >
-                              {showSuspendForm ? 'Cancel' : 'Suspend User'}
-                            </button>
-                          )}
-                        </div>
-
-                        {showSuspendForm && (
-                          <div className="mt-4 p-4 bg-slate-950 border border-amber-500/30 rounded-lg animate-fade-in">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              <div>
-                                <label className="block text-[9px] text-slate-500 uppercase tracking-widest mb-1.5">
-                                  Suspend Until (Date &amp; Time)
-                                </label>
-                                <input
-                                  type="datetime-local"
-                                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-amber-500/50"
-                                  value={suspendForm.until}
-                                  onChange={(e) => setSuspendForm({ ...suspendForm, until: e.target.value })}
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-[9px] text-slate-500 uppercase tracking-widest mb-1.5">
-                                  Admin Password
-                                </label>
-                                <input
-                                  type="password"
-                                  placeholder="Confirm your password"
-                                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-amber-500/50"
-                                  value={suspendForm.adminPassword}
-                                  onChange={(e) => setSuspendForm({ ...suspendForm, adminPassword: e.target.value })}
-                                />
-                              </div>
-                            </div>
-                            <div className="mt-4 flex justify-end">
-                              <button
-                                onClick={() => {
-                                  if (!suspendForm.until || !suspendForm.adminPassword) {
-                                    alert('Please fill in both the suspension date and your admin password.');
-                                    return;
-                                  }
-                                  if (suspendForm.adminPassword !== 'admin') {
-                                    alert('Invalid admin password.');
-                                  }
-                                  onSuccess(`User ${editingPlayer.nickname} suspended until ${new Date(suspendForm.until).toLocaleString()}.`);
-                                  setEditingPlayer({ ...editingPlayer, suspendedUntil: suspendForm.until });
-                                  setShowSuspendForm(false);
-                                }}
-                                className="bg-amber-600 hover:bg-amber-500 text-white font-bold px-4 py-2 rounded-lg text-xs transition-colors"
-                              >
-                                Confirm Suspension
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
                     </div>
                   </div>
                 )}
@@ -511,62 +377,7 @@ export default function PlayerManager({
                   <div className="space-y-6 animate-fade-in">
                     <div className="flex items-center justify-between border-b border-slate-800 pb-4">
                       <h4 className="text-sm font-bold text-slate-300 uppercase tracking-wider">Predictions</h4>
-                      <button
-                        onClick={() => setShowPointAdjust(!showPointAdjust)}
-                        className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-widest uppercase transition-colors shadow-lg"
-                      >
-                        {showPointAdjust ? 'Cancel Adjustment' : 'Manual Point Adjustment'}
-                      </button>
                     </div>
-
-                    {showPointAdjust && (
-                      <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 animate-fade-in">
-                        <div className="flex flex-col sm:flex-row gap-4 items-end">
-                          <div className="w-full sm:w-1/3">
-                            <label className="block text-[9px] text-slate-400 uppercase tracking-widest mb-1.5">
-                              Adjustment Amount (+/-)
-                            </label>
-                            <input
-                              type="number"
-                              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-emerald-500/50"
-                              value={manualPointAdjust.amount}
-                              onChange={(e) =>
-                                setManualPointAdjust({ ...manualPointAdjust, amount: parseInt(e.target.value) || 0 })
-                              }
-                            />
-                          </div>
-                          <div className="w-full sm:w-2/3">
-                            <label className="block text-[9px] text-slate-400 uppercase tracking-widest mb-1.5">
-                              Reason for Adjustment
-                            </label>
-                            <input
-                              type="text"
-                              placeholder="e.g. Correcting mistaken match outcome..."
-                              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-emerald-500/50"
-                              value={manualPointAdjust.reason}
-                              onChange={(e) =>
-                                setManualPointAdjust({ ...manualPointAdjust, reason: e.target.value })
-                              }
-                            />
-                          </div>
-                          <button
-                            onClick={() => {
-                              if (!manualPointAdjust.reason) {
-                                alert('Please provide a reason for the adjustment.');
-                                return;
-                              }
-                              onSuccess(
-                                `Successfully adjusted points by ${manualPointAdjust.amount} for ${editingPlayer.nickname}.`
-                              );
-                              setShowPointAdjust(false);
-                            }}
-                            className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-xs font-bold transition-colors w-full sm:w-auto flex-shrink-0"
-                          >
-                            Apply
-                          </button>
-                        </div>
-                      </div>
-                    )}
 
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/50 p-3 rounded-xl border border-slate-800">
                       <div className="flex flex-wrap items-center gap-2">
@@ -751,100 +562,6 @@ export default function PlayerManager({
                   </div>
                 )}
 
-                {/* COMMUNICATIONS */}
-                {auditTab === 'communications' && (
-                  <div className="space-y-6 animate-fade-in">
-                    <div>
-                      <h4 className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-4 border-b border-slate-800 pb-2">
-                        Direct User Contact
-                      </h4>
-                      <p className="text-[10px] text-slate-500 mb-6">
-                        Send a secure site message to this user. This will appear in their account portal.
-                      </p>
-                      <div className="space-y-4 max-w-2xl">
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-[9px] text-slate-500 uppercase tracking-widest mb-1.5">
-                              Recipient Name
-                            </label>
-                            <input
-                              type="text"
-                              disabled
-                              className="w-full bg-slate-900/50 border border-slate-800 rounded-lg px-3 py-2 text-slate-400 text-xs cursor-not-allowed"
-                              value={`${editingPlayer.firstName} ${editingPlayer.surname} (${editingPlayer.nickname})`}
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[9px] text-slate-500 uppercase tracking-widest mb-1.5">
-                              Recipient Email
-                            </label>
-                            <input
-                              type="text"
-                              disabled
-                              className="w-full bg-slate-900/50 border border-slate-800 rounded-lg px-3 py-2 text-slate-400 text-xs cursor-not-allowed"
-                              value={editingPlayer.email}
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-[9px] text-slate-500 uppercase tracking-widest mb-1.5">
-                            Message Subject
-                          </label>
-                          <input
-                            type="text"
-                            placeholder="Important Account Update"
-                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-white text-xs focus:outline-none focus:border-amber-500/50"
-                            value={directMessage.subject}
-                            onChange={(e) => setDirectMessage({ ...directMessage, subject: e.target.value })}
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[9px] text-slate-500 uppercase tracking-widest mb-1.5">
-                            Message Body
-                          </label>
-                          <textarea
-                            rows={6}
-                            placeholder="Type your message here..."
-                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-3 text-white text-xs focus:outline-none focus:border-amber-500/50 resize-none"
-                            value={directMessage.body}
-                            onChange={(e) => setDirectMessage({ ...directMessage, body: e.target.value })}
-                          />
-                        </div>
-                        <div className="flex justify-end pt-2">
-                          <button
-                            onClick={() => {
-                              if (!directMessage.subject || !directMessage.body) {
-                                alert('Please provide a subject and a message body.');
-                                return;
-                              }
-                              const newMessage = {
-                                id: crypto.randomUUID(),
-                                senderId: 'admin',
-                                receiverId: editingPlayer.id,
-                                subject: directMessage.subject,
-                                body: directMessage.body,
-                                createdAt: new Date().toISOString(),
-                                read: false,
-                              };
-                              const existing = JSON.parse(
-                                localStorage.getItem('pitchside_messages') || '[]'
-                              );
-                              localStorage.setItem(
-                                'pitchside_messages',
-                                JSON.stringify([...existing, newMessage])
-                              );
-                              onSuccess(`Secure site message sent to ${editingPlayer.nickname}.`);
-                              setDirectMessage({ subject: '', body: '' });
-                            }}
-                            className="bg-amber-600 hover:bg-amber-500 text-white font-bold px-6 py-2.5 rounded-lg text-xs transition-colors flex items-center gap-2 shadow-lg shadow-amber-900/20"
-                          >
-                            <Mail className="w-4 h-4" /> Send Secure Message
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           </div>

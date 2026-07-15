@@ -13,17 +13,25 @@ export default function PredictionsViewer() {
     setLoading(true);
     try {
       const matchStatus = statusFilter === 'upcoming' ? 'upcoming' : 'completed';
-      const { data: matchRows } = await supabase
-        .from('matches')
-        .select('id')
-        .eq('status', matchStatus);
 
-      const ids = (matchRows || []).map((m: any) => m.id);
+      // NOTE: predictions.match_id has no foreign key to matches.id, so a PostgREST
+      // embed (`matches:match_id(*)`) fails and silently returns zero rows. We fetch
+      // matches, predictions and profiles independently and merge them client-side.
+      const { data: matchRows, error: matchErr } = await supabase
+        .from('matches')
+        .select('id, home_team, away_team, kickoff_time, actual_home_score, actual_away_score, status, sport')
+        .eq('status', matchStatus);
+      if (matchErr) throw matchErr;
+
+      const matches = matchRows || [];
+      const ids = matches.map((m: any) => m.id);
       if (ids.length === 0) {
         setPredictions([]);
         setLoading(false);
         return;
       }
+      const matchMap: Record<string, any> = {};
+      matches.forEach((m: any) => { matchMap[m.id] = m; });
 
       let query = supabase
         .from('predictions')
@@ -35,15 +43,7 @@ export default function PredictionsViewer() {
           predicted_away_score,
           points_won,
           created_at,
-          submitted,
-          matches:match_id (
-            id, home_team, away_team, kickoff_time,
-            actual_home_score, actual_away_score,
-            status, sport
-          ),
-          profiles:user_id (
-            id, username, first_name, surname
-          )
+          submitted
         `)
         .in('match_id', ids)
         .order('created_at', { ascending: false });
@@ -52,9 +52,27 @@ export default function PredictionsViewer() {
         query = query.eq('submitted', true);
       }
 
-      const { data, error } = await query;
-      if (error) throw error;
-      setPredictions(data || []);
+      const { data: predRows, error: predErr } = await query;
+      if (predErr) throw predErr;
+      const preds = predRows || [];
+
+      // Resolve player profiles in a single follow-up query.
+      const userIds = Array.from(new Set(preds.map((p: any) => p.user_id).filter(Boolean)));
+      const profileMap: Record<string, any> = {};
+      if (userIds.length > 0) {
+        const { data: profileRows } = await supabase
+          .from('profiles')
+          .select('id, username, first_name, surname')
+          .in('id', userIds);
+        (profileRows || []).forEach((pr: any) => { profileMap[pr.id] = pr; });
+      }
+
+      const merged = preds.map((p: any) => ({
+        ...p,
+        matches: matchMap[p.match_id] || null,
+        profiles: profileMap[p.user_id] || null,
+      }));
+      setPredictions(merged);
     } catch (err: any) {
       console.error('Failed to fetch site-wide predictions:', err);
       setPredictions([]);

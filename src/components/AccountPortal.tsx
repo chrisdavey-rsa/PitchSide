@@ -5,6 +5,8 @@ import { UserProfile } from '../types';
 import { getCompetitions } from '../competitions';
 import { useUnreadMessages } from '../hooks/useUnreadMessages';
 import { useLeaguesQuery, useUserLeaguesQuery } from '../hooks/usePitchsideQueries';
+import { RadialOrigin, radialClip } from '../radial';
+import { btnClose } from '../ui';
 
 import { SidebarNav } from './AccountPortal/SidebarNav';
 import { GeneralSettings } from './AccountPortal/GeneralSettings';
@@ -21,9 +23,10 @@ export interface AccountPortalProps {
   onClose: () => void;
   onUpdateUser: (updatedUser: UserProfile) => void;
   onSelectLeague?: (leagueId: string) => void;
+  origin?: RadialOrigin | null;
 }
 
-export default function AccountPortal({ user, registeredUsers, onClose, onUpdateUser, onSelectLeague }: AccountPortalProps) {
+export default function AccountPortal({ user, registeredUsers, onClose, onUpdateUser, onSelectLeague, origin }: AccountPortalProps) {
   const [activeTab, setActiveTab] = useState<'general' | 'change-email' | 'change-password' | 'historic-scores' | 'leagues' | 'messages' | 'delete-account'>('leagues');
 
   const { data: realLeagues = [] } = useLeaguesQuery();
@@ -37,18 +40,12 @@ export default function AccountPortal({ user, registeredUsers, onClose, onUpdate
 
   return (
     <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
+      {...radialClip(origin)}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 md:p-12 font-sans overflow-hidden"
     >
       <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
       
-      <motion.div
-        initial={{ scale: 0.95, opacity: 0, y: 20 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.95, opacity: 0, y: 20 }}
-        transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+      <div
         className="relative w-full max-w-5xl h-[85vh] sm:h-[600px] bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl flex flex-col md:flex-row overflow-hidden"
       >
         <SidebarNav 
@@ -82,7 +79,7 @@ export default function AccountPortal({ user, registeredUsers, onClose, onUpdate
               <button
                 id="acc-close-btn"
                 onClick={onClose}
-                className="text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-800 p-2.5 rounded-full cursor-pointer transition-colors"
+                className={btnClose}
                 title="Return to Dashboard"
               >
                 <X className="w-4 h-4" />
@@ -174,7 +171,7 @@ export default function AccountPortal({ user, registeredUsers, onClose, onUpdate
             PITCHSIDE • 2026
           </div>
         </div>
-      </motion.div>
+      </div>
     </motion.div>
   );
 }

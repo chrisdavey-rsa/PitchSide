@@ -1,9 +1,17 @@
-import React from "react";
+import React, { useState } from "react";
 import { motion } from "motion/react";
-import { Award } from "lucide-react";
+import { Award, X, Search, Eye, EyeOff, Wand2 } from "lucide-react";
+import { btnPrimary, btnSecondary, btnClose } from "../../ui";
 import { getCompetitions } from "../../competitions";
 import { SportType, UserProfile, League } from "../../types";
 import type { LeaderboardRecord } from "../../supabase";
+import {
+  filterLeagues,
+  getLeagueSeason,
+  getAvailableSports,
+  sportLabel,
+  generateStrongPassword,
+} from "../../leagues";
 
 type LeagueMemberDisplay = LeaderboardRecord & {
   displayPoints: number;
@@ -16,8 +24,8 @@ interface LeagueManagementPanelProps {
   leagues: League[];
   userLeagues: League[];
   isUserInAnyLeague: boolean;
-  leagueTab: "joined" | "create" | "join" | "view";
-  setLeagueTab: (tab: "joined" | "create" | "join" | "view") => void;
+  leagueTab: "view" | "join" | "create";
+  setLeagueTab: (tab: "view" | "join" | "create") => void;
   activeLeagueId: string | null;
   setActiveLeagueId: (id: string | null) => void;
   leagueMembersMemoized: LeagueMemberDisplay[];
@@ -43,6 +51,8 @@ interface LeagueManagementPanelProps {
   setLeaguePasswordInput: (v: string) => void;
   leagueSeasonInput: string;
   setLeagueSeasonInput: (v: string) => void;
+  leagueSportInput: SportType;
+  setLeagueSportInput: (v: SportType) => void;
   leagueCompSelect: string;
   setLeagueCompSelect: (v: string) => void;
   leagueIsPublicInput: boolean;
@@ -60,6 +70,7 @@ interface LeagueManagementPanelProps {
   handleLeaveLeague: (leagueId: string) => void | Promise<void>;
   handleUpdateLeagueSettings: () => void | Promise<void>;
   triggerToast: (msg: string) => void;
+  onClose?: () => void;
 }
 
 export default function LeagueManagementPanel({
@@ -94,6 +105,8 @@ export default function LeagueManagementPanel({
   setLeaguePasswordInput,
   leagueSeasonInput,
   setLeagueSeasonInput,
+  leagueSportInput,
+  setLeagueSportInput,
   leagueCompSelect,
   setLeagueCompSelect,
   leagueIsPublicInput,
@@ -111,398 +124,388 @@ export default function LeagueManagementPanel({
   handleLeaveLeague,
   handleUpdateLeagueSettings,
   triggerToast,
+  onClose,
 }: LeagueManagementPanelProps) {
+  const [showLeaguePassword, setShowLeaguePassword] = useState(false);
+
+  const competitions = getCompetitions();
+  const availableSports = getAvailableSports(competitions);
+  const createCompetitions = competitions.filter((c) => c.sport === leagueSportInput);
+  const joinedLeagueIds = new Set(userLeagues.map((l) => l.id));
+
+  const filteredLeagues = filterLeagues(leagues, competitions, {
+    search: viewLeaguesSearchName,
+    sport: viewLeaguesSport,
+    competitionId: viewLeaguesCompId,
+    season: viewLeaguesSeason,
+  }).sort((a, b) => a.name.localeCompare(b.name));
+
+  const tabs: { key: "view" | "join" | "create"; label: string }[] = [
+    { key: "view", label: "View" },
+    { key: "join", label: "Join" },
+    { key: "create", label: "Create" },
+  ];
+
+  const handleSportChange = (sport: SportType) => {
+    setLeagueSportInput(sport);
+    // Reset the competition cleanly if it no longer belongs to the chosen sport.
+    const sportComps = competitions.filter((c) => c.sport === sport);
+    if (!sportComps.some((c) => c.id === leagueCompSelect)) {
+      setLeagueCompSelect(sportComps[0]?.id ?? "");
+    }
+  };
+
+  const handleGeneratePassword = () => {
+    setLeaguePasswordInput(generateStrongPassword());
+    setShowLeaguePassword(true);
+  };
+
   return (
     <motion.div
-      id="tour-league-manager"
       transition={{ duration: 0.5, ease: "easeInOut" }}
-      className={`bg-slate-900/60 rounded-2xl border border-slate-800/70 p-5 flex flex-col justify-between relative overflow-hidden backdrop-blur-xs min-h-[180px] transition-all ${!isUserInAnyLeague ? "ring-2 ring-emerald-500 shadow-[0_0_30px_rgba(16,185,129,0.2)]" : ""}`}
+      className={`bg-slate-900/60 rounded-2xl border border-slate-800/70 p-5 flex flex-col relative overflow-hidden backdrop-blur-xs h-[480px] transition-all ${!isUserInAnyLeague ? "ring-2 ring-emerald-500 shadow-[0_0_30px_rgba(16,185,129,0.2)]" : ""}`}
     >
-      <div>
-        {/* Header with quick sub-tabs */}
-        <div className="flex items-center justify-between pb-2 border-b border-slate-800/60">
-          <div className="flex items-center gap-1.5">
-            <Award className="w-4 h-4 text-yellow-500" />
-            <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono">
-              Leagues
-            </h3>
-          </div>
-          {isUserInAnyLeague && (
-            <div className="flex gap-1 text-[10px] font-mono bg-slate-950/80 p-0.5 rounded border border-slate-800/60">
+      {/* Header with title, submenu and optional close */}
+      <div className="flex items-center justify-between pb-2 border-b border-slate-800/60 gap-3 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
+          <Award className="w-4 h-4 text-yellow-500" />
+          <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono">
+            Leagues
+          </h3>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1 text-[10px] font-mono bg-slate-950/80 p-0.5 rounded border border-slate-800/60">
+            {tabs.map((tab) => (
               <button
+                key={tab.key}
                 onClick={() => {
-                  setLeagueTab("joined");
-                  setActiveLeagueId(null);
+                  setLeagueTab(tab.key);
+                  if (tab.key === "view") setActiveLeagueId(null);
                 }}
-                className={`px-1.5 py-0.5 rounded transition-all cursor-pointer ${leagueTab === "joined" ? "bg-slate-800 text-white font-bold" : "text-slate-500 hover:text-slate-300"}`}
+                className={`px-1.5 py-0.5 rounded transition-all cursor-pointer ${leagueTab === tab.key ? "bg-slate-800 text-white font-bold" : "text-slate-500 hover:text-slate-300"}`}
               >
-                List
+                {tab.label}
               </button>
-              <button
-                onClick={() => setLeagueTab("view")}
-                className={`px-1.5 py-0.5 rounded transition-all cursor-pointer ${leagueTab === "view" ? "bg-slate-800 text-white font-bold" : "text-slate-500 hover:text-slate-300"}`}
-              >
-                View
-              </button>
-              <button
-                onClick={() => setLeagueTab("join")}
-                className={`px-1.5 py-0.5 rounded transition-all cursor-pointer ${leagueTab === "join" ? "bg-slate-800 text-white font-bold" : "text-slate-500 hover:text-slate-300"}`}
-              >
-                Join
-              </button>
-              <button
-                onClick={() => setLeagueTab("create")}
-                className={`px-1.5 py-0.5 rounded transition-all cursor-pointer ${leagueTab === "create" ? "bg-slate-800 text-white font-bold" : "text-slate-500 hover:text-slate-300"}`}
-              >
-                Create
-              </button>
-            </div>
+            ))}
+          </div>
+          {onClose && (
+            <button
+              onClick={onClose}
+              className={btnClose}
+              title="Close leagues"
+            >
+              <X className="w-4 h-4" />
+            </button>
           )}
         </div>
+      </div>
 
-        {/* TAB CONTENT: 1. JOINED / DETAILED LEAGUE */}
-        {leagueTab === "joined" && (
-          <div className="mt-3">
-            {activeLeagueId ? (
-              /* DETAILED LEAGUE VIEW */
-              (() => {
-                const activeLeague = leagues.find(
-                  (l) => l.id === activeLeagueId,
-                );
-                if (!activeLeague) return null;
-                const compName =
-                  getCompetitions().find(
-                    (c) => c.id === activeLeague.competitionId,
-                  )?.name || "Multi-Tournament";
+      {/* Fixed-height content region: the hub stays the same size across tabs */}
+      <div className="flex-1 min-h-0 mt-3">
+        {/* TAB CONTENT: VIEW (browse / search all leagues, or the selected league detail) */}
+        {leagueTab === "view" &&
+          (activeLeagueId ? (
+            /* DETAILED LEAGUE VIEW */
+            (() => {
+              const activeLeague = leagues.find((l) => l.id === activeLeagueId);
+              if (!activeLeague) return null;
+              const compName =
+                competitions.find((c) => c.id === activeLeague.competitionId)?.name ||
+                "Multi-Tournament";
 
-                const isLeagueFootball = activeLeague.competitionId?.startsWith("f-");
-
-                return (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between bg-slate-950/40 p-2 rounded-lg border border-slate-800/50">
-                      <div>
-                        <h4 className="text-xs font-bold text-white truncate max-w-[120px]">
-                          {activeLeague.name}
-                        </h4>
-                        <p className="text-[9px] text-slate-500 truncate max-w-[120px] font-mono font-medium">
-                          {compName}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-[10px] text-slate-400 font-mono">
-                          Code:{" "}
-                          <span className="text-yellow-450 font-bold">
-                            {activeLeague.id}
-                          </span>
-                        </p>
-                        <p className="text-[9px] text-slate-500">
-                          Creator: {activeLeague.creatorName}
-                        </p>
-                      </div>
+              return (
+                <div className="h-full overflow-y-auto pr-1 space-y-3">
+                  <div className="flex items-center justify-between bg-slate-950/40 p-2 rounded-lg border border-slate-800/50">
+                    <div>
+                      <h4 className="text-xs font-bold text-white truncate max-w-[120px]">
+                        {activeLeague.name}
+                      </h4>
+                      <p className="text-[9px] text-slate-500 truncate max-w-[120px] font-mono font-medium">
+                        {compName}
+                      </p>
                     </div>
+                    <div className="text-right">
+                      <p className="text-[10px] text-slate-400 font-mono">
+                        Code:{" "}
+                        <span className="text-yellow-450 font-bold">
+                          {activeLeague.id}
+                        </span>
+                      </p>
+                      <p className="text-[9px] text-slate-500">
+                        Creator: {activeLeague.creatorName}
+                      </p>
+                    </div>
+                  </div>
 
-                    {/* Standings Micro Grid Scroll list */}
-                    <div className="max-h-[110px] overflow-y-auto space-y-1">
-                      {leagueMembersMemoized.map((member, i) => {
-                        const isMe = member.playerId === user.id;
-                        return (
-                          <div
-                            key={member.playerId}
-                            className={`flex items-center justify-between px-2 py-1 text-xs rounded-sm ${isMe ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20" : "bg-slate-950/25 border border-slate-900/40"}`}
-                          >
-                            <div className="flex items-center gap-1.5">
-                              <span
-                                className={`font-bold font-mono text-[10px] w-4 ${i === 0 ? "text-yellow-400" : i === 1 ? "text-slate-400" : "text-slate-600"}`}
-                              >
-                                {i + 1}
-                              </span>
-                              <span className="font-semibold truncate max-w-[110px]">
-                                {member.nickname}
-                              </span>
-                            </div>
-                            <span className="font-bold font-mono text-white">
-                              {member.displayPoints} pts
+                  {/* Standings Micro Grid Scroll list */}
+                  <div className="max-h-[110px] overflow-y-auto space-y-1">
+                    {leagueMembersMemoized.map((member, i) => {
+                      const isMe = member.playerId === user.id;
+                      return (
+                        <div
+                          key={member.playerId}
+                          className={`flex items-center justify-between px-2 py-1 text-xs rounded-sm ${isMe ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20" : "bg-slate-950/25 border border-slate-900/40"}`}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`font-bold font-mono text-[10px] w-4 ${i === 0 ? "text-yellow-400" : i === 1 ? "text-slate-400" : "text-slate-600"}`}
+                            >
+                              {i + 1}
+                            </span>
+                            <span className="font-semibold truncate max-w-[110px]">
+                              {member.nickname}
                             </span>
                           </div>
-                        );
-                      })}
-                    </div>
+                          <span className="font-bold font-mono text-white">
+                            {member.displayPoints} pts
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
 
-                    {/* Actions controls inside selected league details */}
-                    <div className="flex items-center justify-between pt-1 font-mono text-[9px] text-slate-500">
-                      <button
-                        onClick={() => setActiveLeagueId(null)}
-                        className="bg-slate-800 text-slate-300 hover:text-white px-2 py-1 rounded cursor-pointer transition-colors"
-                      >
-                        ← Back List
-                      </button>
+                  {/* Actions controls inside selected league details */}
+                  <div className="flex items-center justify-between pt-1 font-mono text-[9px] text-slate-500">
+                    <button
+                      onClick={() => setActiveLeagueId(null)}
+                      className="bg-slate-800 text-slate-300 hover:text-white px-2 py-1 rounded cursor-pointer transition-colors"
+                    >
+                      ← Back
+                    </button>
 
-                      <div className="flex items-center gap-2">
-                        {activeLeague.creatorId === user.id && (
-                          <button
-                            onClick={() => {
-                              if (editingLeagueId === activeLeague.id) {
-                                setEditingLeagueId(null);
-                              } else {
-                                setEditingLeagueId(activeLeague.id);
-                                setEditIsPublic(activeLeague.isPublic ?? false);
-                                setEditLimitParticipants(!!activeLeague.maxParticipants);
-                                setEditMaxParticipantsInput(activeLeague.maxParticipants ? String(activeLeague.maxParticipants) : "10");
-                              }
-                            }}
-                            className="text-blue-400 hover:text-blue-300 px-2 py-1 rounded border border-blue-500/10 hover:border-blue-500/30 cursor-pointer transition-colors"
-                          >
-                            Manage Settings
-                          </button>
-                        )}
+                    <div className="flex items-center gap-2">
+                      {activeLeague.creatorId === user.id && (
                         <button
-                          onClick={() =>
-                            handleLeaveLeague(activeLeague.id)
-                          }
-                          className="text-red-400 hover:text-red-300 px-2 py-1 rounded border border-red-500/10 hover:border-red-500/30 cursor-pointer transition-colors"
+                          onClick={() => {
+                            if (editingLeagueId === activeLeague.id) {
+                              setEditingLeagueId(null);
+                            } else {
+                              setEditingLeagueId(activeLeague.id);
+                              setEditIsPublic(activeLeague.isPublic ?? false);
+                              setEditLimitParticipants(!!activeLeague.maxParticipants);
+                              setEditMaxParticipantsInput(activeLeague.maxParticipants ? String(activeLeague.maxParticipants) : "10");
+                            }
+                          }}
+                          className="text-blue-400 hover:text-blue-300 px-2 py-1 rounded border border-blue-500/10 hover:border-blue-500/30 cursor-pointer transition-colors"
                         >
-                          {activeLeague.creatorId === user.id
-                            ? "Delete/Disband"
-                            : "Leave League"}
+                          Manage Settings
                         </button>
-                      </div>
+                      )}
+                      <button
+                        onClick={() => handleLeaveLeague(activeLeague.id)}
+                        className="text-red-400 hover:text-red-300 px-2 py-1 rounded border border-red-500/10 hover:border-red-500/30 cursor-pointer transition-colors"
+                      >
+                        {activeLeague.creatorId === user.id
+                          ? "Delete/Disband"
+                          : "Leave League"}
+                      </button>
                     </div>
+                  </div>
 
-                    {/* Manage Settings Panel */}
-                    {editingLeagueId === activeLeague.id && (
-                      <div className="mt-2 p-2 bg-slate-950/80 rounded border border-blue-500/30 space-y-3">
-                        <h4 className="text-[10px] font-bold text-blue-400 uppercase">League Settings</h4>
+                  {/* Manage Settings Panel */}
+                  {editingLeagueId === activeLeague.id && (
+                    <div className="mt-2 p-2 bg-slate-950/80 rounded border border-blue-500/30 space-y-3">
+                      <h4 className="text-[10px] font-bold text-blue-400 uppercase">League Settings</h4>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            id="editLeagueVisibility"
+                            checked={editIsPublic}
+                            onChange={(e) => setEditIsPublic(e.target.checked)}
+                            className="w-3.5 h-3.5 rounded bg-slate-900 border-slate-700 text-blue-500 focus:ring-blue-500/50"
+                          />
+                          <label
+                            htmlFor="editLeagueVisibility"
+                            className="text-[10px] text-slate-400 font-sans cursor-pointer select-none"
+                          >
+                            Visible to global players (shown on leaderboards)
+                          </label>
+                        </div>
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
                             <input
                               type="checkbox"
-                              id="editLeagueVisibility"
-                              checked={editIsPublic}
-                              onChange={(e) => setEditIsPublic(e.target.checked)}
+                              id="editLimitParticipants"
+                              checked={editLimitParticipants}
+                              onChange={(e) => setEditLimitParticipants(e.target.checked)}
                               className="w-3.5 h-3.5 rounded bg-slate-900 border-slate-700 text-blue-500 focus:ring-blue-500/50"
                             />
                             <label
-                              htmlFor="editLeagueVisibility"
+                              htmlFor="editLimitParticipants"
                               className="text-[10px] text-slate-400 font-sans cursor-pointer select-none"
                             >
-                              Visible to global players (shown on leaderboards)
+                              Limit number of participants
                             </label>
                           </div>
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                id="editLimitParticipants"
-                                checked={editLimitParticipants}
-                                onChange={(e) => setEditLimitParticipants(e.target.checked)}
-                                className="w-3.5 h-3.5 rounded bg-slate-900 border-slate-700 text-blue-500 focus:ring-blue-500/50"
-                              />
-                              <label
-                                htmlFor="editLimitParticipants"
-                                className="text-[10px] text-slate-400 font-sans cursor-pointer select-none"
+                          {editLimitParticipants && (
+                            <div>
+                              <select
+                                value={editMaxParticipantsInput}
+                                onChange={(e) => setEditMaxParticipantsInput(e.target.value)}
+                                className="w-full text-xs bg-slate-950 border border-slate-800 p-2 rounded text-white focus:outline-hidden font-sans"
                               >
-                                Limit number of participants
-                              </label>
+                                {Array.from({ length: 20 }, (_, i) => i + 1).map((num) => (
+                                  <option key={num} value={num}>{num}</option>
+                                ))}
+                              </select>
                             </div>
-                            {editLimitParticipants && (
-                              <div>
-                                <select
-                                  value={editMaxParticipantsInput}
-                                  onChange={(e) => setEditMaxParticipantsInput(e.target.value)}
-                                  className="w-full text-xs bg-slate-950 border border-slate-800 p-2 rounded text-white focus:outline-hidden font-sans"
-                                >
-                                  {Array.from({ length: 20 }, (_, i) => i + 1).map(num => (
-                                    <option key={num} value={num}>{num}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            )}
-                          </div>
+                          )}
                         </div>
-                        <button
-                          onClick={handleUpdateLeagueSettings}
-                          className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-1.5 rounded text-[10px] transition-all"
-                        >
-                          Save Settings
-                        </button>
                       </div>
-                    )}
-                  </div>
-                );
-              })()
-            ) : (
-              /* GENERAL LEAGUES DIRECTORY LIST */
-              <div className="space-y-2 mt-3">
-                {!isUserInAnyLeague ? (
-                  <div className="text-center py-6 flex flex-col items-center">
-                    <p className="text-sm font-bold text-white mb-1">
-                      Get Started Here!
-                    </p>
-                    <p className="text-xs text-slate-400 font-sans max-w-[200px] mb-4">
-                      You need to be in a league to start predicting
-                      matches.
-                    </p>
-                    <div className="flex gap-2 w-full max-w-[320px] justify-center flex-wrap">
                       <button
-                        onClick={() => setLeagueTab("view")}
-                        className="flex-1 min-w-[80px] text-[10px] font-mono font-bold bg-purple-500 hover:bg-purple-600 px-3 py-2 rounded-lg text-white cursor-pointer transition-colors shadow-lg shadow-purple-500/20"
+                        onClick={handleUpdateLeagueSettings}
+                        className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-1.5 rounded text-[10px] transition-all"
                       >
-                        View Leagues
-                      </button>
-                      <button
-                        onClick={() => setLeagueTab("join")}
-                        className="flex-1 min-w-[80px] text-[10px] font-mono font-bold bg-blue-500 hover:bg-blue-600 px-3 py-2 rounded-lg text-white cursor-pointer transition-colors shadow-lg shadow-blue-500/20"
-                      >
-                        Join League
-                      </button>
-                      <button
-                        onClick={() => setLeagueTab("create")}
-                        className="flex-1 min-w-[80px] text-[10px] font-mono font-bold bg-emerald-500 hover:bg-emerald-600 px-3 py-2 rounded-lg text-white cursor-pointer transition-colors shadow-lg shadow-emerald-500/20"
-                      >
-                        Create League
+                        Save Settings
                       </button>
                     </div>
+                  )}
+                </div>
+              );
+            })()
+          ) : (
+            /* BROWSE / SEARCH ALL LEAGUES */
+            <div className="h-full flex flex-col">
+              {!isUserInAnyLeague && (
+                <div className="mb-2 flex items-center justify-between gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-2.5 py-1.5 shrink-0">
+                  <p className="text-[10px] text-emerald-300 font-sans">
+                    You're not in a league yet — pick one below to join.
+                  </p>
+                  <div className="flex gap-1 shrink-0">
+                    <button
+                      onClick={() => setLeagueTab("join")}
+                      className="text-[9px] font-mono font-bold bg-blue-500 hover:bg-blue-600 px-2 py-1 rounded text-white cursor-pointer transition-colors"
+                    >
+                      Join
+                    </button>
+                    <button
+                      onClick={() => setLeagueTab("create")}
+                      className="text-[9px] font-mono font-bold bg-emerald-500 hover:bg-emerald-600 px-2 py-1 rounded text-white cursor-pointer transition-colors"
+                    >
+                      Create
+                    </button>
                   </div>
-                ) : (
-                  <div className="space-y-1.5 max-h-[160px] overflow-y-auto">
-                    {userLeagues.map((league) => {
-                        const comp = getCompetitions().find(
-                          (c) => c.id === league.competitionId,
-                        );
-                        return (
-                          <div
-                            key={league.id}
-                            onClick={() => setActiveLeagueId(league.id)}
-                            className="flex items-center justify-between p-2.5 bg-slate-950/40 hover:bg-slate-950 border border-slate-850 hover:border-slate-800 rounded-xl cursor-pointer transition-all duration-200"
-                          >
-                            <div className="space-y-0.5 truncate pr-2">
-                              <h4 className="text-xs font-bold text-white truncate">
-                                {league.name}
-                              </h4>
-                              <p className="text-[9px] text-slate-500 font-mono font-medium truncate">
-                                {comp?.name || "Tournament"}
-                              </p>
-                            </div>
-                            <div className="text-right flex-shrink-0">
-                              <p className="text-[10px] text-emerald-400 font-mono font-bold">
-                                Active
-                              </p>
-                            </div>
-                          </div>
-                        );
-                      })}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+                </div>
+              )}
 
-        {/* TAB CONTENT: VIEW ALL LEAGUES */}
-        {leagueTab === "view" && (
-          <div className="space-y-3 mt-3">
-            <p className="text-[10px] text-slate-400">
-              Explore all registered leagues.
-            </p>
-
-            {/* Filters */}
-            <div className="grid grid-cols-2 gap-2 bg-slate-950/40 p-2 rounded-lg border border-slate-800">
-              <div className="col-span-2">
+              {/* Live search (matches admin panel pattern) */}
+              <div className="relative shrink-0">
+                <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
                 <input
                   type="text"
-                  placeholder="Filter by League Name"
+                  placeholder="Search by name, competition, sport or season..."
                   value={viewLeaguesSearchName}
                   onChange={(e) => setViewLeaguesSearchName(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                  className="w-full bg-slate-950/80 border border-slate-800 text-slate-100 text-xs pl-9 pr-4 py-2 rounded-xl focus:border-blue-500 focus:outline-hidden transition-colors"
                 />
               </div>
-              <select
-                value={viewLeaguesSport}
-                onChange={(e) => {
-                  setViewLeaguesSport(e.target.value as SportType | "ALL");
-                  setViewLeaguesCompId("ALL");
-                }}
-                className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500"
-              >
-                <option value="ALL">All Sports</option>
-                <option value={SportType.FOOTBALL}>Football</option>
-                <option value={SportType.RUGBY}>Rugby</option>
-              </select>
 
-              <select
-                value={viewLeaguesCompId}
-                onChange={(e) => setViewLeaguesCompId(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500"
-              >
-                <option value="ALL">All Tournaments</option>
-                {getCompetitions()
-                  .filter(c => viewLeaguesSport === "ALL" || c.sport === viewLeaguesSport)
-                  .map((comp) => (
-                  <option key={comp.id} value={comp.id}>{comp.name}</option>
-                ))}
-              </select>
-              <select
-                value={viewLeaguesSeason}
-                onChange={(e) => setViewLeaguesSeason(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500 col-span-2"
-              >
-                <option value="ALL">All Seasons</option>
-                <option value="2026">2026</option>
-                <option value="2025">2025</option>
-                <option value="2024">2024</option>
-              </select>
-            </div>
+              {/* Filters */}
+              <div className="grid grid-cols-2 gap-2 mt-2 shrink-0">
+                <select
+                  value={viewLeaguesSport}
+                  onChange={(e) => {
+                    setViewLeaguesSport(e.target.value as SportType | "ALL");
+                    setViewLeaguesCompId("ALL");
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-xs text-slate-300 focus:outline-hidden focus:border-blue-500"
+                >
+                  <option value="ALL">All Sports</option>
+                  {availableSports.map((sport) => (
+                    <option key={sport} value={sport}>
+                      {sportLabel(sport)}
+                    </option>
+                  ))}
+                </select>
 
-            {/* League List */}
-            <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
-              {leagues
-                .filter(l => {
-                  if (viewLeaguesSearchName && !l.name.toLowerCase().includes(viewLeaguesSearchName.toLowerCase())) return false;
+                <select
+                  value={viewLeaguesCompId}
+                  onChange={(e) => setViewLeaguesCompId(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-xs text-slate-300 focus:outline-hidden focus:border-blue-500"
+                >
+                  <option value="ALL">All Competitions</option>
+                  {competitions
+                    .filter((c) => viewLeaguesSport === "ALL" || c.sport === viewLeaguesSport)
+                    .map((comp) => (
+                      <option key={comp.id} value={comp.id}>
+                        {comp.name}
+                      </option>
+                    ))}
+                </select>
 
-                  const comp = getCompetitions().find(c => c.id === l.competitionId);
-                  if (viewLeaguesSport !== "ALL" && comp?.sport !== viewLeaguesSport) return false;
+                <select
+                  value={viewLeaguesSeason}
+                  onChange={(e) => setViewLeaguesSeason(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-xs text-slate-300 focus:outline-hidden focus:border-blue-500 col-span-2"
+                >
+                  <option value="ALL">All Seasons</option>
+                  <option value="2026">2026</option>
+                  <option value="2025">2025</option>
+                  <option value="2024">2024</option>
+                </select>
+              </div>
 
-                  if (viewLeaguesCompId !== "ALL" && l.competitionId !== viewLeaguesCompId) return false;
+              {/* Column headings */}
+              <div className="grid grid-cols-12 gap-2 px-2.5 mt-3 pb-1 border-b border-slate-800/60 text-[9px] uppercase tracking-wider font-mono text-slate-500 shrink-0">
+                <span className="col-span-3">League Name</span>
+                <span className="col-span-2 text-center">Members</span>
+                <span className="col-span-3">Competition</span>
+                <span className="col-span-2">Sport</span>
+                <span className="col-span-2">Season</span>
+              </div>
 
-                  const lSeason = comp?.season || l.season || l.createdAt.substring(0, 4);
-                  if (viewLeaguesSeason !== "ALL" && lSeason !== viewLeaguesSeason) return false;
-
-                  return true;
-                })
-                .sort((a, b) => a.id.localeCompare(b.id))
-                .map((league) => {
-                  const comp = getCompetitions().find((c) => c.id === league.competitionId);
-                  return (
-                    <div
-                      key={league.id}
-                      onClick={() => setActiveLeagueId(league.id)}
-                      className="flex items-center justify-between p-2.5 bg-slate-950/40 border border-slate-850 rounded-xl cursor-pointer hover:bg-slate-900 transition-colors group"
-                    >
-                      <div className="space-y-0.5 truncate pr-2">
-                        <h4 className="text-xs font-bold text-white truncate">
-                          {league.name}
-                        </h4>
-                        <p className="text-[9px] text-slate-500 font-mono font-medium truncate">
+              {/* League list (scrolls; hub itself stays fixed height) */}
+              <div className="flex-1 min-h-0 overflow-y-auto pr-1 mt-1.5 space-y-1.5">
+                {filteredLeagues.length === 0 ? (
+                  <p className="text-center text-[11px] text-slate-500 font-mono py-8">
+                    No leagues found.
+                  </p>
+                ) : (
+                  filteredLeagues.map((league) => {
+                    const comp = competitions.find((c) => c.id === league.competitionId);
+                    const isJoined = joinedLeagueIds.has(league.id);
+                    return (
+                      <div
+                        key={league.id}
+                        onClick={() => setActiveLeagueId(league.id)}
+                        className={`grid grid-cols-12 gap-2 items-center p-2.5 rounded-xl cursor-pointer transition-colors group ${isJoined ? "bg-emerald-500/5 border border-emerald-500/30 hover:bg-emerald-500/10" : "bg-slate-950/40 border border-slate-800 hover:bg-slate-900"}`}
+                      >
+                        <div className="col-span-3 min-w-0">
+                          <h4 className="text-xs font-bold text-white truncate">
+                            {league.name}
+                          </h4>
+                          {isJoined && (
+                            <span className="text-[8px] text-emerald-400 font-mono uppercase tracking-wide">
+                              Joined
+                            </span>
+                          )}
+                        </div>
+                        <div className="col-span-2 text-center text-[11px] text-slate-300 font-mono">
+                          {league.members?.length ?? 0}
+                        </div>
+                        <div className="col-span-3 min-w-0 text-[10px] text-slate-400 font-mono truncate">
                           {comp?.name || "Global"}
-                        </p>
+                        </div>
+                        <div className="col-span-2 min-w-0 text-[10px] text-slate-400 font-mono capitalize truncate">
+                          {comp ? sportLabel(comp.sport) : "—"}
+                        </div>
+                        <div className="col-span-2 text-[10px] text-slate-400 font-mono">
+                          {getLeagueSeason(league, comp)}
+                        </div>
                       </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className="text-[10px] text-slate-400 font-mono">
-                          {league.isPublic ? "Public" : "Private"}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          ))}
 
-        {/* TAB CONTENT: 2. JOIN ANOTHER CONTEST LEAGUE */}
+        {/* TAB CONTENT: JOIN ANOTHER CONTEST LEAGUE */}
         {leagueTab === "join" && (
-          <div className="space-y-3 mt-3">
+          <div className="h-full overflow-y-auto pr-1 space-y-3">
             <p className="text-[10px] text-slate-400">
-              Enter league Code/ID and secret password key to enter:
+              Enter league Code/ID and password key:
             </p>
 
             <div className="space-y-2 font-mono">
@@ -520,7 +523,7 @@ export default function LeagueManagementPanel({
               </div>
               <div>
                 <span className="text-[9px] text-slate-500 block uppercase mb-1">
-                  Secret Password
+                  Password Key
                 </span>
                 <input
                   type="password"
@@ -534,32 +537,30 @@ export default function LeagueManagementPanel({
 
             <div className="flex gap-2 font-mono text-[10px]">
               <button
-                onClick={() => setLeagueTab("joined")}
-                className="flex-1 bg-slate-800 hover:bg-slate-755 text-slate-300 py-1.5 rounded cursor-pointer transition-all"
+                onClick={handleJoinLeague}
+                className={`${btnPrimary} flex-1 py-1.5`}
               >
-                Cancel
+                Join League
               </button>
               <button
-                onClick={handleJoinLeague}
-                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-1.5 rounded cursor-pointer transition-all"
+                onClick={() => setLeagueTab("view")}
+                className={`${btnSecondary} flex-1 py-1.5`}
               >
-                Enter League
+                Cancel
               </button>
             </div>
           </div>
         )}
 
-        {/* TAB CONTENT: 3. CREATE BRAND NEW PRIVATE TOURNAMENT */}
+        {/* TAB CONTENT: CREATE BRAND NEW PRIVATE TOURNAMENT */}
         {leagueTab === "create" && (
-          <div className="space-y-3 mt-3">
-            <p className="text-[10px] text-slate-400">
-              Build your league.
-            </p>
+          <div className="h-full overflow-y-auto pr-1 space-y-3">
+            <p className="text-[10px] text-slate-400">Build your league.</p>
 
             <div className="space-y-2">
               <div>
                 <span className="text-[9px] text-slate-500 font-mono block uppercase mb-1">
-                  League Title
+                  League Name
                 </span>
                 <input
                   type="text"
@@ -569,26 +570,32 @@ export default function LeagueManagementPanel({
                   className="w-full text-xs bg-slate-950 border border-slate-800 hover:border-slate-700 p-2 rounded text-white focus:outline-hidden focus:ring-1 focus:ring-blue-500"
                 />
               </div>
-              <div>
-                <span className="text-[9px] text-slate-500 font-mono block uppercase mb-1">
-                  Associated Sports Competition
-                </span>
-                <div className="flex gap-2">
+
+              <div className="flex gap-2">
+                <div className="w-1/2">
+                  <span className="text-[9px] text-slate-500 font-mono block uppercase mb-1">
+                    Sport
+                  </span>
                   <select
-                    value={leagueCompSelect}
-                    onChange={(e) => setLeagueCompSelect(e.target.value)}
-                    className="w-2/3 text-xs bg-slate-950 border border-slate-800 p-2 rounded text-white focus:outline-hidden font-sans"
+                    value={leagueSportInput}
+                    onChange={(e) => handleSportChange(e.target.value as SportType)}
+                    className="w-full text-xs bg-slate-950 border border-slate-800 p-2 rounded text-white focus:outline-hidden font-sans"
                   >
-                    {getCompetitions().map((comp) => (
-                      <option key={comp.id} value={comp.id}>
-                        {comp.name}
+                    {availableSports.map((sport) => (
+                      <option key={sport} value={sport}>
+                        {sportLabel(sport)}
                       </option>
                     ))}
                   </select>
+                </div>
+                <div className="w-1/2">
+                  <span className="text-[9px] text-slate-500 font-mono block uppercase mb-1">
+                    Season
+                  </span>
                   <select
                     value={leagueSeasonInput}
                     onChange={(e) => setLeagueSeasonInput(e.target.value)}
-                    className="w-1/3 text-xs bg-slate-950 border border-slate-800 p-2 rounded text-white focus:outline-hidden font-sans"
+                    className="w-full text-xs bg-slate-950 border border-slate-800 p-2 rounded text-white focus:outline-hidden font-sans"
                   >
                     <option value="2026">2026</option>
                     <option value="2025">2025</option>
@@ -596,28 +603,71 @@ export default function LeagueManagementPanel({
                   </select>
                 </div>
               </div>
+
+              <div>
+                <span className="text-[9px] text-slate-500 font-mono block uppercase mb-1">
+                  Competition
+                </span>
+                <select
+                  value={leagueCompSelect}
+                  onChange={(e) => setLeagueCompSelect(e.target.value)}
+                  className="w-full text-xs bg-slate-950 border border-slate-800 p-2 rounded text-white focus:outline-hidden font-sans"
+                >
+                  {createCompetitions.length === 0 ? (
+                    <option value="">No competitions available</option>
+                  ) : (
+                    createCompetitions.map((comp) => (
+                      <option key={comp.id} value={comp.id}>
+                        {comp.name}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+
               <div>
                 <span className="text-[9px] text-slate-500 font-mono block uppercase mb-1">
                   Enter League Password
                 </span>
-                <input
-                  type="password"
-                  placeholder="Enter a secret password..."
-                  value={leaguePasswordInput}
-                  onChange={(e) =>
-                    setLeaguePasswordInput(e.target.value)
-                  }
-                  className="w-full text-xs bg-slate-950 border border-slate-800 p-2 rounded text-white focus:outline-hidden focus:ring-1 focus:ring-blue-500"
-                />
+                <div className="relative">
+                  <input
+                    type={showLeaguePassword ? "text" : "password"}
+                    placeholder="Enter a secret password..."
+                    value={leaguePasswordInput}
+                    onChange={(e) => setLeaguePasswordInput(e.target.value)}
+                    className="w-full text-xs bg-slate-950 border border-slate-800 p-2 pr-16 rounded text-white focus:outline-hidden focus:ring-1 focus:ring-blue-500 font-mono"
+                  />
+                  <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowLeaguePassword((v) => !v)}
+                      title={showLeaguePassword ? "Hide password" : "Show password"}
+                      className="p-1.5 text-slate-500 hover:text-slate-200 cursor-pointer transition-colors"
+                    >
+                      {showLeaguePassword ? (
+                        <EyeOff className="w-3.5 h-3.5" />
+                      ) : (
+                        <Eye className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleGeneratePassword}
+                      title="Generate strong password"
+                      className="p-1.5 text-emerald-500 hover:text-emerald-300 cursor-pointer transition-colors"
+                    >
+                      <Wand2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
               </div>
+
               <div className="flex items-center gap-2">
                 <input
                   type="checkbox"
                   id="leagueVisibility"
                   checked={leagueIsPublicInput}
-                  onChange={(e) =>
-                    setLeagueIsPublicInput(e.target.checked)
-                  }
+                  onChange={(e) => setLeagueIsPublicInput(e.target.checked)}
                   className="w-3.5 h-3.5 rounded bg-slate-900 border-slate-700 text-blue-500 focus:ring-blue-500/50"
                 />
                 <label
@@ -651,7 +701,7 @@ export default function LeagueManagementPanel({
                       onChange={(e) => setMaxParticipantsInput(e.target.value)}
                       className="w-full text-xs bg-slate-950 border border-slate-800 p-2 rounded text-white focus:outline-hidden font-sans"
                     >
-                      {Array.from({ length: 20 }, (_, i) => i + 1).map(num => (
+                      {Array.from({ length: 20 }, (_, i) => i + 1).map((num) => (
                         <option key={num} value={num}>{num}</option>
                       ))}
                     </select>
@@ -662,16 +712,16 @@ export default function LeagueManagementPanel({
 
             <div className="flex gap-2 font-mono text-[10px]">
               <button
-                onClick={() => setLeagueTab("joined")}
-                className="flex-1 bg-slate-800 hover:bg-slate-755 text-slate-300 py-1.5 rounded cursor-pointer transition-all"
+                onClick={handleCreateLeague}
+                className={`${btnPrimary} flex-1 py-1.5`}
               >
-                Cancel
+                Create League
               </button>
               <button
-                onClick={handleCreateLeague}
-                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-1.5 rounded cursor-pointer transition-all"
+                onClick={() => setLeagueTab("view")}
+                className={`${btnSecondary} flex-1 py-1.5`}
               >
-                Build Tier
+                Cancel
               </button>
             </div>
           </div>

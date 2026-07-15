@@ -59,6 +59,32 @@ export interface Match {
   matchDate: string;
   status: "upcoming" | "live" | "completed";
   season?: string;
+  /**
+   * Optional "high stakes" label for premium fixtures (e.g. "Derby",
+   * "Barrage Bout", "Cup Run"). Rendered as a badge on the fixture card and
+   * reserved for upcoming point-multiplier mechanics.
+   */
+  matchTag?: string;
+
+  // --- Live API-Sports data (see 20260715_api_automation_schema.sql) ---
+  /** Competition round/stage label from the data provider (e.g. "Round 12"). */
+  roundName?: string;
+  /** Venue / stadium name from the data provider. */
+  venueName?: string;
+  /** Pre-match decimal odds for a home win. */
+  oddsHomeWin?: number;
+  /** Pre-match decimal odds for a draw. */
+  oddsDraw?: number;
+  /** Pre-match decimal odds for an away win. */
+  oddsAwayWin?: number;
+  /** Automated point multiplier applied to this fixture (defaults to 1.0). */
+  baseMultiplier?: number;
+  /** Live in-play home score ("As It Stands"). */
+  provisionalHomeScore?: number;
+  /** Live in-play away score ("As It Stands"). */
+  provisionalAwayScore?: number;
+  /** Live match clock, as text (e.g. "45+2", "HT", "78"). */
+  matchMinute?: string;
 }
 
 export interface Prediction {
@@ -69,6 +95,11 @@ export interface Prediction {
   predictedAwayScore: number;
   pointsEarned?: number;
   createdAt: string;
+  /**
+   * Live running score this prediction is currently tracking, before the match
+   * is settled ("As It Stands"). See 20260715_api_automation_schema.sql.
+   */
+  provisionalPoints?: number;
 }
 
 export interface League {

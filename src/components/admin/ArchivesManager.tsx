@@ -4,7 +4,6 @@ import {
   Download,
   Search,
   AlertTriangle,
-  Trash2,
   FileJson,
   Mail,
 } from 'lucide-react';
@@ -152,14 +151,6 @@ export default function ArchivesManager({
                   </td>
                   <td className="py-3 px-4 text-right space-x-1.5">
                     <button
-                      onClick={() => alert('Account restoration initiated')}
-                      className="p-1 px-2.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 rounded-lg cursor-pointer transition-colors text-[9px] font-mono inline-flex items-center gap-1 font-bold"
-                      title="Restore User Account"
-                    >
-                      <RefreshCw className="w-3 h-3" />
-                      <span>RESTORE</span>
-                    </button>
-                    <button
                       onClick={() => {
                         const dataStr =
                           'data:text/json;charset=utf-8,' +
@@ -179,21 +170,6 @@ export default function ArchivesManager({
                     >
                       <FileJson className="w-3 h-3 text-emerald-400" />
                       <span>JSON BUNDLE</span>
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (
-                          confirm(
-                            `Permanently purge archive for ${b.deletedUser?.nickname}? This cannot be undone.`
-                          )
-                        ) {
-                          alert('Permanently Purge initiated');
-                        }
-                      }}
-                      className="p-1 px-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-lg cursor-pointer transition-colors text-[9px] font-mono inline-flex items-center gap-1 font-bold"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                      <span>PURGE</span>
                     </button>
                   </td>
                 </tr>

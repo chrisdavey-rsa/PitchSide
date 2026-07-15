@@ -120,7 +120,8 @@ $$;
 
 -- --------------------------------------------------------------------------
 -- Drop allowance per competition.
--- EPL = 4, Championship = 6, everything else (rugby / cups) = 0.
+-- EPL = 4, Championship = 6, Scottish Premiership = 4, everything else
+-- (rugby / cups) = 0.
 -- --------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.pitchside_competition_drops(p_competition_id text)
 RETURNS integer
@@ -130,6 +131,7 @@ AS $$
   SELECT CASE p_competition_id
     WHEN 'f-epl' THEN 4
     WHEN 'f-championship' THEN 6
+    WHEN 'f-spfl' THEN 4
     ELSE 0
   END;
 $$;

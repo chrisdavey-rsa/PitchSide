@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuthStatus } from '../hooks/useAuthStatus';
@@ -14,6 +14,7 @@ import {
   useLeaguesQuery,
   useUserLeaguesQuery,
   useLeagueMembersQuery,
+  useLeaguesMembershipQuery,
   useLeaderboardQuery,
   mapLeaderboardForSport,
   mergeMatches,
@@ -63,15 +64,22 @@ import { calculatePoints } from "../utils";
 import GlobalNavigation from './Dashboard/GlobalNavigation';
 import WelcomeHeader from './Dashboard/WelcomeHeader';
 import LeaderboardTable from './Dashboard/LeaderboardTable';
-import type { LeaderboardItem } from './Dashboard/LeaderboardTable';
+import type { LeaderboardItem, LeaderboardScope } from './Dashboard/Leaderboard';
 import LeagueHub from './Dashboard/LeagueHub';
 import LeagueManagementPanel from './Dashboard/LeagueManagementPanel';
 import MobileNavigation from './Dashboard/MobileNavigation';
 import MatchPredictor from './Dashboard/MatchPredictor';
 import { getCountryFlag } from './Dashboard/shared';
 import OnboardingTour, { type TourStep } from './OnboardingTour';
+import CommunityShieldEvent, {
+  isCommunityShieldOpen,
+  isCommunityShieldScheduled,
+} from './events/CommunityShieldEvent';
+import { RadialOrigin, radialClip } from '../radial';
 
 const ONBOARDING_STORAGE_KEY = "hasCompletedOnboarding";
+const onboardingKeyFor = (userId?: string) =>
+  userId ? `${ONBOARDING_STORAGE_KEY}_${userId}` : ONBOARDING_STORAGE_KEY;
 
 const ONBOARDING_STEPS: TourStep[] = [
   {
@@ -84,7 +92,7 @@ const ONBOARDING_STEPS: TourStep[] = [
     targetId: "tour-league-manager",
     title: "Leagues Are Your Home Base",
     description:
-      "Create a private league or join an existing one with a code and password. You need to be in at least one league before the Match Predictor unlocks.",
+      "Use the Leagues button in the top navigation to create a private league or join one with a code and password. You need to be in at least one league before the Match Predictor unlocks.",
   },
   {
     targetId: "tour-nav-buttons",
@@ -97,12 +105,14 @@ const ONBOARDING_STEPS: TourStep[] = [
 interface DashboardProps {
   user: UserProfile;
   onLogout: () => void;
-  onOpenRules: () => void;
+  onOpenRules: (origin?: RadialOrigin) => void;
   registeredUsers: UserProfile[];
   onOpenAdmin: () => void;
-  onOpenAccount: () => void;
+  onOpenAccount: (origin?: RadialOrigin) => void;
   externalSelectedLeagueId?: string | null;
   onClearExternalLeagueSelection?: () => void;
+  /** One-shot toast shown when the dashboard first mounts (e.g. post-verification welcome). */
+  initialToast?: string | null;
 }
 
 export default function Dashboard({
@@ -114,6 +124,7 @@ export default function Dashboard({
   onOpenAccount,
   externalSelectedLeagueId,
   onClearExternalLeagueSelection,
+  initialToast,
 }: DashboardProps) {
   const authStatus = useAuthStatus();
   const queryClient = useQueryClient();
@@ -122,19 +133,41 @@ export default function Dashboard({
   const isSandbox =
     !user || !user.id || user.id.startsWith("usr_") || user.id === "user-admin";
   const [selectedSport, setSelectedSport] = useState<SportType | null>(user?.preferredSport ?? null);
-  const [globalLeaderboardSport, setGlobalLeaderboardSport] = useState<SportType>(SportType.FOOTBALL);
+  // Default the consolidated leaderboard to the user's preferred sport so the
+  // first thing they see is relevant to them.
+  const [globalLeaderboardSport, setGlobalLeaderboardSport] = useState<SportType>(
+    user?.preferredSport ?? SportType.FOOTBALL,
+  );
   const [selectedCompId, setSelectedCompId] = useState<string | null>(null);
+  const [showLeagues, setShowLeagues] = useState(false);
+  const [leaguesOrigin, setLeaguesOrigin] = useState<RadialOrigin | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showShieldEvent, setShowShieldEvent] = useState(false);
 
+  const dismissShieldEvent = () => {
+    if (user?.id) {
+      localStorage.setItem(`community_shield_dismissed_${user.id}`, "true");
+    }
+    setShowShieldEvent(false);
+  };
+
+  // Show the intro walkthrough the first time each user lands on the site.
   useEffect(() => {
-    if (!localStorage.getItem(ONBOARDING_STORAGE_KEY)) {
+    if (!localStorage.getItem(onboardingKeyFor(user?.id))) {
       setShowOnboarding(true);
     }
-  }, []);
+  }, [user?.id]);
 
   const completeOnboarding = () => {
-    localStorage.setItem(ONBOARDING_STORAGE_KEY, "true");
+    localStorage.setItem(onboardingKeyFor(user?.id), "true");
     setShowOnboarding(false);
+  };
+
+  const openLeaguesModal = (origin?: RadialOrigin) => {
+    setLeaguesOrigin(origin ?? null);
+    setActiveLeagueId(null);
+    setLeagueTab("view");
+    setShowLeagues(true);
   };
 
   const [localMatches, setLocalMatches] = useState<Match[]>(() => {
@@ -151,6 +184,22 @@ export default function Dashboard({
     () => mergeMatches(dbMatches, localMatches),
     [dbMatches, localMatches],
   );
+
+  // The Golden Ticket / Community Shield promo only makes sense when an actual
+  // Community Shield fixture is scheduled. Drives both the promo pop-up here and
+  // the Golden Ticket section in the Rules guide.
+  const communityShieldScheduled = useMemo(
+    () => isCommunityShieldScheduled(allMatches),
+    [allMatches],
+  );
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const dismissed = localStorage.getItem(`community_shield_dismissed_${user.id}`);
+    if (!dismissed && communityShieldScheduled && isCommunityShieldOpen()) {
+      setShowShieldEvent(true);
+    }
+  }, [user?.id, communityShieldScheduled]);
 
   const { data: leaderboardList = [] } = useLeaderboardQuery(user?.id, allMatches);
 
@@ -174,6 +223,15 @@ export default function Dashboard({
 
   // Simple feedback notification states
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Show a welcome toast when routed here after email verification, etc.
+  useEffect(() => {
+    if (initialToast) {
+      setToastMessage(initialToast);
+      const t = setTimeout(() => setToastMessage(null), 6000);
+      return () => clearTimeout(t);
+    }
+  }, [initialToast]);
 
   // Listen to local sandbox storage updates across tabs
   useEffect(() => {
@@ -224,6 +282,7 @@ export default function Dashboard({
   const [leagueNameInput, setLeagueNameInput] = useState("");
   const [leaguePasswordInput, setLeaguePasswordInput] = useState("");
   const [leagueSeasonInput, setLeagueSeasonInput] = useState("2026");
+  const [leagueSportInput, setLeagueSportInput] = useState<SportType>(SportType.FOOTBALL);
   const [leagueCompSelect, setLeagueCompSelect] = useState("f-epl");
   const [leagueIsPublicInput, setLeagueIsPublicInput] = useState(true);
   const [limitParticipants, setLimitParticipants] = useState(false);
@@ -234,8 +293,8 @@ export default function Dashboard({
   const [activeLeagueJoinPassword, setActiveLeagueJoinPassword] = useState("");
   const [isJoiningActiveLeague, setIsJoiningActiveLeague] = useState(false);
 
-  const [leagueTab, setLeagueTab] = useState<"joined" | "create" | "join" | "view">(
-    "joined",
+  const [leagueTab, setLeagueTab] = useState<"view" | "join" | "create">(
+    "view",
   );
 
   const [viewLeaguesSearchName, setViewLeaguesSearchName] = useState("");
@@ -445,7 +504,7 @@ export default function Dashboard({
         `ðŸŽ‰ Created League: "${name}" successfully! Code: ${newLeagueId}`,
       );
 
-      setLeagueTab("joined");
+      setLeagueTab("view");
       setActiveLeagueId(newLeagueId);
     } catch (err) {
       console.error("Failed writing cloud league:", err);
@@ -482,7 +541,7 @@ export default function Dashboard({
     if (userLeagues.some(l => l.id === target.id)) {
       triggerToast("â„¹ï¸ Already joined.");
       setActiveLeagueId(target.id);
-      setLeagueTab("joined");
+      setLeagueTab("view");
       return;
     }
 
@@ -499,7 +558,7 @@ export default function Dashboard({
 
       setJoinCodeInput("");
       setJoinPasswordInput("");
-      setLeagueTab("joined");
+      setLeagueTab("view");
       setActiveLeagueId(target.id);
 
       triggerToast(`ðŸŽ‰ Joined "${target.name}"!`);
@@ -657,6 +716,45 @@ export default function Dashboard({
 
   const isUserInAnyLeague = userLeagues.length > 0;
 
+  // ── "My League" leaderboard scope ────────────────────────────────────────
+  // Default the leaderboard to the user's most populated private league so
+  // their local competition is front-and-center; Global requires a click.
+  const privateLeagues = useMemo(
+    () => userLeagues.filter((l) => !l.isPublic),
+    [userLeagues],
+  );
+  const privateLeagueIds = useMemo(
+    () => privateLeagues.map((l) => l.id),
+    [privateLeagues],
+  );
+  const { data: leaguesMembership = {} } = useLeaguesMembershipQuery(privateLeagueIds);
+
+  const targetPrivateLeague = useMemo(() => {
+    if (privateLeagues.length === 0) return null;
+    return [...privateLeagues].sort(
+      (a, b) =>
+        (leaguesMembership[b.id]?.length || 0) -
+        (leaguesMembership[a.id]?.length || 0),
+    )[0];
+  }, [privateLeagues, leaguesMembership]);
+
+  const leagueLeaderboard = useMemo(() => {
+    if (!targetPrivateLeague) return [];
+    const memberIds = leaguesMembership[targetPrivateLeague.id] || [];
+    const records = leaderboardList.filter((r) => memberIds.includes(r.playerId));
+    return mapLeaderboardForSport(records, globalLeaderboardSport, user.id);
+  }, [targetPrivateLeague, leaguesMembership, leaderboardList, globalLeaderboardSport, user.id]);
+
+  const [leaderboardScope, setLeaderboardScope] = useState<LeaderboardScope>("global");
+  const leaderboardScopeInitialized = useRef(false);
+  useEffect(() => {
+    if (leaderboardScopeInitialized.current) return;
+    if (privateLeagues.length > 0) {
+      setLeaderboardScope("league");
+      leaderboardScopeInitialized.current = true;
+    }
+  }, [privateLeagues.length]);
+
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6 animate-fade-in pb-20 md:pb-0">
       <GlobalNavigation
@@ -665,6 +763,8 @@ export default function Dashboard({
         onOpenRules={onOpenRules}
         onOpenAdmin={onOpenAdmin}
         onOpenAccount={onOpenAccount}
+        onOpenLeagues={openLeaguesModal}
+        isUserInAnyLeague={isUserInAnyLeague}
         onResetState={() => {
           setActiveLeagueId(null);
           setSelectedSport(null);
@@ -735,66 +835,13 @@ export default function Dashboard({
       })() : (
         <>
           {/* Personalized Welcome Jumbotron Header */}
-          <motion.div
-            transition={{ duration: 0.5, ease: "easeInOut" }}
-            className={`grid grid-cols-1 gap-6 ${isUserInAnyLeague ? "md:grid-cols-3" : ""}`}
-          >
+          <motion.div transition={{ duration: 0.5, ease: "easeInOut" }}>
             <WelcomeHeader
               user={user}
               userPoints={userPoints}
               totalPredicted={totalPredicted}
               perfectPredictions={perfectPredictions}
               isUserInAnyLeague={isUserInAnyLeague}
-            />
-            <LeagueManagementPanel
-              user={user}
-              leagues={leagues}
-              userLeagues={userLeagues}
-              isUserInAnyLeague={isUserInAnyLeague}
-              leagueTab={leagueTab}
-              setLeagueTab={setLeagueTab}
-              activeLeagueId={activeLeagueId}
-              setActiveLeagueId={setActiveLeagueId}
-              leagueMembersMemoized={leagueMembersMemoized}
-              editingLeagueId={editingLeagueId}
-              setEditingLeagueId={setEditingLeagueId}
-              editIsPublic={editIsPublic}
-              setEditIsPublic={setEditIsPublic}
-              editLimitParticipants={editLimitParticipants}
-              setEditLimitParticipants={setEditLimitParticipants}
-              editMaxParticipantsInput={editMaxParticipantsInput}
-              setEditMaxParticipantsInput={setEditMaxParticipantsInput}
-              viewLeaguesSearchName={viewLeaguesSearchName}
-              setViewLeaguesSearchName={setViewLeaguesSearchName}
-              viewLeaguesSport={viewLeaguesSport}
-              setViewLeaguesSport={setViewLeaguesSport}
-              viewLeaguesCompId={viewLeaguesCompId}
-              setViewLeaguesCompId={setViewLeaguesCompId}
-              viewLeaguesSeason={viewLeaguesSeason}
-              setViewLeaguesSeason={setViewLeaguesSeason}
-              leagueNameInput={leagueNameInput}
-              setLeagueNameInput={setLeagueNameInput}
-              leaguePasswordInput={leaguePasswordInput}
-              setLeaguePasswordInput={setLeaguePasswordInput}
-              leagueSeasonInput={leagueSeasonInput}
-              setLeagueSeasonInput={setLeagueSeasonInput}
-              leagueCompSelect={leagueCompSelect}
-              setLeagueCompSelect={setLeagueCompSelect}
-              leagueIsPublicInput={leagueIsPublicInput}
-              setLeagueIsPublicInput={setLeagueIsPublicInput}
-              limitParticipants={limitParticipants}
-              setLimitParticipants={setLimitParticipants}
-              maxParticipantsInput={maxParticipantsInput}
-              setMaxParticipantsInput={setMaxParticipantsInput}
-              joinCodeInput={joinCodeInput}
-              setJoinCodeInput={setJoinCodeInput}
-              joinPasswordInput={joinPasswordInput}
-              setJoinPasswordInput={setJoinPasswordInput}
-              handleCreateLeague={handleCreateLeague}
-              handleJoinLeague={handleJoinLeague}
-              handleLeaveLeague={handleLeaveLeague}
-              handleUpdateLeagueSettings={handleUpdateLeagueSettings}
-              triggerToast={triggerToast}
             />
           </motion.div>
 
@@ -820,11 +867,17 @@ export default function Dashboard({
 
           <LeaderboardTable
             user={user}
-            displayLeaderboard={displayLeaderboard}
+            displayLeaderboard={
+              leaderboardScope === "league" ? leagueLeaderboard : displayLeaderboard
+            }
             globalLeaderboardSport={globalLeaderboardSport}
             setGlobalLeaderboardSport={setGlobalLeaderboardSport}
             onViewProfile={(player) => setViewingProfile(player)}
             triggerToast={triggerToast}
+            scope={leaderboardScope}
+            setScope={setLeaderboardScope}
+            hasPrivateLeague={privateLeagues.length > 0}
+            leagueName={targetPrivateLeague?.name}
           />
         </>
       )}
@@ -961,12 +1014,97 @@ export default function Dashboard({
         onOpenAccount={onOpenAccount}
         onOpenRules={onOpenRules}
         onOpenAdmin={onOpenAdmin}
+        onOpenLeagues={openLeaguesModal}
+        isUserInAnyLeague={isUserInAnyLeague}
         onLogout={onLogout}
       />
+
+      {/* Leagues Overlay — radial expansion from the click point */}
+      <AnimatePresence>
+        {showLeagues && (
+          <motion.div
+            {...radialClip(leaguesOrigin)}
+            className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-4 overflow-y-auto"
+          >
+            <div
+              className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm"
+              onClick={() => setShowLeagues(false)}
+            />
+            <div className="relative w-full max-w-lg my-8">
+              <LeagueManagementPanel
+                user={user}
+                leagues={leagues}
+                userLeagues={userLeagues}
+                isUserInAnyLeague={isUserInAnyLeague}
+                leagueTab={leagueTab}
+                setLeagueTab={setLeagueTab}
+                activeLeagueId={activeLeagueId}
+                setActiveLeagueId={(id) => {
+                  setActiveLeagueId(id);
+                  if (id) setShowLeagues(false);
+                }}
+                leagueMembersMemoized={leagueMembersMemoized}
+                editingLeagueId={editingLeagueId}
+                setEditingLeagueId={setEditingLeagueId}
+                editIsPublic={editIsPublic}
+                setEditIsPublic={setEditIsPublic}
+                editLimitParticipants={editLimitParticipants}
+                setEditLimitParticipants={setEditLimitParticipants}
+                editMaxParticipantsInput={editMaxParticipantsInput}
+                setEditMaxParticipantsInput={setEditMaxParticipantsInput}
+                viewLeaguesSearchName={viewLeaguesSearchName}
+                setViewLeaguesSearchName={setViewLeaguesSearchName}
+                viewLeaguesSport={viewLeaguesSport}
+                setViewLeaguesSport={setViewLeaguesSport}
+                viewLeaguesCompId={viewLeaguesCompId}
+                setViewLeaguesCompId={setViewLeaguesCompId}
+                viewLeaguesSeason={viewLeaguesSeason}
+                setViewLeaguesSeason={setViewLeaguesSeason}
+                leagueNameInput={leagueNameInput}
+                setLeagueNameInput={setLeagueNameInput}
+                leaguePasswordInput={leaguePasswordInput}
+                setLeaguePasswordInput={setLeaguePasswordInput}
+                leagueSeasonInput={leagueSeasonInput}
+                setLeagueSeasonInput={setLeagueSeasonInput}
+                leagueSportInput={leagueSportInput}
+                setLeagueSportInput={setLeagueSportInput}
+                leagueCompSelect={leagueCompSelect}
+                setLeagueCompSelect={setLeagueCompSelect}
+                leagueIsPublicInput={leagueIsPublicInput}
+                setLeagueIsPublicInput={setLeagueIsPublicInput}
+                limitParticipants={limitParticipants}
+                setLimitParticipants={setLimitParticipants}
+                maxParticipantsInput={maxParticipantsInput}
+                setMaxParticipantsInput={setMaxParticipantsInput}
+                joinCodeInput={joinCodeInput}
+                setJoinCodeInput={setJoinCodeInput}
+                joinPasswordInput={joinPasswordInput}
+                setJoinPasswordInput={setJoinPasswordInput}
+                handleCreateLeague={handleCreateLeague}
+                handleJoinLeague={handleJoinLeague}
+                handleLeaveLeague={handleLeaveLeague}
+                handleUpdateLeagueSettings={handleUpdateLeagueSettings}
+                triggerToast={triggerToast}
+                onClose={() => setShowLeagues(false)}
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {showOnboarding && !activeLeagueId && (
         <OnboardingTour steps={ONBOARDING_STEPS} onComplete={completeOnboarding} />
       )}
+
+      <AnimatePresence>
+        {showShieldEvent && !showOnboarding && !showLeagues && (
+          <CommunityShieldEvent
+            user={user}
+            triggerToast={triggerToast}
+            onClose={dismissShieldEvent}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

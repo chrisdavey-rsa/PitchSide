@@ -45,10 +45,12 @@ export function calculateFootballPoints(
 /**
  * Calculates scores based on Rugby Rules:
  *  - Correct winning team and exact correct margin: 5 points
- *  - Correct winning team and predicted margin is within 3 points: 3 points
- *  - Correct winning team and predicted margin is within 5 points: 1 point
- *  - Correct winning team, predicted margin off by more than 5 points: 0 points
+ *  - Correct winning team and margin difference within 7 points: 3 points
+ *  - Correct winning team and margin difference within 10 points: 1 point
+ *  - Correct winning team, margin difference greater than 10 points: 0 points
  *  - Incorrect outcome: 0 points
+ *
+ * NOTE: keep in sync with the SQL RPC public.pitchside_rugby_points.
  */
 export function calculateRugbyPoints(
   predictedHome: number,
@@ -74,13 +76,13 @@ export function calculateRugbyPoints(
     return 5;
   }
 
-  // Correct winning team and margin within 3 points
-  if (marginDifference <= 3) {
+  // Correct winning team and margin difference within 7 points
+  if (marginDifference <= 7) {
     return 3;
   }
 
-  // Correct winning team and margin within 5 points
-  if (marginDifference <= 5) {
+  // Correct winning team and margin difference within 10 points
+  if (marginDifference <= 10) {
     return 1;
   }
 

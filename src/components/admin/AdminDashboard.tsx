@@ -6,6 +6,10 @@ import {
   CheckCircle2,
   RefreshCw,
   AlertTriangle,
+  Activity,
+  Repeat,
+  Target,
+  Zap,
 } from 'lucide-react';
 import { supabase } from '../../supabase';
 
@@ -90,47 +94,90 @@ export default function AdminDashboard({ onNavigate }: AdminDashboardProps) {
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-      <button
-        onClick={() => onNavigate('players')}
-        className="bg-slate-900/50 hover:bg-slate-800/80 cursor-pointer border border-slate-800 p-5 rounded-xl space-y-2 relative overflow-hidden group text-left transition-colors"
-      >
-        <h4 className="text-[10px] font-bold font-mono text-slate-500 uppercase tracking-widest flex items-center gap-2">
-          <Users className="w-3.5 h-3.5 text-blue-400" /> Total Players
+    <div className="space-y-6">
+      {/* Live metrics (wired) */}
+      <div>
+        <h4 className="text-xs font-bold text-slate-300 font-mono uppercase tracking-wider flex items-center gap-1.5 mb-1">
+          <Activity className="w-4 h-4 text-purple-400" /> Game Health Analytics
         </h4>
-        <div className="text-3xl font-bold text-white font-mono">{stats.players}</div>
-      </button>
+        <p className="text-[10px] text-slate-500 font-sans mb-3">
+          Live platform vitals. Click a card to drill into the underlying records.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <button
+            onClick={() => onNavigate('players')}
+            className="bg-slate-900/50 hover:bg-slate-800/80 cursor-pointer border border-slate-800 p-5 rounded-xl space-y-2 relative overflow-hidden group text-left transition-colors"
+          >
+            <h4 className="text-[10px] font-bold font-mono text-slate-500 uppercase tracking-widest flex items-center gap-2">
+              <Users className="w-3.5 h-3.5 text-blue-400" /> Total Players
+            </h4>
+            <div className="text-3xl font-bold text-white font-mono">{stats.players}</div>
+          </button>
 
-      <button
-        onClick={() => onNavigate('predictions')}
-        className="bg-slate-900/50 hover:bg-slate-800/80 cursor-pointer border border-slate-800 p-5 rounded-xl space-y-2 relative overflow-hidden group text-left transition-colors"
-      >
-        <h4 className="text-[10px] font-bold font-mono text-slate-500 uppercase tracking-widest flex items-center gap-2">
-          <Database className="w-3.5 h-3.5 text-purple-400" /> Predictions Cast
-        </h4>
-        <div className="text-3xl font-bold text-white font-mono">{stats.predictions}</div>
-        <p className="text-[9px] text-slate-500 font-mono">for upcoming matches · click to explore</p>
-      </button>
+          <button
+            onClick={() => onNavigate('predictions')}
+            className="bg-slate-900/50 hover:bg-slate-800/80 cursor-pointer border border-slate-800 p-5 rounded-xl space-y-2 relative overflow-hidden group text-left transition-colors"
+          >
+            <h4 className="text-[10px] font-bold font-mono text-slate-500 uppercase tracking-widest flex items-center gap-2">
+              <Database className="w-3.5 h-3.5 text-purple-400" /> Predictions Cast
+            </h4>
+            <div className="text-3xl font-bold text-white font-mono">{stats.predictions}</div>
+            <p className="text-[9px] text-slate-500 font-mono">for upcoming matches · click to explore</p>
+          </button>
 
-      <button
-        onClick={() => onNavigate('fixtures', 'upcoming')}
-        className="bg-slate-900/50 hover:bg-slate-800/80 cursor-pointer border border-slate-800 p-5 rounded-xl space-y-2 relative overflow-hidden group text-left transition-colors"
-      >
-        <h4 className="text-[10px] font-bold font-mono text-slate-500 uppercase tracking-widest flex items-center gap-2">
-          <Calendar className="w-3.5 h-3.5 text-amber-400" /> Upcoming Matches
-        </h4>
-        <div className="text-3xl font-bold text-white font-mono">{stats.upcomingMatches}</div>
-      </button>
+          <button
+            onClick={() => onNavigate('fixtures', 'upcoming')}
+            className="bg-slate-900/50 hover:bg-slate-800/80 cursor-pointer border border-slate-800 p-5 rounded-xl space-y-2 relative overflow-hidden group text-left transition-colors"
+          >
+            <h4 className="text-[10px] font-bold font-mono text-slate-500 uppercase tracking-widest flex items-center gap-2">
+              <Calendar className="w-3.5 h-3.5 text-amber-400" /> Upcoming Matches
+            </h4>
+            <div className="text-3xl font-bold text-white font-mono">{stats.upcomingMatches}</div>
+          </button>
 
-      <button
-        onClick={() => onNavigate('fixtures', 'completed')}
-        className="bg-slate-900/50 hover:bg-slate-800/80 cursor-pointer border border-slate-800 p-5 rounded-xl space-y-2 relative overflow-hidden group text-left transition-colors"
-      >
-        <h4 className="text-[10px] font-bold font-mono text-slate-500 uppercase tracking-widest flex items-center gap-2">
-          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Completed Matches
+          <button
+            onClick={() => onNavigate('fixtures', 'completed')}
+            className="bg-slate-900/50 hover:bg-slate-800/80 cursor-pointer border border-slate-800 p-5 rounded-xl space-y-2 relative overflow-hidden group text-left transition-colors"
+          >
+            <h4 className="text-[10px] font-bold font-mono text-slate-500 uppercase tracking-widest flex items-center gap-2">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Completed Matches
+            </h4>
+            <div className="text-3xl font-bold text-white font-mono">{stats.completedMatches}</div>
+          </button>
+        </div>
+      </div>
+
+      {/* Advanced analytics (placeholders — to be wired to RPCs) */}
+      <div>
+        <h4 className="text-xs font-bold text-slate-300 font-mono uppercase tracking-wider flex items-center gap-1.5 mb-1">
+          <Target className="w-4 h-4 text-indigo-400" /> Engagement &amp; Retention
         </h4>
-        <div className="text-3xl font-bold text-white font-mono">{stats.completedMatches}</div>
-      </button>
+        <p className="text-[10px] text-slate-500 font-sans mb-3">
+          Deeper behavioural insights. Wiring to Supabase RPCs is planned next.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[
+            { label: 'Activation Rate', icon: Zap, color: 'text-amber-400', hint: '% of signups who cast a first prediction' },
+            { label: 'Cross-Sport Players', icon: Repeat, color: 'text-blue-400', hint: 'players active in both football & rugby' },
+            { label: 'Avg Prediction Accuracy', icon: Target, color: 'text-emerald-400', hint: 'mean points per settled prediction' },
+            { label: 'Power-Up Deployment Rate', icon: Activity, color: 'text-purple-400', hint: '% of wallets with an armed power-up' },
+          ].map(({ label, icon: Icon, color, hint }) => (
+            <div
+              key={label}
+              className="bg-slate-950/40 border border-dashed border-slate-800 p-5 rounded-xl space-y-2 relative overflow-hidden"
+            >
+              <div className="absolute top-3 right-3 text-[8px] font-mono uppercase tracking-widest text-slate-600 bg-slate-900/60 border border-slate-800 px-1.5 py-0.5 rounded">
+                Soon
+              </div>
+              <h4 className="text-[10px] font-bold font-mono text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                <Icon className={`w-3.5 h-3.5 ${color}`} /> {label}
+              </h4>
+              <div className="text-3xl font-bold text-slate-700 font-mono">—</div>
+              <p className="text-[9px] text-slate-600 font-mono leading-snug">{hint}</p>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

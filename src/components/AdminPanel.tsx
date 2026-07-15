@@ -13,7 +13,6 @@ import PlayerManager from './admin/PlayerManager';
 import FixturesManager from './admin/FixturesManager';
 import CompetitionsManager from './admin/CompetitionsManager';
 import ArchivesManager from './admin/ArchivesManager';
-import Communications from './admin/Communications';
 import AdminLeagueManager from './admin/AdminLeagueManager';
 
 interface AdminPanelProps {
@@ -119,10 +118,6 @@ export default function AdminPanel({
           onRefresh={fetchArchives}
           onSuccess={triggerSuccess}
         />
-      )}
-
-      {activeTab === 'communications' && (
-        <Communications onSuccess={triggerSuccess} onError={triggerError} />
       )}
 
       {activeTab === 'leagues' && (

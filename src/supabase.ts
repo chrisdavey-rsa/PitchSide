@@ -297,6 +297,30 @@ export async function dbFetchUserLeagues(userId: string): Promise<League[]> {
   }) : [];
 }
 
+/**
+ * Fetch the member user-ids for several leagues in a single round-trip.
+ * Returns a map of leagueId -> array of member user-ids. Used to pick the
+ * user's most populated private league for the dashboard "My League" tab and
+ * to scope the leaderboard to that league's members.
+ */
+export async function dbFetchLeaguesMembership(
+  leagueIds: string[],
+): Promise<Record<string, string[]>> {
+  if (!supabase || leagueIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from("league_members")
+    .select("league_id, user_id")
+    .in("league_id", leagueIds);
+  if (error) throw error;
+
+  const map: Record<string, string[]> = {};
+  (data || []).forEach((row: any) => {
+    if (!map[row.league_id]) map[row.league_id] = [];
+    map[row.league_id].push(row.user_id);
+  });
+  return map;
+}
+
 export async function dbFetchLeagueMembers(leagueId: string): Promise<UserProfile[]> {
   if (!supabase) throw new Error("Database not connected.");
   const { data, error } = await supabase.from("league_members").select(`user_id, profiles (*)`).eq("league_id", leagueId);
@@ -400,10 +424,12 @@ export interface LeaderboardRecord {
 
 // Per-competition drop allowance. Mirrors public.pitchside_competition_drops()
 // in supabase/migrations/20260713130000_leaderboard_best34.sql. Keep the two in
-// sync: EPL = 4, Championship = 6, everything else (rugby / cups) = 0.
+// sync: EPL = 4, Championship = 6, Scottish Premiership = 4, everything else
+// (rugby / cups) = 0.
 const COMPETITION_DROPS_ALLOWED: Record<string, number> = {
   "f-epl": 4,
   "f-championship": 6,
+  "f-spfl": 4,
 };
 
 export function dropsAllowedForCompetition(competitionId?: string | null): number {

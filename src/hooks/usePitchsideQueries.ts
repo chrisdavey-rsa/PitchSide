@@ -5,6 +5,7 @@ import {
   dbFetchLeagues,
   dbFetchUserLeagues,
   dbFetchLeagueMembers,
+  dbFetchLeaguesMembership,
   dbFetchGlobalLeaderboard,
   dbSavePrediction,
   type LeaderboardRecord,
@@ -47,6 +48,14 @@ export function useLeagueMembersQuery(leagueId?: string | null) {
     queryKey: queryKeys.leagueMembers(leagueId || 'none'),
     queryFn: () => (leagueId ? dbFetchLeagueMembers(leagueId) : Promise.resolve([])),
     enabled: !!leagueId,
+  });
+}
+
+export function useLeaguesMembershipQuery(leagueIds: string[]) {
+  return useQuery({
+    queryKey: queryKeys.leaguesMembership(leagueIds),
+    queryFn: () => dbFetchLeaguesMembership(leagueIds),
+    enabled: leagueIds.length > 0,
   });
 }
 

@@ -4,6 +4,8 @@ export const queryKeys = {
   leagues: ['leagues'] as const,
   userLeagues: (userId: string) => ['userLeagues', userId] as const,
   leagueMembers: (leagueId: string) => ['leagueMembers', leagueId] as const,
+  leaguesMembership: (leagueIds: string[]) =>
+    ['leaguesMembership', [...leagueIds].sort().join(',')] as const,
   leaderboard: ['leaderboard'] as const,
   players: ['players'] as const,
 };

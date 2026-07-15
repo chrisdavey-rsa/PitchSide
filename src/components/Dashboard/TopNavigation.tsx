@@ -1,17 +1,20 @@
 import React from "react";
 import { motion } from "motion/react";
-import { UserCheck, HelpCircle, Lock, LogOut } from "lucide-react";
+import { UserCheck, HelpCircle, Lock, LogOut, Users } from "lucide-react";
 import { UserProfile } from "../../types";
 import PitchSideLogo from "../PitchSideLogo";
 import { useUnreadMessages } from "../../hooks/useUnreadMessages";
+import { RadialOrigin, radialOriginFromEvent } from "../../radial";
 
 interface TopNavigationProps {
   user: UserProfile;
   onLogout: () => void;
-  onOpenRules: () => void;
+  onOpenRules: (origin?: RadialOrigin) => void;
   onOpenAdmin: () => void;
-  onOpenAccount: () => void;
+  onOpenAccount: (origin?: RadialOrigin) => void;
+  onOpenLeagues: (origin?: RadialOrigin) => void;
   onResetState: () => void;
+  isUserInAnyLeague?: boolean;
 }
 
 export default function TopNavigation({
@@ -20,9 +23,12 @@ export default function TopNavigation({
   onOpenRules,
   onOpenAdmin,
   onOpenAccount,
+  onOpenLeagues,
   onResetState,
+  isUserInAnyLeague = true,
 }: TopNavigationProps) {
   const unreadMessagesCount = useUnreadMessages(user?.id);
+  const highlightLeagues = !isUserInAnyLeague;
 
   return (
     <div className="bg-slate-900/80 backdrop-blur-md rounded-2xl border border-slate-800/80 p-4 sm:px-6 flex items-center justify-between shadow-xl">
@@ -39,9 +45,26 @@ export default function TopNavigation({
 
       <div id="tour-nav-buttons" className="hidden md:flex items-center gap-2 sm:gap-4">
         <motion.button
+          layoutId="nav-leagues-btn"
+          id="tour-league-manager"
+          onClick={(e) => onOpenLeagues(radialOriginFromEvent(e))}
+          className={`relative overflow-hidden text-xs text-slate-300 hover:text-white bg-slate-800/60 p-2 sm:px-3 sm:py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-1.5 font-medium ${
+            highlightLeagues
+              ? "ring-2 ring-emerald-400 shadow-[0_0_18px_rgba(16,185,129,0.35)] text-white"
+              : ""
+          }`}
+        >
+          {highlightLeagues && (
+            <span className="pointer-events-none absolute inset-0 -translate-x-full bg-linear-to-r from-transparent via-emerald-300/25 to-transparent animate-[shimmer_2.2s_ease-in-out_infinite]" />
+          )}
+          <Users className="w-4 h-4 text-yellow-500" />
+          <span>Leagues</span>
+        </motion.button>
+
+        <motion.button
           layoutId="nav-account-btn"
           id="nav-account-btn"
-          onClick={onOpenAccount}
+          onClick={(e) => onOpenAccount(radialOriginFromEvent(e))}
           className="text-xs text-slate-300 hover:text-white bg-slate-800/60 p-2 sm:px-3 sm:py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-1.5 font-medium relative"
         >
           <UserCheck className="w-4 h-4 text-emerald-450" />
@@ -54,7 +77,7 @@ export default function TopNavigation({
         <motion.button
           layoutId="nav-rules-btn"
           id="nav-rules-btn"
-          onClick={onOpenRules}
+          onClick={(e) => onOpenRules(radialOriginFromEvent(e))}
           className="text-xs text-slate-300 hover:text-white bg-slate-800/60 p-2 sm:px-3 sm:py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-1.5 font-medium"
         >
           <HelpCircle className="w-4 h-4 text-blue-400" />

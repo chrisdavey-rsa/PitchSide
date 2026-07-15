@@ -3,18 +3,29 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
-import { motion } from "motion/react";
+import React, { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import {
   ChevronRight,
-  Zap,
   ShieldAlert,
   Plus,
   Minus,
+  Sparkles,
+  Users,
 } from "lucide-react";
 import { SportType, Competition, Match } from "../../types";
 import { getCompetitions } from "../../competitions";
 import { MetallicTickWithLightning } from "./shared";
+import LockGuessButton from "./LockGuessButton";
+import SportIntroModal from "../onboarding/SportIntroModal";
+import PowerUpModal from "../powerups/PowerUpModal";
+import { getPowerUp } from "../../data/powerUps";
+
+/** Wallet chips: power-up id paired with its current (hardcoded) status. */
+const WALLET_CHIPS: { id: string; status: string }[] = [
+  { id: "urc-shield-bank", status: "1 Available" },
+  { id: "ucl-joker", status: "Arsenal" },
+];
 
 interface MatchPredictorProps {
   isUserInAnyLeague: boolean;
@@ -53,8 +64,53 @@ export default function MatchPredictor({
   const [fbHover, setFbHover] = useState(false);
   const [rbHover, setRbHover] = useState(false);
 
+  // Just-in-time onboarding: show a sport intro the first time a player opens
+  // a Football or Rugby competition (tracked per-sport in localStorage).
+  const [introSport, setIntroSport] = useState<"football" | "rugby" | null>(null);
+
+  useEffect(() => {
+    if (
+      selectedSport === SportType.FOOTBALL &&
+      !localStorage.getItem("hasSeenFootballIntro")
+    ) {
+      setIntroSport("football");
+    } else if (
+      selectedSport === SportType.RUGBY &&
+      !localStorage.getItem("hasSeenRugbyIntro")
+    ) {
+      setIntroSport("rugby");
+    }
+  }, [selectedSport]);
+
+  const dismissIntro = () => {
+    if (introSport === "football") {
+      localStorage.setItem("hasSeenFootballIntro", "true");
+    } else if (introSport === "rugby") {
+      localStorage.setItem("hasSeenRugbyIntro", "true");
+    }
+    setIntroSport(null);
+  };
+
+  // Power-up explainer modal opened from the wallet chips.
+  const [activePowerUp, setActivePowerUp] = useState<string | null>(null);
+
   return (
     <>
+      <AnimatePresence>
+        {introSport && (
+          <SportIntroModal sport={introSport} onDismiss={dismissIntro} />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {activePowerUp && (
+          <PowerUpModal
+            powerUpId={activePowerUp}
+            onClose={() => setActivePowerUp(null)}
+          />
+        )}
+      </AnimatePresence>
+
       {/* TWO LARGE TILE BUTTONS SECTION (Football & Rugby) */}
           <div id="tour-match-predictor" className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
               {/* Football Sport Tile Card */}
@@ -557,6 +613,42 @@ export default function MatchPredictor({
 
                   </div>
 
+                  {/* POWER-UP WALLET: strategic assets — tap a chip to learn more */}
+                  <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-slate-800/70 bg-slate-950/30 px-4 py-3">
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500 mr-1">
+                      Power-Up Wallet
+                    </span>
+
+                    {WALLET_CHIPS.map((chip) => {
+                      const powerUp = getPowerUp(chip.id);
+                      if (!powerUp) return null;
+                      const Icon = powerUp.icon;
+                      return (
+                        <button
+                          key={chip.id}
+                          type="button"
+                          onClick={() => setActivePowerUp(chip.id)}
+                          title={`${powerUp.name} — tap for details`}
+                          className={`group flex items-center gap-2 rounded-lg border ${powerUp.theme.border} ${powerUp.theme.bg} px-3 py-1.5 text-left transition-all hover:brightness-125 hover:-translate-y-px cursor-pointer`}
+                        >
+                          <Icon className={`h-4 w-4 ${powerUp.theme.iconText}`} />
+                          <span className="flex flex-col leading-tight">
+                            <span className={`text-[11px] font-bold font-display ${powerUp.theme.accentText}`}>
+                              {powerUp.name}
+                            </span>
+                            <span className="text-[9px] font-mono uppercase tracking-wide text-slate-500">
+                              {chip.status}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+
+                    <span className="ml-auto text-[9px] font-mono uppercase tracking-widest text-slate-600">
+                      Tap to learn
+                    </span>
+                  </div>
+
                   {activeMatches.length === 0 ? (
                     <div className="text-center py-6 text-xs text-slate-500 font-sans">
                       No matches loaded for this collection. Expand matches by
@@ -593,11 +685,37 @@ export default function MatchPredictor({
                             )}
                             <div
                               className={`relative p-5 rounded-2xl border transition-all ${
-                                isLocked
+                                match.matchTag
+                                  ? "border-amber-500/30 bg-slate-900"
+                                  : isLocked
                                   ? "bg-slate-900 border-blue-900/30"
                                   : "bg-slate-900/40 border-slate-800/40"
                               }`}
                             >
+                              {/* HIGH STAKES TAG: premium gold/neon badge with a subtle pulse */}
+                              {match.matchTag && (
+                                <div className="absolute -top-2.5 left-4 z-10">
+                                  <motion.span
+                                    initial={{ opacity: 0, y: 4 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className="relative inline-flex items-center gap-1 rounded-full border border-amber-400/60 bg-slate-950/90 px-2.5 py-0.5 text-[9px] font-bold font-mono uppercase tracking-widest text-amber-300"
+                                  >
+                                    <motion.span
+                                      aria-hidden
+                                      animate={{ opacity: [0.35, 0.8, 0.35] }}
+                                      transition={{
+                                        repeat: Infinity,
+                                        duration: 2.4,
+                                        ease: "easeInOut",
+                                      }}
+                                      className="pointer-events-none absolute inset-0 rounded-full border border-amber-300/50 shadow-[0_0_12px_rgba(251,191,36,0.45)]"
+                                    />
+                                    <Sparkles className="relative h-2.5 w-2.5" />
+                                    <span className="relative">{match.matchTag}</span>
+                                  </motion.span>
+                                </div>
+                              )}
+
                               {/* Top Row: Date, Time, Action Button */}
                               <div className="flex justify-between items-center mb-6">
                                 <div className="flex-1 hidden md:block"></div> {/* Left spacer for center alignment */}
@@ -617,20 +735,17 @@ export default function MatchPredictor({
                                       >
                                         <ShieldAlert className="w-3.5 h-3.5" /> VERIFY EMAIL TO PLAY
                                       </div>
-                                    ) : !isLocked ? (
-                                      <button
-                                        id={`submit-pred-btn-${match.id}`}
-                                        onClick={() => onSubmitPrediction(match.id)}
-                                        className="w-full sm:w-auto bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold font-display uppercase text-xs px-5 py-3 rounded-xl cursor-pointer transition-transform duration-100 flex items-center justify-center gap-1 shadow-md shadow-emerald-500/10"
-                                      >
-                                        Lock Guess{" "}
-                                        <Zap className="w-3.5 h-3.5 stroke-2" />
-                                      </button>
-                                    ) : (
+                                    ) : isMatchStarted && !isSubmitted ? (
                                       <div className="w-full sm:w-auto flex items-center gap-2 text-xs font-mono text-slate-500 bg-slate-950/60 border border-slate-800 px-4 py-2.5 rounded-xl">
                                         <MetallicTickWithLightning />
-                                        <span>{isSubmitted ? "Prediction Locked" : "Match Started"}</span>
+                                        <span>Match Started</span>
                                       </div>
+                                    ) : (
+                                      <LockGuessButton
+                                        id={`submit-pred-btn-${match.id}`}
+                                        submitted={isSubmitted}
+                                        onClick={() => onSubmitPrediction(match.id)}
+                                      />
                                     )}
                                   </div>
                                 </div>
@@ -933,6 +1048,25 @@ export default function MatchPredictor({
                                 </div>
                               )}
                             </div>
+
+                            {/* ANTICIPATION MECHANIC: consensus stays hidden until the guess is locked */}
+                            {isSubmitted && (
+                              <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: "auto" }}
+                                className="mt-5 border-t border-slate-800/60 pt-4 overflow-hidden"
+                              >
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <Users className="h-3.5 w-3.5 text-slate-600" />
+                                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
+                                    Community Consensus
+                                  </span>
+                                </div>
+                                <p className="mt-1 text-center text-xs italic text-slate-600">
+                                  Consensus revealing soon…
+                                </p>
+                              </motion.div>
+                            )}
                             </div>
                           </React.Fragment>
                         );
