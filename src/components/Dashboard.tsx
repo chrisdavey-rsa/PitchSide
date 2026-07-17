@@ -3,35 +3,31 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuthStatus } from '../hooks/useAuthStatus';
 import { useSupabaseRealtime } from '../hooks/useSupabaseRealtime';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
+import { useOverlayHistory, transferOverlay } from '../hooks/useOverlayHistory';
 import {
   useMatchesQuery,
+  useActiveCompetitionsQuery,
   usePredictionsQuery,
   useLeaguesQuery,
   useUserLeaguesQuery,
   useLeagueMembersQuery,
   useLeaguesMembershipQuery,
   useLeaderboardQuery,
+  useLiveProvisionalQuery,
   mapLeaderboardForSport,
   mergeMatches,
+  activeCompetitionsToCatalog,
 } from '../hooks/usePitchsideQueries';
+import type { PredictionEntry } from '../supabase';
 import { queryKeys } from '../lib/queryKeys';
 import {
-  Trophy,
-  History,
-  TrendingUp,
-  Settings,
-  HelpCircle,
-  LogOut,
-  Sparkles,
   Check,
-  Lock,
-  Mail,
-  UserCheck,
   X,
 } from "lucide-react";
 import {
@@ -43,6 +39,7 @@ import {
   dbFetchLeagueMembers,
   isSupabaseConfigured,
   supabase,
+  filterMatchesToHorizon,
 } from "../supabase";
 import {
   UserProfile,
@@ -54,17 +51,12 @@ import {
 } from "../types";
 import PitchSideLogo from "./PitchSideLogo";
 import { getCompetitions } from "../competitions";
-import {
-  ALL_COMPETITIONS,
-  INITIAL_LEADERBOARD,
-  FOOTBALL_COMPETITIONS,
-  RUGBY_COMPETITIONS,
-} from "../data";
-import { calculatePoints } from "../utils";
+import { getLatestSeason } from "../seasons";
+import { calculatePoints, computeWeeklyStreak } from "../utils";
 import GlobalNavigation from './Dashboard/GlobalNavigation';
 import WelcomeHeader from './Dashboard/WelcomeHeader';
 import LeaderboardTable from './Dashboard/LeaderboardTable';
-import type { LeaderboardItem, LeaderboardScope } from './Dashboard/Leaderboard';
+import type { LeaderboardScope } from './Dashboard/Leaderboard';
 import LeagueHub from './Dashboard/LeagueHub';
 import LeagueManagementPanel from './Dashboard/LeagueManagementPanel';
 import MobileNavigation from './Dashboard/MobileNavigation';
@@ -98,7 +90,7 @@ const ONBOARDING_STEPS: TourStep[] = [
     targetId: "tour-nav-buttons",
     title: "Rules & Your Account",
     description:
-      "Open the Rules Guide any time to see exactly how scoring works, and use Account to manage your profile, leagues and messages.",
+      "Open the Rules Guide any time to see exactly how scoring works, and use Account to manage your profile and leagues.",
   },
 ];
 
@@ -170,18 +162,35 @@ export default function Dashboard({
     setShowLeagues(true);
   };
 
+  const suppressLeaguesBackdropCloseRef = useRef(true);
+  useEffect(() => {
+    if (!showLeagues) return;
+    suppressLeaguesBackdropCloseRef.current = true;
+    const timer = window.setTimeout(() => {
+      suppressLeaguesBackdropCloseRef.current = false;
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [showLeagues]);
+
   const [localMatches, setLocalMatches] = useState<Match[]>(() => {
-    const saved = localStorage.getItem("added_fixtures");
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem("added_fixtures");
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
   });
 
   const { data: dbMatches = [] } = useMatchesQuery();
+  const { data: activeCompetitions = [] } = useActiveCompetitionsQuery();
   const { data: remotePredictions } = usePredictionsQuery(user?.id);
-  const { data: leagues = [] } = useLeaguesQuery();
+  const { data: leagues = [] } = useLeaguesQuery(user?.id);
   const { data: userLeagues = [] } = useUserLeaguesQuery(user?.id);
 
   const allMatches = useMemo(
-    () => mergeMatches(dbMatches, localMatches),
+    () => filterMatchesToHorizon(mergeMatches(dbMatches, localMatches)),
     [dbMatches, localMatches],
   );
 
@@ -202,12 +211,19 @@ export default function Dashboard({
   }, [user?.id, communityShieldScheduled]);
 
   const { data: leaderboardList = [] } = useLeaderboardQuery(user?.id, allMatches);
+  const { data: liveProvisionalByUser = {} } = useLiveProvisionalQuery(allMatches);
 
   const [predictions, setPredictions] = useState<
-    Record<string, { home: number; away: number; submitted: boolean }>
+    Record<string, PredictionEntry>
   >(() => {
-    const saved = localStorage.getItem(`predictions_${user?.id || "guest"}`);
-    return saved ? JSON.parse(saved) : {};
+    try {
+      const saved = localStorage.getItem(`predictions_${user?.id || "guest"}`);
+      if (!saved) return {};
+      const parsed = JSON.parse(saved);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
   });
 
   useEffect(() => {
@@ -236,9 +252,13 @@ export default function Dashboard({
   // Listen to local sandbox storage updates across tabs
   useEffect(() => {
     const handleStorageChange = () => {
-      const saved = localStorage.getItem("added_fixtures");
-      if (saved) {
-        setLocalMatches(JSON.parse(saved));
+      try {
+        const saved = localStorage.getItem("added_fixtures");
+        if (!saved) return;
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) setLocalMatches(parsed);
+      } catch {
+        /* ignore corrupt cross-tab payloads */
       }
     };
     window.addEventListener("storage", handleStorageChange);
@@ -248,14 +268,77 @@ export default function Dashboard({
   const [activeLeagueId, setActiveLeagueId] = useState<string | null>(null);
   const { data: leagueMemberProfiles = [] } = useLeagueMembersQuery(activeLeagueId);
   const activeLeagueMembers = useMemo(() => {
+    // Prefer the dedicated league_members query; fall back to the hydrated
+    // members arrays on league objects (also sourced from league_members).
     if (leagueMemberProfiles.length > 0) {
       return leagueMemberProfiles.map((member) => member.id);
     }
-    const league = leagues.find((entry) => entry.id === activeLeagueId);
+    const globalLeagues = leagues ?? [];
+    const mine = userLeagues ?? [];
+    const league =
+      globalLeagues.find((entry) => entry?.id === activeLeagueId) ||
+      mine.find((entry) => entry?.id === activeLeagueId);
     return league?.members ?? [];
-  }, [leagueMemberProfiles, leagues, activeLeagueId]);
+  }, [leagueMemberProfiles, leagues, userLeagues, activeLeagueId]);
   const [leagueToLeave, setLeagueToLeave] = useState<string | null>(null);
   const [viewingProfile, setViewingProfile] = useState<any | null>(null);
+
+  const closeLeaguesModal = useCallback(() => setShowLeagues(false), []);
+  const closeLeagueHub = useCallback(() => setActiveLeagueId(null), []);
+  const closeViewingProfile = useCallback(() => setViewingProfile(null), []);
+  const closeLeaveLeague = useCallback(() => setLeagueToLeave(null), []);
+
+  const openLeagueHub = useCallback((leagueId: string) => {
+    // Hand the swipe-back history entry from the leagues modal to the hub
+    // without a history.back() that React Router can treat as a remount.
+    transferOverlay("leagues", "league-hub", () => setActiveLeagueId(null));
+    setActiveLeagueId(leagueId);
+    setShowLeagues(false);
+  }, []);
+
+  /** Resolve league from either global or user-scoped lists (never clear mid-render). */
+  const resolvedActiveLeague = useMemo(() => {
+    if (!activeLeagueId) return null;
+    const globalLeagues = leagues ?? [];
+    const mine = userLeagues ?? [];
+    return (
+      globalLeagues.find((l) => l?.id === activeLeagueId) ||
+      mine.find((l) => l?.id === activeLeagueId) ||
+      null
+    );
+  }, [activeLeagueId, leagues, userLeagues]);
+
+  // Only clear a missing league once both lists have had a chance to load —
+  // otherwise an empty [] during the first fetch falsely looks "not found"
+  // and snaps the hub shut (or races into a bad render).
+  const leaguesReady = Array.isArray(leagues);
+  const userLeaguesReady = Array.isArray(userLeagues);
+
+  useEffect(() => {
+    if (!activeLeagueId) return;
+    if (!leaguesReady || !userLeaguesReady) return;
+    if (resolvedActiveLeague) return;
+    // Both arrays are loaded and still no match → drop the stale id safely.
+    setActiveLeagueId(null);
+  }, [activeLeagueId, resolvedActiveLeague, leaguesReady, userLeaguesReady]);
+
+  const handleSelectSport = useCallback((sport: SportType) => {
+    setActiveLeagueId(null);
+    setSelectedSport(sport);
+    setGlobalLeaderboardSport(sport);
+    const comps = activeCompetitionsToCatalog(activeCompetitions, sport);
+    setSelectedCompId(comps[0]?.id ?? null);
+    requestAnimationFrame(() => {
+      document.getElementById("tour-match-predictor")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, [activeCompetitions]);
+
+  // Mobile / PWA: edge-swipe back closes overlays instead of exiting the app
+  useBodyScrollLock(showLeagues || !!viewingProfile || !!leagueToLeave);
+  useOverlayHistory(showLeagues, closeLeaguesModal, "leagues");
+  useOverlayHistory(!!activeLeagueId && !showLeagues, closeLeagueHub, "league-hub");
+  useOverlayHistory(!!viewingProfile, closeViewingProfile, "profile");
+  useOverlayHistory(!!leagueToLeave, closeLeaveLeague, "leave-league");
 
   useEffect(() => {
     if (externalSelectedLeagueId) {
@@ -270,8 +353,11 @@ export default function Dashboard({
     if (!user?.id) return;
     queryClient.invalidateQueries({ queryKey: queryKeys.userLeagues(user.id) });
     queryClient.invalidateQueries({ queryKey: queryKeys.leagues });
+    queryClient.invalidateQueries({ queryKey: ['leaguesMembership'] });
     if (leagueId) {
       queryClient.invalidateQueries({ queryKey: queryKeys.leagueMembers(leagueId) });
+    } else {
+      queryClient.invalidateQueries({ queryKey: ['leagueMembers'] });
     }
   };
   const [expandedStandingsUser, setExpandedStandingsUser] = useState<
@@ -281,7 +367,7 @@ export default function Dashboard({
   // Custom league Create & Join flows interaction states
   const [leagueNameInput, setLeagueNameInput] = useState("");
   const [leaguePasswordInput, setLeaguePasswordInput] = useState("");
-  const [leagueSeasonInput, setLeagueSeasonInput] = useState("2026");
+  const [leagueSeasonInput, setLeagueSeasonInput] = useState(getLatestSeason);
   const [leagueSportInput, setLeagueSportInput] = useState<SportType>(SportType.FOOTBALL);
   const [leagueCompSelect, setLeagueCompSelect] = useState("f-epl");
   const [leagueIsPublicInput, setLeagueIsPublicInput] = useState(true);
@@ -420,6 +506,7 @@ export default function Dashboard({
       [matchId]: {
         ...pred,
         submitted: true,
+        lockedAt: new Date().toISOString(),
       },
     };
 
@@ -451,13 +538,30 @@ export default function Dashboard({
 
   const handleUpdateLeagueSettings = async () => {
     if (!editingLeagueId) return;
-    
-    const maxParts = editLimitParticipants ? parseInt(editMaxParticipantsInput, 10) : null;
-    await dbUpdateLeagueSettings(editingLeagueId, editIsPublic, maxParts);
+
+    const maxParts = editLimitParticipants
+      ? Math.min(20, Math.max(1, parseInt(editMaxParticipantsInput, 10) || 20))
+      : 20;
+    await dbUpdateLeagueSettings(editingLeagueId, {
+      isPrivate: !editIsPublic,
+      maxPlayers: maxParts,
+    });
 
     queryClient.invalidateQueries({ queryKey: queryKeys.leagues });
+    queryClient.invalidateQueries({ queryKey: queryKeys.userLeagues(user.id) });
     setEditingLeagueId(null);
-    triggerToast("âœ… League settings updated");
+    triggerToast("✅ League settings updated");
+  };
+
+  const handleHubLeagueSettings = async (
+    leagueId: string,
+    settings: { isPrivate: boolean; maxPlayers: number; password: string },
+  ) => {
+    await dbUpdateLeagueSettings(leagueId, settings);
+    queryClient.invalidateQueries({ queryKey: queryKeys.leagues });
+    queryClient.invalidateQueries({ queryKey: queryKeys.userLeagues(user.id) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.leagueMembers(leagueId) });
+    triggerToast("✅ League settings updated");
   };
 
   const handleCreateLeague = async () => {
@@ -485,7 +589,11 @@ export default function Dashboard({
       creatorName: user.nickname,
       members: [user.id],
       isPublic: leagueIsPublicInput,
-      maxParticipants: limitParticipants ? parseInt(maxParticipantsInput, 10) : undefined,
+      isPrivate: !leagueIsPublicInput,
+      maxParticipants: limitParticipants ? parseInt(maxParticipantsInput, 10) : 20,
+      maxPlayers: limitParticipants
+        ? Math.min(20, Math.max(1, parseInt(maxParticipantsInput, 10) || 20))
+        : 20,
       season: leagueSeasonInput,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -547,8 +655,9 @@ export default function Dashboard({
 
     const currentMembers = await dbFetchLeagueMembers(target.id);
 
-    if (target.maxParticipants && currentMembers.length >= target.maxParticipants) {
-      triggerToast(`âš ï¸ League is full (Max ${target.maxParticipants} players).`);
+    const memberCap = target.maxPlayers ?? target.maxParticipants;
+    if (memberCap && currentMembers.length >= memberCap) {
+      triggerToast(`⚠️ League is full (Max ${memberCap} players).`);
       return;
     }
 
@@ -598,11 +707,43 @@ export default function Dashboard({
     }
   };
 
-  // Get active sport competitions
-  const filteredCompetitions = getCompetitions().filter((c) => c.sport === selectedSport);
-  const selectedCompetition = getCompetitions().find(
-    (c) => c.id === selectedCompId,
+  // Competitions with live/upcoming fixtures for the selected sport (DB-driven,
+  // enriched with any horizon matches already in memory e.g. local sandbox).
+  const filteredCompetitions = useMemo(() => {
+    const fromQuery = activeCompetitionsToCatalog(activeCompetitions, selectedSport);
+    const seen = new Set(fromQuery.map((c) => c.id));
+    const extras: Competition[] = [];
+
+    for (const match of allMatches) {
+      if (selectedSport && match.sport !== selectedSport) continue;
+      if (match.status === "completed") continue;
+      if (!match.competitionId || seen.has(match.competitionId)) continue;
+      seen.add(match.competitionId);
+      extras.push({
+        id: match.competitionId,
+        name: match.competitionName || `Competition ${match.competitionId}`,
+        sport: match.sport,
+      });
+    }
+
+    return [...fromQuery, ...extras].sort((a, b) => a.name.localeCompare(b.name));
+  }, [activeCompetitions, selectedSport, allMatches]);
+  const selectedCompetition = useMemo(
+    () => filteredCompetitions.find((c) => c.id === selectedCompId),
+    [filteredCompetitions, selectedCompId],
   );
+
+  // If the selected chip disappears after a sync/horizon refresh, re-home.
+  useEffect(() => {
+    if (!selectedSport) return;
+    if (filteredCompetitions.length === 0) {
+      if (selectedCompId) setSelectedCompId(null);
+      return;
+    }
+    if (!selectedCompId || !filteredCompetitions.some((c) => c.id === selectedCompId)) {
+      setSelectedCompId(filteredCompetitions[0].id);
+    }
+  }, [selectedSport, filteredCompetitions, selectedCompId]);
 
   const { activeMatches, groupedActiveMatches, sortedActiveMatches } = useMemo(() => {
     const active = allMatches.filter(
@@ -616,6 +757,9 @@ export default function Dashboard({
       if (dateA.getTime() !== dateB.getTime()) {
         return dateA.getTime() - dateB.getTime();
       }
+      // Prefer round grouping stability, then kickoff, then home team.
+      const roundCmp = (a.roundName || "").localeCompare(b.roundName || "");
+      if (roundCmp !== 0) return roundCmp;
       return a.homeTeam.localeCompare(b.homeTeam);
     });
 
@@ -641,7 +785,9 @@ export default function Dashboard({
     sortedActiveLeagueMatches,
     leagueMembersMemoized
   } = useMemo(() => {
-    const activeLeague = leagues.find((l) => l.id === activeLeagueId);
+    const activeLeague =
+      (leagues ?? []).find((l) => l?.id === activeLeagueId) ||
+      (userLeagues ?? []).find((l) => l?.id === activeLeagueId);
     if (!activeLeague) {
       return {
         activeLeagueMatches: [],
@@ -694,7 +840,7 @@ export default function Dashboard({
       sortedActiveLeagueMatches: sorted,
       leagueMembersMemoized: members,
     };
-  }, [activeLeagueId, leagues, allMatches, activeLeagueMembers, leaderboardList]);
+  }, [activeLeagueId, leagues, userLeagues, allMatches, activeLeagueMembers, leaderboardList]);
 
   // Statistics summaries
   const totalPredicted = Object.keys(predictions).filter(
@@ -709,9 +855,22 @@ export default function Dashboard({
     return match.homeScore === pred.home && match.awayScore === pred.away;
   }).length;
 
+  const weeklyStreak = useMemo(() => {
+    const lockedTimestamps = Object.keys(predictions)
+      .filter((k) => predictions[k].submitted && predictions[k].lockedAt)
+      .map((k) => predictions[k].lockedAt as string);
+    return computeWeeklyStreak(lockedTimestamps);
+  }, [predictions]);
+
   const displayLeaderboard = useMemo(
-    () => mapLeaderboardForSport(leaderboardList, globalLeaderboardSport, user.id),
-    [leaderboardList, globalLeaderboardSport, user.id],
+    () =>
+      mapLeaderboardForSport(
+        leaderboardList,
+        globalLeaderboardSport,
+        user.id,
+        liveProvisionalByUser,
+      ),
+    [leaderboardList, globalLeaderboardSport, user.id, liveProvisionalByUser],
   );
 
   const isUserInAnyLeague = userLeagues.length > 0;
@@ -720,7 +879,7 @@ export default function Dashboard({
   // Default the leaderboard to the user's most populated private league so
   // their local competition is front-and-center; Global requires a click.
   const privateLeagues = useMemo(
-    () => userLeagues.filter((l) => !l.isPublic),
+    () => userLeagues.filter((l) => l.isPrivate || l.isPublic === false),
     [userLeagues],
   );
   const privateLeagueIds = useMemo(
@@ -742,8 +901,20 @@ export default function Dashboard({
     if (!targetPrivateLeague) return [];
     const memberIds = leaguesMembership[targetPrivateLeague.id] || [];
     const records = leaderboardList.filter((r) => memberIds.includes(r.playerId));
-    return mapLeaderboardForSport(records, globalLeaderboardSport, user.id);
-  }, [targetPrivateLeague, leaguesMembership, leaderboardList, globalLeaderboardSport, user.id]);
+    return mapLeaderboardForSport(
+      records,
+      globalLeaderboardSport,
+      user.id,
+      liveProvisionalByUser,
+    );
+  }, [
+    targetPrivateLeague,
+    leaguesMembership,
+    leaderboardList,
+    globalLeaderboardSport,
+    user.id,
+    liveProvisionalByUser,
+  ]);
 
   const [leaderboardScope, setLeaderboardScope] = useState<LeaderboardScope>("global");
   const leaderboardScopeInitialized = useRef(false);
@@ -756,7 +927,7 @@ export default function Dashboard({
   }, [privateLeagues.length]);
 
   return (
-    <div className="w-full max-w-6xl mx-auto space-y-6 animate-fade-in pb-20 md:pb-0">
+    <div className="w-full max-w-6xl mx-auto flex flex-col gap-6 animate-fade-in pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-0 min-h-0">
       <GlobalNavigation
         user={user}
         onLogout={onLogout}
@@ -764,6 +935,8 @@ export default function Dashboard({
         onOpenAdmin={onOpenAdmin}
         onOpenAccount={onOpenAccount}
         onOpenLeagues={openLeaguesModal}
+        onSelectSport={handleSelectSport}
+        selectedSport={selectedSport}
         isUserInAnyLeague={isUserInAnyLeague}
         onResetState={() => {
           setActiveLeagueId(null);
@@ -790,15 +963,9 @@ export default function Dashboard({
         )}
       </AnimatePresence>
 
-      {activeLeagueId ? (() => {
-        const activeLeague = leagues.find((l) => l.id === activeLeagueId);
-        if (!activeLeague) {
-          setActiveLeagueId(null);
-          return null;
-        }
-        return (
+      {resolvedActiveLeague ? (
           <LeagueHub
-            activeLeague={activeLeague}
+            activeLeague={resolvedActiveLeague}
             user={user}
             registeredUsers={registeredUsers}
             leagueMembersMemoized={leagueMembersMemoized}
@@ -812,7 +979,7 @@ export default function Dashboard({
             setIsJoiningActiveLeague={setIsJoiningActiveLeague}
             activeLeagueJoinPassword={activeLeagueJoinPassword}
             setActiveLeagueJoinPassword={setActiveLeagueJoinPassword}
-            onBack={() => setActiveLeagueId(null)}
+            onBack={closeLeagueHub}
             onRequestLeave={(leagueId) => setLeagueToLeave(leagueId)}
             onJoinLeague={async (league, password) => {
               if (password !== league.password) {
@@ -829,10 +996,10 @@ export default function Dashboard({
                 triggerToast("Failed to join league.");
               }
             }}
+            onUpdateLeagueSettings={handleHubLeagueSettings}
             triggerToast={triggerToast}
           />
-        );
-      })() : (
+      ) : (
         <>
           {/* Personalized Welcome Jumbotron Header */}
           <motion.div transition={{ duration: 0.5, ease: "easeInOut" }}>
@@ -841,6 +1008,7 @@ export default function Dashboard({
               userPoints={userPoints}
               totalPredicted={totalPredicted}
               perfectPredictions={perfectPredictions}
+              weeklyStreak={weeklyStreak}
               isUserInAnyLeague={isUserInAnyLeague}
             />
           </motion.div>
@@ -907,7 +1075,7 @@ export default function Dashboard({
               </div>
               <div className="flex gap-2 font-mono text-xs">
                 <button
-                  onClick={() => setLeagueToLeave(null)}
+                  onClick={closeLeaveLeague}
                   className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 py-2 rounded-lg cursor-pointer transition-colors"
                 >
                   Cancel
@@ -915,7 +1083,7 @@ export default function Dashboard({
                 <button
                   onClick={() => {
                     const id = leagueToLeave;
-                    setLeagueToLeave(null);
+                    closeLeaveLeague();
                     handleLeaveLeague(id);
                   }}
                   className="flex-1 bg-red-600 hover:bg-red-750 text-white font-bold py-2 rounded-lg cursor-pointer transition-all shadow-md shadow-red-950/40"
@@ -954,7 +1122,7 @@ export default function Dashboard({
                   </span>
                 </div>
                 <button
-                  onClick={() => setViewingProfile(null)}
+                  onClick={closeViewingProfile}
                   className="text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
                 >
                   <X className="w-5 h-5" />
@@ -998,7 +1166,7 @@ export default function Dashboard({
 
               <div className="pt-2 text-center">
                 <button
-                  onClick={() => setViewingProfile(null)}
+                  onClick={closeViewingProfile}
                   className="w-full font-mono text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 transition-colors py-2.5 rounded-lg cursor-pointer"
                 >
                   Close Profile
@@ -1016,7 +1184,6 @@ export default function Dashboard({
         onOpenAdmin={onOpenAdmin}
         onOpenLeagues={openLeaguesModal}
         isUserInAnyLeague={isUserInAnyLeague}
-        onLogout={onLogout}
       />
 
       {/* Leagues Overlay — radial expansion from the click point */}
@@ -1028,9 +1195,16 @@ export default function Dashboard({
           >
             <div
               className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm"
-              onClick={() => setShowLeagues(false)}
+              onClick={() => {
+                if (suppressLeaguesBackdropCloseRef.current) return;
+                closeLeaguesModal();
+              }}
             />
-            <div className="relative w-full max-w-lg my-8">
+            <div
+              className="relative w-full max-w-lg md:max-w-5xl my-8"
+              onClick={(e) => e.stopPropagation()}
+              onTouchEnd={(e) => e.stopPropagation()}
+            >
               <LeagueManagementPanel
                 user={user}
                 leagues={leagues}
@@ -1040,8 +1214,11 @@ export default function Dashboard({
                 setLeagueTab={setLeagueTab}
                 activeLeagueId={activeLeagueId}
                 setActiveLeagueId={(id) => {
-                  setActiveLeagueId(id);
-                  if (id) setShowLeagues(false);
+                  if (id) {
+                    openLeagueHub(id);
+                    return;
+                  }
+                  setActiveLeagueId(null);
                 }}
                 leagueMembersMemoized={leagueMembersMemoized}
                 editingLeagueId={editingLeagueId}
@@ -1085,7 +1262,7 @@ export default function Dashboard({
                 handleLeaveLeague={handleLeaveLeague}
                 handleUpdateLeagueSettings={handleUpdateLeagueSettings}
                 triggerToast={triggerToast}
-                onClose={() => setShowLeagues(false)}
+                onClose={closeLeaguesModal}
               />
             </div>
           </motion.div>

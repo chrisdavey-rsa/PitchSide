@@ -1,10 +1,11 @@
 {
-  "name": "PitchSide",
-  "short_name": "PitchSide",
+  "name": "Pitchside Predictions",
+  "short_name": "Pitchside",
   "description": "Play. Predict. Prevail. The ultimate sports score predictor.",
+  "display": "standalone",
+  "orientation": "portrait",
   "start_url": "/",
   "scope": "/",
-  "display": "standalone",
   "background_color": "#020617",
   "theme_color": "#020617",
   "icons": [

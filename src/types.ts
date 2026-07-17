@@ -24,16 +24,6 @@ export interface UserProfile {
   suspendedUntil?: string;
 }
 
-export interface SiteMessage {
-  id: string;
-  senderId: string;
-  receiverId: string; // 'all' for site-wide
-  subject: string;
-  body: string;
-  createdAt: string;
-  read: boolean;
-}
-
 export enum SportType {
   FOOTBALL = "football",
   RUGBY = "rugby",
@@ -51,6 +41,8 @@ export interface Competition {
 export interface Match {
   id: string;
   competitionId: string;
+  /** Display name from the fixtures provider when available. */
+  competitionName?: string;
   sport: SportType;
   homeTeam: string;
   awayTeam: string;
@@ -85,6 +77,19 @@ export interface Match {
   provisionalAwayScore?: number;
   /** Live match clock, as text (e.g. "45+2", "HT", "78"). */
   matchMinute?: string;
+  /**
+   * Admin visibility override. When false, the fixture is hidden from
+   * player-facing feeds but still manageable in the Admin Panel.
+   * Defaults to true.
+   */
+  isVisible?: boolean;
+}
+
+/** Competition currently hosting live or upcoming fixtures in the DB. */
+export interface ActiveCompetition {
+  competitionId: string;
+  competitionName: string;
+  sportType: SportType;
 }
 
 export interface Prediction {
@@ -110,8 +115,13 @@ export interface League {
   creatorId: string;
   creatorName: string;
   members: string[];
-  inactiveMembers?: string[];
+  /** Hidden from the global directory when true (alias of !isPublic). */
+  isPrivate?: boolean;
+  /** Hard membership cap (1–20). */
+  maxPlayers?: number;
+  /** Legacy mirror of !isPrivate — kept for existing UI. */
   isPublic?: boolean;
+  /** Legacy mirror of maxPlayers. */
   maxParticipants?: number;
   season?: string;
   createdAt: string;

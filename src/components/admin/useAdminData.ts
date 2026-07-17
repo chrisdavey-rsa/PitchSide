@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { dbFetchMatches, dbFetchLeagues, dbFetchLeaguesMembership, dbFetchArchivedPlayers } from '../../supabase';
+import { dbFetchMatches, dbFetchLeagues, dbFetchArchivedPlayers } from '../../supabase';
 import { League, Match } from '../../types';
 
 export interface AdminDataState {
@@ -28,7 +28,7 @@ export function useAdminData(activeTab: string): AdminDataState {
   const fetchFixtures = useCallback(async () => {
     setLoadingFixtures(true);
     try {
-      const data = await dbFetchMatches();
+      const data = await dbFetchMatches({ horizonDays: null, visibleOnly: false });
       setFixtures(data);
     } catch (e) {
       console.warn('useAdminData: Failed to fetch fixtures', e);
@@ -40,14 +40,10 @@ export function useAdminData(activeTab: string): AdminDataState {
   const fetchLeagues = useCallback(async () => {
     setLoadingLeagues(true);
     try {
-      const data = await dbFetchLeagues();
-      // The legacy `members` JSONB column on `leagues` is deprecated and must be
-      // ignored entirely — real membership lives in the `league_members` table.
-      // Hydrate each league strictly from league_members so counts and the audit
-      // modal reflect live data.
-      const membership = await dbFetchLeaguesMembership(data.map((l) => l.id));
-      const hydrated = data.map((l) => ({ ...l, members: membership[l.id] || [] }));
-      setLeagues(hydrated);
+      // dbFetchLeagues hydrates `members` from league_members (ignores JSONB).
+      // Admin view includes private leagues that normal browse hides.
+      const data = await dbFetchLeagues({ includeAllPrivate: true });
+      setLeagues(data);
     } catch (e) {
       console.warn('useAdminData: Failed to fetch leagues', e);
     } finally {

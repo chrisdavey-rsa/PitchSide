@@ -3,10 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  ChevronRight,
   ShieldAlert,
   Plus,
   Minus,
@@ -14,18 +13,42 @@ import {
   Users,
 } from "lucide-react";
 import { SportType, Competition, Match } from "../../types";
-import { getCompetitions } from "../../competitions";
-import { MetallicTickWithLightning } from "./shared";
+import { calculatePoints } from "../../utils";
 import LockGuessButton from "./LockGuessButton";
 import SportIntroModal from "../onboarding/SportIntroModal";
-import PowerUpModal from "../powerups/PowerUpModal";
 import { getPowerUp } from "../../data/powerUps";
+import type { PredictionEntry } from "../../supabase";
+import SportEntryTile from "./SportEntryTile";
+import { useOverlayHistory } from "../../hooks/useOverlayHistory";
+import { useBodyScrollLock } from "../../hooks/useBodyScrollLock";
 
 /** Wallet chips: power-up id paired with its current (hardcoded) status. */
 const WALLET_CHIPS: { id: string; status: string }[] = [
   { id: "urc-shield-bank", status: "1 Available" },
   { id: "ucl-joker", status: "Arsenal" },
 ];
+
+function getMatchStatusDisplay(match: Match) {
+  if (match.status === "completed") {
+    return {
+      label: "Finished",
+      className:
+        "text-green-500 font-mono text-[10px] uppercase tracking-widest font-bold",
+    };
+  }
+  if (match.status === "live") {
+    return {
+      label: "In play",
+      className:
+        "text-green-500 font-mono text-[10px] uppercase tracking-widest font-bold animate-pulse",
+    };
+  }
+  return {
+    label: "To be played",
+    className:
+      "text-slate-400 font-mono text-[10px] uppercase tracking-widest font-bold",
+  };
+}
 
 interface MatchPredictorProps {
   isUserInAnyLeague: boolean;
@@ -38,7 +61,7 @@ interface MatchPredictorProps {
   activeMatches: Match[];
   filteredCompetitions: Competition[];
   selectedCompetition?: Competition;
-  predictions: Record<string, { home: number; away: number; submitted: boolean }>;
+  predictions: Record<string, PredictionEntry>;
   isEmailVerified: boolean;
   onScoreChange: (matchId: string, side: "home" | "away", val: string) => void;
   onRugbyPredictionChange: (matchId: string, winner: "home" | "away" | "draw" | null, marginStr: string) => void;
@@ -61,9 +84,6 @@ export default function MatchPredictor({
   onRugbyPredictionChange,
   onSubmitPrediction,
 }: MatchPredictorProps) {
-  const [fbHover, setFbHover] = useState(false);
-  const [rbHover, setRbHover] = useState(false);
-
   // Just-in-time onboarding: show a sport intro the first time a player opens
   // a Football or Rugby competition (tracked per-sport in localStorage).
   const [introSport, setIntroSport] = useState<"football" | "rugby" | null>(null);
@@ -82,17 +102,19 @@ export default function MatchPredictor({
     }
   }, [selectedSport]);
 
-  const dismissIntro = () => {
-    if (introSport === "football") {
-      localStorage.setItem("hasSeenFootballIntro", "true");
-    } else if (introSport === "rugby") {
-      localStorage.setItem("hasSeenRugbyIntro", "true");
-    }
-    setIntroSport(null);
-  };
+  const dismissIntro = useCallback(() => {
+    setIntroSport((current) => {
+      if (current === "football") {
+        localStorage.setItem("hasSeenFootballIntro", "true");
+      } else if (current === "rugby") {
+        localStorage.setItem("hasSeenRugbyIntro", "true");
+      }
+      return null;
+    });
+  }, []);
 
-  // Power-up explainer modal opened from the wallet chips.
-  const [activePowerUp, setActivePowerUp] = useState<string | null>(null);
+  useBodyScrollLock(!!introSport);
+  useOverlayHistory(!!introSport, dismissIntro, "sport-intro");
 
   return (
     <>
@@ -102,410 +124,24 @@ export default function MatchPredictor({
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {activePowerUp && (
-          <PowerUpModal
-            powerUpId={activePowerUp}
-            onClose={() => setActivePowerUp(null)}
-          />
-        )}
-      </AnimatePresence>
-
       {/* TWO LARGE TILE BUTTONS SECTION (Football & Rugby) */}
-          <div id="tour-match-predictor" className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-              {/* Football Sport Tile Card */}
-              <div
+          <div
+            id="tour-match-predictor"
+            className="grid grid-cols-2 md:grid-cols-2 gap-3 sm:gap-6 pt-2 auto-rows-fr"
+          >
+              <SportEntryTile
                 id="football-sport-tile"
-                onClick={() => {
-                  setSelectedSport(SportType.FOOTBALL);
-                  const comps = getCompetitions().filter((c) => c.sport === SportType.FOOTBALL);
-                  setSelectedCompId(comps.length > 0 ? comps[0].id : null);
-                }}
-                onMouseEnter={() => setFbHover(true)}
-                onMouseLeave={() => setFbHover(false)}
-                className={`relative rounded-3xl p-8 border-2 transition-all duration-300 overflow-hidden cursor-pointer flex flex-col justify-between group min-h-[220px] ${
-                  selectedSport === SportType.FOOTBALL
-                    ? "bg-blue-950/40 border-blue-500 shadow-[0_0_24px_rgba(59,130,246,0.35)]"
-                    : "bg-slate-900/50 border-slate-800 hover:border-slate-700 hover:shadow-lg shadow-sm"
-                }`}
-              >
-                {/* Background Ambient Glow */}
-                <div
-                  className={`absolute -right-12 -bottom-12 w-48 h-48 rounded-full blur-3xl opacity-20 transition-all ${
-                    selectedSport === SportType.FOOTBALL
-                      ? "bg-blue-500 opacity-30"
-                      : "bg-slate-500 group-hover:bg-blue-500"
-                  }`}
-                />
+                sport="football"
+                selected={selectedSport === SportType.FOOTBALL}
+                onSelect={() => setSelectedSport(SportType.FOOTBALL)}
+              />
 
-                <div className="flex justify-between items-start">
-                  <div className="space-y-1">
-                    <h2 className="text-3xl font-extrabold font-display text-white group-hover:text-blue-300 transition-colors">
-                      FOOTBALL
-                    </h2>
-                    <p className="text-slate-400 text-xs max-w-xs pt-1 font-sans">
-                      Predict goal lines across Premier League, Champions
-                      League, Europa rosters and FIFA divisions.
-                    </p>
-                  </div>
-
-                  {/* Silhouette outline of a Football */}
-                  <div
-                    className={`relative p-3.5 rounded-full transition-all duration-500 flex items-center justify-center ${fbHover ? "scale-105 bg-blue-950/15 text-blue-400" : "text-slate-400"}`}
-                  >
-                    {/* Slower, more professional motion transform on the icon itself */}
-                    <motion.div
-                      animate={
-                        fbHover
-                          ? { rotate: 25, scale: 1.08 }
-                          : { rotate: 0, scale: 1 }
-                      }
-                      transition={{
-                        type: "spring",
-                        stiffness: 80,
-                        damping: 15,
-                      }}
-                      className="w-14 h-14 relative flex items-center justify-center"
-                    >
-                      {/* Modern Classical design Soccer ball icon SVG */}
-                      <svg
-                        className="w-full h-full relative z-10"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        xmlns="http://www.w3.org/2000/svg"
-                      >
-                        <circle
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                        />
-                        {/* Central Pentagonal Panel */}
-                        <polygon
-                          points="12,7.5 15.2,9.8 14,13.6 10,13.6 8.8,9.8"
-                          fill="currentColor"
-                          fillOpacity="0.25"
-                          stroke="currentColor"
-                          strokeWidth="1.2"
-                        />
-                        {/* Outer Seam lines radiating from the pentagon vertices */}
-                        <line
-                          x1="12"
-                          y1="7.5"
-                          x2="12"
-                          y2="2"
-                          stroke="currentColor"
-                          strokeWidth="1.2"
-                        />
-                        <line
-                          x1="15.2"
-                          y1="9.8"
-                          x2="19.8"
-                          y2="8.3"
-                          stroke="currentColor"
-                          strokeWidth="1.2"
-                        />
-                        <line
-                          x1="14"
-                          y1="13.6"
-                          x2="17.8"
-                          y2="18.6"
-                          stroke="currentColor"
-                          strokeWidth="1.2"
-                        />
-                        <line
-                          x1="10"
-                          y1="13.6"
-                          x2="6.2"
-                          y2="18.6"
-                          stroke="currentColor"
-                          strokeWidth="1.2"
-                        />
-                        <line
-                          x1="8.8"
-                          y1="9.8"
-                          x2="4.2"
-                          y2="8.3"
-                          stroke="currentColor"
-                          strokeWidth="1.2"
-                        />
-                        {/* 3D Curved peripheral accent lines */}
-                        <path
-                          d="M4.2 8.3 C6.5 5.5, 9.5 3.5, 12 2"
-                          stroke="currentColor"
-                          strokeWidth="0.8"
-                          className="opacity-60"
-                        />
-                        <path
-                          d="M19.8 8.3 C17.5 5.5, 14.5 3.5, 12 2"
-                          stroke="currentColor"
-                          strokeWidth="0.8"
-                          className="opacity-60"
-                        />
-                        <path
-                          d="M19.8 8.3 C20.8 11.5, 20.1 15.3, 17.8 18.6"
-                          stroke="currentColor"
-                          strokeWidth="0.8"
-                          className="opacity-60"
-                        />
-                        <path
-                          d="M4.2 8.3 C3.2 11.5, 3.9 15.3, 6.2 18.6"
-                          stroke="currentColor"
-                          strokeWidth="0.8"
-                          className="opacity-60"
-                        />
-                        <path
-                          d="M6.2 18.6 C9.5 19.8, 14.5 19.8, 17.8 18.6"
-                          stroke="currentColor"
-                          strokeWidth="0.8"
-                          className="opacity-60"
-                        />
-                      </svg>
-
-                      {/* Animated lightning flash circling the soccer ball itself */}
-                      {fbHover && (
-                        <motion.div
-                          animate={{ rotate: 360 }}
-                          transition={{
-                            repeat: Infinity,
-                            duration: 4,
-                            ease: "linear",
-                          }}
-                          className="absolute inset-0 pointer-events-none z-20"
-                        >
-                          <svg
-                            className="w-full h-full absolute inset-0"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                          >
-                            <circle
-                              cx="12"
-                              cy="12"
-                              r="10.8"
-                              stroke="url(#fbLightningGrad)"
-                              strokeWidth="1.5"
-                              strokeDasharray="5, 12"
-                              className="opacity-100"
-                              style={{
-                                filter:
-                                  "drop-shadow(0 0 4px #3b82f6) drop-shadow(0 0 8px #60a5fa)",
-                              }}
-                            />
-                            <defs>
-                              <linearGradient
-                                id="fbLightningGrad"
-                                x1="0%"
-                                y1="0%"
-                                x2="100%"
-                                y2="100%"
-                              >
-                                <stop offset="0%" stopColor="#3b82f6" />
-                                <stop
-                                  offset="50%"
-                                  stopColor="#60a5fa"
-                                  stopOpacity="0.8"
-                                />
-                                <stop offset="100%" stopColor="#3b82f6" />
-                              </linearGradient>
-                            </defs>
-                          </svg>
-                        </motion.div>
-                      )}
-                    </motion.div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1.5 mt-6 font-mono text-xs text-blue-400 group-hover:translate-x-1 transition-transform">
-                  <span>Choose Football leagues</span>{" "}
-                  <ChevronRight className="w-4 h-4" />
-                </div>
-              </div>
-
-              {/* Rugby Sport Tile Card */}
-              <div
+              <SportEntryTile
                 id="rugby-sport-tile"
-                onClick={() => {
-                  setSelectedSport(SportType.RUGBY);
-                  const comps = getCompetitions().filter((c) => c.sport === SportType.RUGBY);
-                  setSelectedCompId(comps.length > 0 ? comps[0].id : null);
-                }}
-                onMouseEnter={() => setRbHover(true)}
-                onMouseLeave={() => setRbHover(false)}
-                className={`relative rounded-3xl p-8 border-2 transition-all duration-300 overflow-hidden cursor-pointer flex flex-col justify-between group min-h-[220px] ${
-                  selectedSport === SportType.RUGBY
-                    ? "bg-amber-950/40 border-amber-500 shadow-[0_0_24px_rgba(245,158,11,0.35)]"
-                    : "bg-slate-900/50 border-slate-800 hover:border-slate-700 hover:shadow-lg shadow-sm"
-                }`}
-              >
-                {/* Background Ambient Glow */}
-                <div
-                  className={`absolute -right-12 -bottom-12 w-48 h-48 rounded-full blur-3xl opacity-20 transition-all ${
-                    selectedSport === SportType.RUGBY
-                      ? "bg-amber-500 opacity-30"
-                      : "bg-slate-500 group-hover:bg-amber-500"
-                  }`}
-                />
-
-                <div className="flex justify-between items-start">
-                  <div className="space-y-1">
-                    <h2 className="text-3xl font-extrabold font-display text-white group-hover:text-amber-300 transition-colors">
-                      RUGBY
-                    </h2>
-                    <p className="text-slate-400 text-xs max-w-xs pt-1 font-sans">
-                      Predict winning score margins across Six Nations,
-                      Heineken, Top 14, and Rugby Worlds brackets.
-                    </p>
-                  </div>
-
-                  {/* Silhouette outline of a Rugby Ball */}
-                  <div
-                    className={`relative p-3.5 rounded-full transition-all duration-500 flex items-center justify-center ${rbHover ? "scale-105 bg-amber-950/15 text-amber-400" : "text-slate-400"}`}
-                  >
-                    {/* Slower, more professional motion transform on the icon itself */}
-                    <motion.div
-                      animate={
-                        rbHover
-                          ? { rotate: -15, scale: 1.08 }
-                          : { rotate: 0, scale: 1 }
-                      }
-                      transition={{
-                        type: "spring",
-                        stiffness: 80,
-                        damping: 15,
-                      }}
-                      className="w-14 h-14 relative flex items-center justify-center"
-                    >
-                      {/* High-fidelity custom stitch Rugby Oval ball SVG */}
-                      <svg
-                        className="w-full h-full relative z-10"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        xmlns="http://www.w3.org/2000/svg"
-                      >
-                        <g transform="rotate(-30 12 12)">
-                          <path
-                            d="M12 2 C5.5 2, 2 7.5, 2 12 C2 16.5, 5.5 22, 12 22 C18.5 22, 22 16.5, 22 12 C22 7.5, 18.5 2, 12 2 Z"
-                            stroke="currentColor"
-                            strokeWidth="1.5"
-                            fill="currentColor"
-                            fillOpacity="0.12"
-                          />
-                          <path
-                            d="M12 2 C8 6, 8 18, 12 22"
-                            stroke="currentColor"
-                            strokeWidth="1"
-                            className="opacity-80"
-                          />
-                          <path
-                            d="M12 2 C16 6, 16 18, 12 22"
-                            stroke="currentColor"
-                            strokeWidth="1"
-                            className="opacity-80"
-                          />
-
-                          {/* Centered Laces / Seam Stitching */}
-                          <line
-                            x1="12"
-                            y1="5.5"
-                            x2="12"
-                            y2="18.5"
-                            stroke="currentColor"
-                            strokeWidth="1.5"
-                          />
-                          <line
-                            x1="9.5"
-                            y1="8"
-                            x2="14.5"
-                            y2="8"
-                            stroke="currentColor"
-                            strokeWidth="1.3"
-                          />
-                          <line
-                            x1="9"
-                            y1="10.5"
-                            x2="15"
-                            y2="10.5"
-                            stroke="currentColor"
-                            strokeWidth="1.3"
-                          />
-                          <line
-                            x1="9"
-                            y1="13"
-                            x2="15"
-                            y2="13"
-                            stroke="currentColor"
-                            strokeWidth="1.3"
-                          />
-                          <line
-                            x1="9.5"
-                            y1="15.5"
-                            x2="14.5"
-                            y2="15.5"
-                            stroke="currentColor"
-                            strokeWidth="1.3"
-                          />
-                        </g>
-                      </svg>
-
-                      {/* Animated lightning flash circling the rugby ball itself */}
-                      {rbHover && (
-                        <motion.div
-                          animate={{ rotate: -360 }}
-                          transition={{
-                            repeat: Infinity,
-                            duration: 4,
-                            ease: "linear",
-                          }}
-                          className="absolute inset-0 pointer-events-none z-20"
-                        >
-                          <svg
-                            className="w-full h-full absolute inset-0"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                          >
-                            <circle
-                              cx="12"
-                              cy="12"
-                              r="10.8"
-                              stroke="url(#rbLightningGrad)"
-                              strokeWidth="1.5"
-                              strokeDasharray="5, 12"
-                              className="opacity-100"
-                              style={{
-                                filter:
-                                  "drop-shadow(0 0 4px #f59e0b) drop-shadow(0 0 8px #fbbf24)",
-                              }}
-                            />
-                            <defs>
-                              <linearGradient
-                                id="rbLightningGrad"
-                                x1="0%"
-                                y1="0%"
-                                x2="100%"
-                                y2="100%"
-                              >
-                                <stop offset="0%" stopColor="#f59e0b" />
-                                <stop
-                                  offset="50%"
-                                  stopColor="#fbbf24"
-                                  stopOpacity="0.8"
-                                />
-                                <stop offset="100%" stopColor="#f59e0b" />
-                              </linearGradient>
-                            </defs>
-                          </svg>
-                        </motion.div>
-                      )}
-                    </motion.div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1.5 mt-6 font-mono text-xs text-amber-400 group-hover:translate-x-1 transition-transform">
-                  <span>Choose Rugby leagues</span>{" "}
-                  <ChevronRight className="w-4 h-4" />
-                </div>
-              </div>
+                sport="rugby"
+                selected={selectedSport === SportType.RUGBY}
+                onSelect={() => setSelectedSport(SportType.RUGBY)}
+              />
             </div>
 
           {/* DETAILED DRILL-DOWN SUB VIEW */}
@@ -518,20 +154,15 @@ export default function MatchPredictor({
               {/* Leagues filtering tab */}
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-800/80 pb-5 mb-5">
                 <div>
-                  <span className="text-[10px] uppercase font-bold font-mono tracking-widest text-emerald-400">
-                    Live Division Filters
-                  </span>
-                  <h3 className="text-xl font-bold font-display text-white mt-0.5">
+                  <h3 className="text-xl font-bold font-display text-white">
                     {selectedSport === SportType.FOOTBALL
                       ? "Football Leagues"
-                      : "Rugby Leagues"}{" "}
-                    Included
+                      : "Rugby Leagues"}
                   </h3>
                 </div>
 
-                {/* Quick stats segment */}
                 <div className="text-xs text-slate-400 flex items-center gap-2">
-                  <span>Selected Competitions:</span>
+                  <span>Total Competitions:</span>
                   <span
                     className={`px-2 py-0.5 rounded-sm font-mono text-xs font-semibold ${
                       selectedSport === SportType.FOOTBALL
@@ -544,11 +175,23 @@ export default function MatchPredictor({
                 </div>
               </div>
 
-              {/* Grid list of leagues targeting future wrapping layout */}
+              {/* Grid list of competitions with active/upcoming fixtures */}
+              {filteredCompetitions.length === 0 ? (
+                <div className="rounded-2xl border border-slate-800/80 bg-slate-950/40 px-6 py-14 text-center">
+                  <p className="text-sm font-display font-semibold text-slate-200">
+                    No active fixtures available for this game-week.
+                  </p>
+                  <p className="mt-2 text-xs text-slate-500 font-sans max-w-sm mx-auto leading-relaxed">
+                    When live or upcoming matches are synced for{" "}
+                    {selectedSport === SportType.FOOTBALL ? "football" : "rugby"},
+                    their competitions will appear here automatically.
+                  </p>
+                </div>
+              ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 {filteredCompetitions.map((comp) => {
                   const count = allMatches.filter(
-                    (m) => m.competitionId === comp.id,
+                    (m) => m.competitionId === comp.id && m.status !== "completed",
                   ).length;
                   const isSelected = selectedCompId === comp.id;
 
@@ -556,6 +199,7 @@ export default function MatchPredictor({
                     <button
                       id={`comp-btn-${comp.id}`}
                       key={comp.id}
+                      type="button"
                       onClick={() => setSelectedCompId(comp.id)}
                       className={`w-full text-left p-4 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
                         isSelected
@@ -568,7 +212,7 @@ export default function MatchPredictor({
                           {comp.name}
                         </h4>
                         <span className="text-[10px] text-slate-500 font-mono">
-                          {comp.nationality || "International"}
+                          Live schedule
                         </span>
                       </div>
 
@@ -579,23 +223,24 @@ export default function MatchPredictor({
                             : "bg-slate-800 text-slate-500"
                         }`}
                       >
-                        {count > 0 ? `${count} Fixture` : "Scheduled"}
+                        {count > 0 ? `${count} Fixture${count === 1 ? "" : "s"}` : "Scheduled"}
                       </span>
                     </button>
                   );
                 })}
               </div>
+              )}
 
-              {/* FIREFIGHTING NO MATCH MESSAGE */}
-              {!selectedCompId && (
+              {/* Prompt when comps exist but none selected yet */}
+              {filteredCompetitions.length > 0 && !selectedCompId && (
                 <div className="text-center py-10 text-slate-500 font-sans text-xs">
-                  ðŸ‘ˆ Select one of the competitions above to load action items
+                  Select one of the competitions above to load action items
                   and configure score predictions.
                 </div>
               )}
 
               {/* SPECIFIC COMPETITION FIXTURES PREDICTOR */}
-              {selectedCompId && (
+              {selectedCompId && filteredCompetitions.length > 0 && (
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -613,46 +258,53 @@ export default function MatchPredictor({
 
                   </div>
 
-                  {/* POWER-UP WALLET: strategic assets — tap a chip to learn more */}
-                  <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-slate-800/70 bg-slate-950/30 px-4 py-3">
-                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500 mr-1">
+                  {/* POWER-UP WALLET: inactive launch teaser (coming soon) */}
+                  <div className="flex flex-col gap-2.5 md:flex-row md:flex-wrap md:items-center rounded-xl border border-slate-800/70 bg-slate-950/30 px-4 py-3">
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500 shrink-0">
                       Power-Up Wallet
                     </span>
 
-                    {WALLET_CHIPS.map((chip) => {
-                      const powerUp = getPowerUp(chip.id);
-                      if (!powerUp) return null;
-                      const Icon = powerUp.icon;
-                      return (
-                        <button
-                          key={chip.id}
-                          type="button"
-                          onClick={() => setActivePowerUp(chip.id)}
-                          title={`${powerUp.name} — tap for details`}
-                          className={`group flex items-center gap-2 rounded-lg border ${powerUp.theme.border} ${powerUp.theme.bg} px-3 py-1.5 text-left transition-all hover:brightness-125 hover:-translate-y-px cursor-pointer`}
-                        >
-                          <Icon className={`h-4 w-4 ${powerUp.theme.iconText}`} />
-                          <span className="flex flex-col leading-tight">
-                            <span className={`text-[11px] font-bold font-display ${powerUp.theme.accentText}`}>
-                              {powerUp.name}
+                    <div className="grid grid-cols-2 gap-2 md:flex md:flex-row md:flex-wrap md:items-center md:gap-2.5">
+                      {WALLET_CHIPS.map((chip) => {
+                        const powerUp = getPowerUp(chip.id);
+                        if (!powerUp) return null;
+                        const Icon = powerUp.icon;
+                        return (
+                          <button
+                            key={chip.id}
+                            type="button"
+                            disabled
+                            aria-disabled="true"
+                            title={`${powerUp.name} — coming soon`}
+                            className="relative flex items-center justify-center md:justify-start gap-2 rounded-lg border border-slate-700 bg-slate-800 w-full md:w-auto p-2.5 md:px-3 md:py-1.5 text-left text-slate-500 cursor-not-allowed opacity-90"
+                          >
+                            <Icon className="relative z-10 h-5 w-5 md:h-4 md:w-4 text-slate-500" />
+                            <span className="hidden md:flex flex-col leading-tight relative z-10">
+                              <span className="text-[11px] font-bold font-display text-slate-400">
+                                {powerUp.name}
+                              </span>
+                              <span className="text-[9px] font-mono uppercase tracking-wide text-slate-600">
+                                Coming soon
+                              </span>
                             </span>
-                            <span className="text-[9px] font-mono uppercase tracking-wide text-slate-500">
-                              {chip.status}
-                            </span>
-                          </span>
-                        </button>
-                      );
-                    })}
+                          </button>
+                        );
+                      })}
+                    </div>
 
-                    <span className="ml-auto text-[9px] font-mono uppercase tracking-widest text-slate-600">
-                      Tap to learn
+                    <span className="hidden md:block md:ml-auto text-[9px] font-mono uppercase tracking-widest text-slate-600 shrink-0">
+                      Launch locked
                     </span>
                   </div>
 
                   {activeMatches.length === 0 ? (
-                    <div className="text-center py-6 text-xs text-slate-500 font-sans">
-                      No matches loaded for this collection. Expand matches by
-                      editing fixtures draft lists.
+                    <div className="rounded-xl border border-slate-800/70 bg-slate-950/30 px-5 py-10 text-center">
+                      <p className="text-sm font-display font-semibold text-slate-200">
+                        No active fixtures available for this game-week.
+                      </p>
+                      <p className="mt-2 text-xs text-slate-500 font-sans">
+                        Check back once upcoming fixtures are synced for this competition.
+                      </p>
                     </div>
                   ) : (
                     <div className="space-y-4">
@@ -669,11 +321,34 @@ export default function MatchPredictor({
                           home: 0,
                           away: 0,
                           submitted: false,
+                          provisionalPoints: 0,
                         };
                         const isSubmitted = savedPred.submitted;
+                        const isLive = match.status === "live";
                         const isMatchStarted =
-                          new Date() > new Date(match.matchDate);
+                          isLive || new Date() > new Date(match.matchDate);
                         const isLocked = isSubmitted || isMatchStarted;
+
+                        // As It Stands: prefer live-computed points from provisional
+                        // scores; fall back to the DB provisional_points field.
+                        const liveHome = match.provisionalHomeScore;
+                        const liveAway = match.provisionalAwayScore;
+                        const asItStandsPoints =
+                          isLive &&
+                          isSubmitted &&
+                          liveHome != null &&
+                          liveAway != null
+                            ? calculatePoints(
+                                match.sport,
+                                savedPred.home,
+                                savedPred.away,
+                                liveHome,
+                                liveAway,
+                              )
+                            : savedPred.provisionalPoints ?? 0;
+
+                        const matchStatus = getMatchStatusDisplay(match);
+
                         return (
                           <React.Fragment key={match.id}>
                             {showDateSeparator && (
@@ -685,7 +360,9 @@ export default function MatchPredictor({
                             )}
                             <div
                               className={`relative p-5 rounded-2xl border transition-all ${
-                                match.matchTag
+                                isLive
+                                  ? "border-rose-500/40 bg-slate-900 shadow-[0_0_24px_rgba(244,63,94,0.08)]"
+                                  : match.matchTag
                                   ? "border-amber-500/30 bg-slate-900"
                                   : isLocked
                                   ? "bg-slate-900 border-blue-900/30"
@@ -716,14 +393,42 @@ export default function MatchPredictor({
                                 </div>
                               )}
 
-                              {/* Top Row: Date, Time, Action Button */}
+                              {/* Top Row: Live clock / kickoff time + Action Button */}
                               <div className="flex justify-between items-center mb-6">
-                                <div className="flex-1 hidden md:block"></div> {/* Left spacer for center alignment */}
+                                <div className="flex-1 hidden md:block"></div>
                                 
-                                <div className="flex-1 flex flex-col items-center justify-center text-center">
-                                  <span className="inline-block bg-slate-900 border border-slate-700 text-slate-400 text-[10px] font-mono px-3 py-0.5 rounded-full">
-                                    {timeKey}
-                                  </span>
+                                <div className="flex-1 flex flex-col items-center justify-center text-center gap-1.5">
+                                  {match.roundName && (
+                                    <span className="text-[9px] font-mono uppercase tracking-widest text-slate-500">
+                                      {match.roundName}
+                                    </span>
+                                  )}
+                                  {isLive ? (
+                                    <>
+                                      <span className="inline-flex items-center gap-1.5 bg-rose-500/10 border border-rose-500/40 text-rose-300 text-[10px] font-mono font-bold px-3 py-0.5 rounded-full uppercase tracking-widest">
+                                        <span className="relative flex h-2 w-2">
+                                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-60" />
+                                          <span className="relative inline-flex h-2 w-2 animate-pulse rounded-full bg-rose-500" />
+                                        </span>
+                                        Live
+                                        {match.matchMinute && (
+                                          <span className="text-rose-200/90">{match.matchMinute}</span>
+                                        )}
+                                      </span>
+                                      <span className="font-display font-black text-2xl tracking-widest text-white tabular-nums">
+                                        {liveHome ?? "–"}
+                                        <span className="mx-1.5 text-slate-500">–</span>
+                                        {liveAway ?? "–"}
+                                      </span>
+                                      <span className="text-[9px] font-mono uppercase tracking-widest text-slate-500">
+                                        As It Stands
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <span className="inline-block bg-slate-900 border border-slate-700 text-slate-400 text-[10px] font-mono px-3 py-0.5 rounded-full">
+                                      {timeKey}
+                                    </span>
+                                  )}
                                 </div>
                                 
                                 <div className="flex-1 flex justify-end">
@@ -735,18 +440,22 @@ export default function MatchPredictor({
                                       >
                                         <ShieldAlert className="w-3.5 h-3.5" /> VERIFY EMAIL TO PLAY
                                       </div>
-                                    ) : isMatchStarted && !isSubmitted ? (
-                                      <div className="w-full sm:w-auto flex items-center gap-2 text-xs font-mono text-slate-500 bg-slate-950/60 border border-slate-800 px-4 py-2.5 rounded-xl">
-                                        <MetallicTickWithLightning />
-                                        <span>Match Started</span>
+                                    ) : isLive && isSubmitted ? (
+                                      <div className="w-full sm:w-auto flex flex-col items-center gap-0.5 text-xs font-mono bg-amber-500/10 border border-amber-500/30 px-4 py-2 rounded-xl">
+                                        <span className="text-[9px] uppercase tracking-widest text-amber-500/80">
+                                          As It Stands
+                                        </span>
+                                        <span className="font-display font-black text-amber-300 text-sm">
+                                          {asItStandsPoints > 0 ? `+${asItStandsPoints}` : asItStandsPoints} pts
+                                        </span>
                                       </div>
-                                    ) : (
+                                    ) : !isMatchStarted || isSubmitted ? (
                                       <LockGuessButton
                                         id={`submit-pred-btn-${match.id}`}
                                         submitted={isSubmitted}
                                         onClick={() => onSubmitPrediction(match.id)}
                                       />
-                                    )}
+                                    ) : null}
                                   </div>
                                 </div>
                               </div>
@@ -754,17 +463,9 @@ export default function MatchPredictor({
                               <div className="flex flex-col md:flex-row items-center justify-center gap-6">
                               {/* Teams Scoring UI Rows */}
                               {match.sport === "football" ? (
-                                <div className="w-full flex items-center justify-center gap-2 max-w-xl mx-auto">
+                                <div className="w-full flex items-start justify-center gap-3 sm:gap-4 max-w-xl mx-auto">
                                   {/* Home Team */}
-                                  <div className="flex-1 text-right">
-                                    <h5 className="font-extrabold font-display text-sm tracking-tight text-white mb-0.5">
-                                      {match.homeTeam}
-                                    </h5>
-                                  </div>
-
-                                  {/* Central Inputs and VS */}
-                                  <div className="flex flex-none items-center gap-2 px-1">
-                                    {/* Home Input Interactors */}
+                                  <div className="flex-1 min-w-0 flex flex-col items-center text-center">
                                     <div className="flex items-center justify-center gap-1 bg-slate-950 px-1.5 py-1 rounded-xl border border-slate-800 focus-within:border-emerald-500/50 transition-all">
                                       <button
                                         type="button"
@@ -822,13 +523,22 @@ export default function MatchPredictor({
                                         <Plus className="w-2.5 h-2.5 relative z-10" />
                                       </button>
                                     </div>
+                                    <h5 className="mt-2 font-extrabold font-display text-xs sm:text-sm tracking-tight text-white break-words w-full leading-snug">
+                                      {match.homeTeam}
+                                    </h5>
+                                  </div>
 
-                                    {/* Versus divider */}
-                                    <div className="text-center font-mono font-bold text-slate-600 text-[10px] uppercase tracking-widest">
+                                  <div className="shrink-0 flex flex-col items-center justify-center text-center gap-1 px-1 pt-2">
+                                    <span className={matchStatus.className}>
+                                      {matchStatus.label}
+                                    </span>
+                                    <span className="font-mono font-bold text-slate-600 text-[10px] uppercase tracking-widest">
                                       vs
-                                    </div>
+                                    </span>
+                                  </div>
 
-                                    {/* Away Input Interactors */}
+                                  {/* Away Team */}
+                                  <div className="flex-1 min-w-0 flex flex-col items-center text-center">
                                     <div className="flex items-center justify-center gap-1 bg-slate-950 px-1.5 py-1 rounded-xl border border-slate-800 focus-within:border-emerald-500/50 transition-all">
                                       <button
                                         type="button"
@@ -886,17 +596,16 @@ export default function MatchPredictor({
                                         <Plus className="w-2.5 h-2.5 relative z-10" />
                                       </button>
                                     </div>
-                                  </div>
-
-                                  {/* Away Team */}
-                                  <div className="flex-1 text-left">
-                                    <h5 className="font-extrabold font-display text-sm tracking-tight text-white mb-0.5">
+                                    <h5 className="mt-2 font-extrabold font-display text-xs sm:text-sm tracking-tight text-white break-words w-full leading-snug">
                                       {match.awayTeam}
                                     </h5>
                                   </div>
                                 </div>
                               ) : (
                                 <div className="flex-1 w-full flex flex-col items-center gap-3 bg-slate-950/40 p-4 border border-slate-850/60 rounded-2xl relative">
+                                  <span className={matchStatus.className}>
+                                    {matchStatus.label}
+                                  </span>
                                   {/* Winner Selection Segment */}
                                   <div className="w-full grid grid-cols-3 gap-2">
                                     <button

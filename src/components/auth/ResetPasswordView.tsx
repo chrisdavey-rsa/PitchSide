@@ -15,7 +15,7 @@ import {
   Mail,
   ArrowLeft,
 } from 'lucide-react';
-import AuthCard, { AuthError, AuthSuccess } from './AuthCard';
+import AuthCard, { AuthError } from './AuthCard';
 import { requestPasswordReset, updatePassword } from './authSession';
 import { supabase } from '../../supabase';
 

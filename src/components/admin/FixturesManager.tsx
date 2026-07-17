@@ -1,15 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Plus,
   Calendar,
   Play,
   RefreshCw,
   X,
+  Search,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
-import { supabase, dbSaveMatch } from '../../supabase';
+import { supabase, dbSaveMatch, dbSetMatchVisibility } from '../../supabase';
 import { SportType, Match } from '../../types';
 import { getCompetitions } from '../../competitions';
 import { calculatePoints } from '../../utils';
+import { getAvailableSeasons, getLatestSeason } from '../../seasons';
 
 interface FixturesManagerProps {
   initialFixtures: Match[];
@@ -18,6 +22,12 @@ interface FixturesManagerProps {
   onSuccess: (msg: string) => void;
   onError: (msg: string) => void;
   onRefresh: () => void;
+}
+
+function competitionLabel(fixture: Match): string {
+  if (fixture.competitionName?.trim()) return fixture.competitionName.trim();
+  const fromCatalog = getCompetitions().find((c) => c.id === fixture.competitionId);
+  return fromCatalog?.name ?? fixture.competitionId ?? '';
 }
 
 export default function FixturesManager({
@@ -36,13 +46,20 @@ export default function FixturesManager({
   const [homeTeam, setHomeTeam] = useState('');
   const [awayTeam, setAwayTeam] = useState('');
   const [matchDateInput, setMatchDateInput] = useState('');
-  const [matchSeason, setMatchSeason] = useState('2026');
+  const [matchSeason, setMatchSeason] = useState(getLatestSeason);
   const [matchHour, setMatchHour] = useState('15');
   const [matchMinute, setMatchMinute] = useState('00');
 
   // Score update inputs
   const [scoreInputs, setScoreInputs] = useState<Record<string, { home: string; away: string }>>({});
   const [loadingMatches, setLoadingMatches] = useState<Record<string, boolean>>({});
+  const [visibilityBusy, setVisibilityBusy] = useState<Record<string, boolean>>({});
+
+  // Advanced search / filter bar
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sportFilter, setSportFilter] = useState<'all' | SportType>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   // Local fixture state (merges DB fixtures with any locally registered ones)
   const [localFixtures] = useState<any[]>(() => {
@@ -65,18 +82,93 @@ export default function FixturesManager({
     }
   }, [sport]);
 
-  // Blended fixtures list
-  const allCurrentFixtures = (() => {
+  const allCurrentFixtures = useMemo(() => {
     const seen = new Set<string>();
-    const combined: any[] = [];
-    groupFixtures.forEach((f) => { combined.push(f); seen.add(f.id); });
-    localFixtures.forEach((f) => { if (!seen.has(f.id)) { combined.push(f); seen.add(f.id); } });
-    combined.sort((a, b) => new Date(b.matchDate).getTime() - new Date(a.matchDate).getTime());
+    const combined: Match[] = [];
+    groupFixtures.forEach((f) => {
+      combined.push(f);
+      seen.add(f.id);
+    });
+    localFixtures.forEach((f) => {
+      if (!seen.has(f.id)) {
+        combined.push(f as Match);
+        seen.add(f.id);
+      }
+    });
+    combined.sort(
+      (a, b) => new Date(b.matchDate).getTime() - new Date(a.matchDate).getTime(),
+    );
 
-    if (fixtureFilter === 'upcoming') return combined.filter((f) => f.status === 'upcoming');
-    if (fixtureFilter === 'completed') return combined.filter((f) => f.status === 'completed');
-    return combined;
-  })();
+    const q = searchQuery.trim().toLowerCase();
+    const fromTs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : null;
+    const toTs = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : null;
+
+    return combined.filter((f) => {
+      if (fixtureFilter === 'upcoming' && f.status !== 'upcoming') return false;
+      if (fixtureFilter === 'completed' && f.status !== 'completed') return false;
+      if (sportFilter !== 'all' && f.sport !== sportFilter) return false;
+
+      const kickoff = new Date(f.matchDate).getTime();
+      if (fromTs != null && !Number.isNaN(kickoff) && kickoff < fromTs) return false;
+      if (toTs != null && !Number.isNaN(kickoff) && kickoff > toTs) return false;
+
+      if (q) {
+        const haystack = [
+          f.homeTeam,
+          f.awayTeam,
+          competitionLabel(f),
+          f.id,
+          f.sport,
+        ]
+          .join(' ')
+          .toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [
+    groupFixtures,
+    localFixtures,
+    fixtureFilter,
+    searchQuery,
+    sportFilter,
+    dateFrom,
+    dateTo,
+  ]);
+
+  const hasAdvancedFilters =
+    searchQuery.trim() !== '' ||
+    sportFilter !== 'all' ||
+    dateFrom !== '' ||
+    dateTo !== '';
+
+  const clearAdvancedFilters = () => {
+    setSearchQuery('');
+    setSportFilter('all');
+    setDateFrom('');
+    setDateTo('');
+  };
+
+  const handleToggleVisibility = async (fixture: Match) => {
+    const nextVisible = fixture.isVisible === false;
+    setVisibilityBusy((prev) => ({ ...prev, [fixture.id]: true }));
+    try {
+      await dbSetMatchVisibility(fixture.id, nextVisible);
+      setGroupFixtures((prev) =>
+        prev.map((f) => (f.id === fixture.id ? { ...f, isVisible: nextVisible } : f)),
+      );
+      onSuccess(
+        nextVisible
+          ? `${fixture.homeTeam} vs ${fixture.awayTeam} is now visible to players.`
+          : `${fixture.homeTeam} vs ${fixture.awayTeam} hidden from player feeds.`,
+      );
+      onRefresh();
+    } catch (err: any) {
+      onError(`Failed to update visibility: ${err.message || 'Database error'}`);
+    } finally {
+      setVisibilityBusy((prev) => ({ ...prev, [fixture.id]: false }));
+    }
+  };
 
   const handleAddFixture = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,11 +186,13 @@ export default function FixturesManager({
       id: fixtureId,
       sport,
       competitionId: compSelect,
+      competitionName: getCompetitions().find((c) => c.id === compSelect)?.name,
       homeTeam: homeTeam.trim(),
       awayTeam: awayTeam.trim(),
       matchDate: combinedDateTime,
       status: 'upcoming' as const,
       season: matchSeason,
+      isVisible: true,
     };
 
     try {
@@ -320,9 +414,11 @@ export default function FixturesManager({
                   onChange={(e) => setMatchSeason(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white focus:border-blue-500 focus:outline-hidden"
                 >
-                  <option value="2026">2026</option>
-                  <option value="2025">2025</option>
-                  <option value="2024">2024</option>
+                  {getAvailableSeasons().map((season) => (
+                    <option key={season} value={season}>
+                      {season}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -425,14 +521,68 @@ export default function FixturesManager({
                 Record final score outcomes of scheduled fixtures. PitchSide engines auto-evaluate predictions sheets.
               </p>
             </div>
-            {fixtureFilter !== 'all' && (
-              <button
-                onClick={() => setFixtureFilter('all')}
-                className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+            <div className="flex flex-wrap gap-2">
+              {fixtureFilter !== 'all' && (
+                <button
+                  onClick={() => setFixtureFilter('all')}
+                  className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <X className="w-3 h-3" /> Clear "{fixtureFilter}" Filter
+                </button>
+              )}
+              {hasAdvancedFilters && (
+                <button
+                  onClick={clearAdvancedFilters}
+                  className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <X className="w-3 h-3" /> Clear search filters
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Advanced search bar */}
+          <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3.5 space-y-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search teams or competition names…"
+                className="w-full bg-slate-900 border border-slate-800 text-slate-100 text-xs pl-9 pr-3 py-2 rounded-lg focus:border-blue-500 focus:outline-hidden"
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <select
+                value={sportFilter}
+                onChange={(e) => setSportFilter(e.target.value as 'all' | SportType)}
+                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:outline-hidden focus:border-blue-500 font-mono"
               >
-                <X className="w-3 h-3" /> Clear "{fixtureFilter}" Filter
-              </button>
-            )}
+                <option value="all">All Sports</option>
+                <option value={SportType.FOOTBALL}>Football</option>
+                <option value={SportType.RUGBY}>Rugby</option>
+              </select>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                aria-label="Kickoff from date"
+                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:outline-hidden focus:border-blue-500 font-mono"
+              />
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                aria-label="Kickoff to date"
+                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:outline-hidden focus:border-blue-500 font-mono"
+              />
+            </div>
+            <p className="text-[9px] text-slate-600 font-mono">
+              Showing {allCurrentFixtures.length} fixture
+              {allCurrentFixtures.length === 1 ? '' : 's'}
+              {hasAdvancedFilters ? ' matching filters' : ''}
+            </p>
           </div>
 
           {allCurrentFixtures.length > 0 && (
@@ -448,8 +598,8 @@ export default function FixturesManager({
 
           {allCurrentFixtures.length === 0 ? (
             <div className="p-12 text-center text-xs text-slate-500 font-mono border border-dashed border-slate-800 rounded-xl bg-slate-950/40">
-              {fixtureFilter !== 'all'
-                ? `No ${fixtureFilter} matches found in database.`
+              {fixtureFilter !== 'all' || hasAdvancedFilters
+                ? 'No matches found for the current filters.'
                 : 'No sports fixtures currently registered in database memory clusters. Click "Register Game Fixture" above to add some.'}
             </div>
           ) : (
@@ -458,18 +608,22 @@ export default function FixturesManager({
                 const scores = scoreInputs[fixture.id] || { home: '', away: '' };
                 const isLoading = !!loadingMatches[fixture.id];
                 const isCompleted = fixture.status === 'completed';
+                const isVisible = fixture.isVisible !== false;
+                const toggling = !!visibilityBusy[fixture.id];
 
                 return (
                   <div
                     key={fixture.id}
                     className={`p-4 rounded-xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all ${
-                      isCompleted
-                        ? 'bg-slate-950/40 border-slate-800/80'
-                        : 'bg-slate-950 border-blue-950/40 shadow-xs'
+                      !isVisible
+                        ? 'bg-slate-950/30 border-slate-800/60 opacity-80'
+                        : isCompleted
+                          ? 'bg-slate-950/40 border-slate-800/80'
+                          : 'bg-slate-950 border-blue-950/40 shadow-xs'
                     }`}
                   >
                     <div className="space-y-1.5 min-w-[280px]">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 bg-blue-500/10 text-blue-400 rounded-sm font-mono border border-blue-500/15">
                           {fixture.id}
                         </span>
@@ -481,6 +635,11 @@ export default function FixturesManager({
                         ) : (
                           <span className="text-[8px] uppercase font-sans font-bold px-1.5 py-0.5 bg-yellow-500/10 text-yellow-500 rounded-md animate-pulse">
                             ● Upcoming
+                          </span>
+                        )}
+                        {!isVisible && (
+                          <span className="text-[8px] uppercase font-sans font-bold px-1.5 py-0.5 bg-slate-800 text-slate-400 rounded-md border border-slate-700">
+                            Hidden from players
                           </span>
                         )}
                       </div>
@@ -497,10 +656,48 @@ export default function FixturesManager({
                             {new Date(fixture.matchDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </div>
+                        <div className="text-slate-500">{competitionLabel(fixture)}</div>
                       </div>
                     </div>
 
-                    <div className="w-full md:w-auto flex items-center justify-end gap-3 self-end md:self-auto border-t md:border-t-0 border-slate-800/60 pt-3 md:pt-0">
+                    <div className="w-full md:w-auto flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-3 self-end md:self-auto border-t md:border-t-0 border-slate-800/60 pt-3 md:pt-0">
+                      <label
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer select-none transition-colors ${
+                          isVisible
+                            ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
+                            : 'bg-slate-900 border-slate-700 text-slate-400'
+                        } ${toggling ? 'opacity-60 pointer-events-none' : ''}`}
+                        title="Opt-out override: hide this fixture from player prediction feeds"
+                      >
+                        <input
+                          type="checkbox"
+                          className="sr-only"
+                          checked={isVisible}
+                          disabled={toggling}
+                          onChange={() => handleToggleVisibility(fixture)}
+                        />
+                        {isVisible ? (
+                          <Eye className="w-3.5 h-3.5 shrink-0" />
+                        ) : (
+                          <EyeOff className="w-3.5 h-3.5 shrink-0" />
+                        )}
+                        <span className="text-[9px] font-mono font-bold uppercase tracking-wide whitespace-nowrap">
+                          Visible to Players
+                        </span>
+                        <span
+                          className={`relative inline-flex h-4 w-7 shrink-0 rounded-full transition-colors ${
+                            isVisible ? 'bg-emerald-500' : 'bg-slate-700'
+                          }`}
+                          aria-hidden
+                        >
+                          <span
+                            className={`absolute top-0.5 left-0.5 h-3 w-3 rounded-full bg-white transition-transform ${
+                              isVisible ? 'translate-x-3' : 'translate-x-0'
+                            }`}
+                          />
+                        </span>
+                      </label>
+
                       {isCompleted ? (
                         <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 px-4 py-2.5 rounded-lg text-center font-display min-w-[140px] justify-center">
                           <div>

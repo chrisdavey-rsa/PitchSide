@@ -101,8 +101,10 @@ Outcome (win/draw/loss) must be correct first — a wrong outcome scores 0.
 |:------:|-----------|
 | **5** | Exact scoreline correct (e.g. predict 2–0, result 2–0). |
 | **3** | Correct outcome **and** correct goal margin, but wrong scoreline (e.g. predict 3–1, result 2–0). |
-| **2** | Correct outcome only (wrong margin). Includes correctly-called draws. |
+| **1** | Correct outcome only (wrong margin). Includes correctly-called draws with a different scoreline (e.g. predict 2–0, result 1–0). |
 | **0** | Wrong outcome. |
+
+> Implemented in `pitchside_football_points` (SQL), `calculateFootballPoints` (`src/utils.ts`), and `supabase/functions/sync-settlement/index.ts`. Documented in-app in `RulesInfo.tsx` and the Football `SportIntroModal`.
 
 ### 2.2 Rugby Scoring (updated brackets)
 
@@ -117,11 +119,12 @@ Rugby is margin-based. The winner must be correct first; then the score depends 
 
 > These brackets replaced the previous ±3 / ±5 point system. They are implemented in `pitchside_rugby_points` (SQL) and `calculateRugbyPoints` (`src/utils.ts`), and documented in-app in `RulesInfo.tsx` and the Rugby `SportIntroModal`.
 
-### 2.3 The "Drops" Forgiveness Mechanic
+### 2.3 The Football Forgiveness Mechanic ("Drops")
 
-To keep long seasons fair, each competition has a **drop allowance** — a player's worst results are excluded from their official total once they've played enough games.
+To keep long football seasons fair, each football competition has a **drop allowance** — a player's worst results are excluded from their official total once they've played enough games.
 
-- **Per-competition allowances:** Premier League = 4, Championship = 6, Scottish Premiership = 4, everything else (cups & **all rugby**) = 0.
+- **Per-competition allowances:** Premier League = 4, Championship = 6, Scottish Premiership = 4, other football competitions = 0.
+- **Rugby:** no drops — every rugby prediction counts toward the total.
 - **Formula (per competition):**
   - `drops_used = LEAST(drops_allowed, GREATEST(0, settled_games − drops_allowed))`
   - `best_points = sum(all settled points) − sum(the worst drops_used results)`
@@ -191,7 +194,7 @@ Persistence groundwork exists in the `power_up_wallet` table (see §4); the wall
 |----------|------|
 | `get_global_leaderboard(p_current_user_id)` | Computes the full leaderboard server-side: per-sport points, prediction counts, **ghost points**, and per-sport **drops used/allowed** — applying the dynamic per-competition drops mechanic. Returns all rows (the client handles Top-5/neighborhood presentation). Granted to `anon, authenticated`. |
 | `get_email_by_nickname(search_nickname)` | Resolves a nickname (`profiles.username`) to an email for login-by-nickname. `SECURITY DEFINER`, pinned `search_path`, ignores freed accounts, granted to `anon` (login runs pre-auth). |
-| `pitchside_football_points(...)` | Per-prediction football scoring (5/3/2/0). |
+| `pitchside_football_points(...)` | Per-prediction football scoring (5/3/1/0). |
 | `pitchside_rugby_points(...)` | Per-prediction rugby scoring (updated 5 / ≤7→3 / ≤10→1 / 0). |
 | `pitchside_competition_drops(competition_id)` | Per-competition drop allowance (EPL 4, Championship 6, SPFL 4, else 0). |
 
@@ -206,6 +209,7 @@ Migrations live in `supabase/migrations/` (apply in filename order):
 6. `20260715_fix_auth_trigger.sql` — corrects `handle_new_user()` metadata key mapping (so `preferred_sport`, `supported_team`, `nationality`, `phone`, `username` populate on signup), rewires the auth triggers, and back-fills existing profiles. Fully idempotent.
 7. `20260715_create_competitions.sql` — `custom_competitions` table (schema only; UI not yet wired). Fully idempotent.
 8. `20260715_api_automation_schema.sql` — live API-Sports columns on `matches` and `predictions` (see 4.7). Fully idempotent.
+9. `20260717100000_football_points_wrong_margin_1.sql` — football wrong-margin award **2 → 1** (5/3/1/0). Keep in sync with `src/utils.ts` and `sync-settlement`.
 
 ### 4.5 Data-Fetching Strategy (React Query)
 

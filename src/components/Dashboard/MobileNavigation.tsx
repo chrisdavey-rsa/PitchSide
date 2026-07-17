@@ -1,7 +1,6 @@
 import React from 'react';
-import { UserCheck, HelpCircle, Lock, LogOut, Users } from 'lucide-react';
+import { UserCheck, HelpCircle, Lock, Users } from 'lucide-react';
 import { UserProfile } from '../../types';
-import { useUnreadMessages } from '../../hooks/useUnreadMessages';
 import { RadialOrigin, radialOriginFromEvent } from '../../radial';
 
 interface MobileNavigationProps {
@@ -10,7 +9,6 @@ interface MobileNavigationProps {
   onOpenRules: (origin?: RadialOrigin) => void;
   onOpenAdmin: () => void;
   onOpenLeagues: (origin?: RadialOrigin) => void;
-  onLogout: () => void;
   isUserInAnyLeague?: boolean;
 }
 
@@ -20,27 +18,30 @@ export default function MobileNavigation({
   onOpenRules,
   onOpenAdmin,
   onOpenLeagues,
-  onLogout,
   isUserInAnyLeague = true,
 }: MobileNavigationProps) {
-  const unreadMessagesCount = useUnreadMessages(user?.id);
   const highlightLeagues = !isUserInAnyLeague;
 
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-950/90 backdrop-blur-lg border-t border-slate-800 z-40 flex items-center justify-around px-2 py-3 safe-area-pb">
+    <div className="md:hidden fixed bottom-0 left-0 right-0 w-full bg-slate-950/95 backdrop-blur-lg border-t border-slate-800 z-[110] flex items-center justify-around px-2 py-3 safe-area-pb pointer-events-auto">
       <button
-        onClick={(e) => onOpenAccount(radialOriginFromEvent(e))}
-        className="flex flex-col items-center gap-1 p-2 text-slate-400 hover:text-white transition-colors relative"
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenAccount(radialOriginFromEvent(e));
+        }}
+        className="flex flex-col items-center gap-1 p-2 text-slate-400 hover:text-white transition-colors"
       >
         <UserCheck className="w-5 h-5 text-emerald-450" />
         <span className="text-[10px] font-medium">Account</span>
-        {unreadMessagesCount > 0 && (
-          <span className="absolute top-1 right-2 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
-        )}
       </button>
 
       <button
-        onClick={(e) => onOpenLeagues(radialOriginFromEvent(e))}
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenLeagues(radialOriginFromEvent(e));
+        }}
         className={`relative overflow-hidden flex flex-col items-center gap-1 p-2 transition-colors ${
           highlightLeagues
             ? "text-emerald-300 ring-2 ring-emerald-400 rounded-lg shadow-[0_0_16px_rgba(16,185,129,0.35)]"
@@ -55,7 +56,11 @@ export default function MobileNavigation({
       </button>
 
       <button
-        onClick={(e) => onOpenRules(radialOriginFromEvent(e))}
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenRules(radialOriginFromEvent(e));
+        }}
         className="flex flex-col items-center gap-1 p-2 text-slate-400 hover:text-white transition-colors"
       >
         <HelpCircle className="w-5 h-5 text-blue-400" />
@@ -71,14 +76,6 @@ export default function MobileNavigation({
           <span className="text-[10px] font-medium">Admin</span>
         </button>
       )}
-
-      <button
-        onClick={onLogout}
-        className="flex flex-col items-center gap-1 p-2 text-slate-400 hover:text-red-400 transition-colors"
-      >
-        <LogOut className="w-5 h-5" />
-        <span className="text-[10px] font-medium">Logout</span>
-      </button>
     </div>
   );
 }

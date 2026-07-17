@@ -14,7 +14,7 @@
 //   SUPABASE_SERVICE_ROLE_KEY    — service role key (auto-injected on deploy)
 // ============================================================================
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",

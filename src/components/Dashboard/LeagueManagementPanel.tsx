@@ -1,17 +1,21 @@
 import React, { useState } from "react";
 import { motion } from "motion/react";
-import { Award, X, Search, Eye, EyeOff, Wand2 } from "lucide-react";
+import { Award, X, Search, Eye, EyeOff, Wand2, Lock, ChevronUp, ChevronDown } from "lucide-react";
 import { btnPrimary, btnSecondary, btnClose } from "../../ui";
 import { getCompetitions } from "../../competitions";
 import { SportType, UserProfile, League } from "../../types";
 import type { LeaderboardRecord } from "../../supabase";
 import {
   filterLeagues,
+  sortLeagues,
   getLeagueSeason,
   getAvailableSports,
   sportLabel,
   generateStrongPassword,
+  type LeagueSortKey,
+  type LeagueSortDir,
 } from "../../leagues";
+import { getAvailableSeasons } from "../../seasons";
 
 type LeagueMemberDisplay = LeaderboardRecord & {
   displayPoints: number;
@@ -127,18 +131,44 @@ export default function LeagueManagementPanel({
   onClose,
 }: LeagueManagementPanelProps) {
   const [showLeaguePassword, setShowLeaguePassword] = useState(false);
+  const [sortKey, setSortKey] = useState<LeagueSortKey>("name");
+  const [sortDir, setSortDir] = useState<LeagueSortDir>("asc");
+  const availableSeasons = getAvailableSeasons();
 
   const competitions = getCompetitions();
   const availableSports = getAvailableSports(competitions);
   const createCompetitions = competitions.filter((c) => c.sport === leagueSportInput);
   const joinedLeagueIds = new Set(userLeagues.map((l) => l.id));
 
-  const filteredLeagues = filterLeagues(leagues, competitions, {
-    search: viewLeaguesSearchName,
-    sport: viewLeaguesSport,
-    competitionId: viewLeaguesCompId,
-    season: viewLeaguesSeason,
-  }).sort((a, b) => a.name.localeCompare(b.name));
+  const filteredLeagues = sortLeagues(
+    filterLeagues(leagues, competitions, {
+      search: viewLeaguesSearchName,
+      sport: viewLeaguesSport,
+      competitionId: viewLeaguesCompId,
+      season: viewLeaguesSeason,
+    }),
+    sortKey,
+    sortDir,
+  );
+
+  const toggleSort = (key: LeagueSortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      // Sensible defaults: name A→Z, members high→low, privacy public-first
+      setSortDir(key === "members" ? "desc" : "asc");
+    }
+  };
+
+  const SortChevron = ({ active }: { active: boolean }) =>
+    active ? (
+      sortDir === "asc" ? (
+        <ChevronUp className="w-3 h-3 inline-block ml-0.5" />
+      ) : (
+        <ChevronDown className="w-3 h-3 inline-block ml-0.5" />
+      )
+    ) : null;
 
   const tabs: { key: "view" | "join" | "create"; label: string }[] = [
     { key: "view", label: "View" },
@@ -163,7 +193,7 @@ export default function LeagueManagementPanel({
   return (
     <motion.div
       transition={{ duration: 0.5, ease: "easeInOut" }}
-      className={`bg-slate-900/60 rounded-2xl border border-slate-800/70 p-5 flex flex-col relative overflow-hidden backdrop-blur-xs h-[480px] transition-all ${!isUserInAnyLeague ? "ring-2 ring-emerald-500 shadow-[0_0_30px_rgba(16,185,129,0.2)]" : ""}`}
+      className={`bg-slate-900/60 rounded-2xl border border-slate-800/70 p-5 md:p-7 flex flex-col relative overflow-hidden backdrop-blur-xs h-[480px] md:h-[min(85vh,820px)] transition-all ${!isUserInAnyLeague ? "ring-2 ring-emerald-500 shadow-[0_0_30px_rgba(16,185,129,0.2)]" : ""}`}
     >
       {/* Header with title, submenu and optional close */}
       <div className="flex items-center justify-between pb-2 border-b border-slate-800/60 gap-3 shrink-0">
@@ -281,9 +311,11 @@ export default function LeagueManagementPanel({
                               setEditingLeagueId(null);
                             } else {
                               setEditingLeagueId(activeLeague.id);
-                              setEditIsPublic(activeLeague.isPublic ?? false);
-                              setEditLimitParticipants(!!activeLeague.maxParticipants);
-                              setEditMaxParticipantsInput(activeLeague.maxParticipants ? String(activeLeague.maxParticipants) : "10");
+                              setEditIsPublic(!(activeLeague.isPrivate ?? activeLeague.isPublic === false));
+                              setEditLimitParticipants(!!(activeLeague.maxPlayers ?? activeLeague.maxParticipants));
+                              setEditMaxParticipantsInput(
+                                String(activeLeague.maxPlayers ?? activeLeague.maxParticipants ?? 20),
+                              );
                             }
                           }}
                           className="text-blue-400 hover:text-blue-300 px-2 py-1 rounded border border-blue-500/10 hover:border-blue-500/30 cursor-pointer transition-colors"
@@ -440,19 +472,55 @@ export default function LeagueManagementPanel({
                   className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-xs text-slate-300 focus:outline-hidden focus:border-blue-500 col-span-2"
                 >
                   <option value="ALL">All Seasons</option>
-                  <option value="2026">2026</option>
-                  <option value="2025">2025</option>
-                  <option value="2024">2024</option>
+                  {availableSeasons.map((season) => (
+                    <option key={season} value={season}>
+                      {season}
+                    </option>
+                  ))}
                 </select>
               </div>
 
-              {/* Column headings */}
+              {/* Column headings — clickable sort */}
               <div className="grid grid-cols-12 gap-2 px-2.5 mt-3 pb-1 border-b border-slate-800/60 text-[9px] uppercase tracking-wider font-mono text-slate-500 shrink-0">
-                <span className="col-span-3">League Name</span>
-                <span className="col-span-2 text-center">Members</span>
+                <button
+                  type="button"
+                  onClick={() => toggleSort("name")}
+                  className={`col-span-3 text-left flex items-center cursor-pointer hover:text-slate-300 transition-colors ${
+                    sortKey === "name" ? "text-emerald-400" : ""
+                  }`}
+                >
+                  League Name
+                  <SortChevron active={sortKey === "name"} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleSort("members")}
+                  className={`col-span-2 text-center flex items-center justify-center cursor-pointer hover:text-slate-300 transition-colors ${
+                    sortKey === "members" ? "text-emerald-400" : ""
+                  }`}
+                >
+                  Members
+                  <SortChevron active={sortKey === "members"} />
+                </button>
                 <span className="col-span-3">Competition</span>
                 <span className="col-span-2">Sport</span>
-                <span className="col-span-2">Season</span>
+                <button
+                  type="button"
+                  onClick={() => toggleSort("privacy")}
+                  className={`col-span-2 text-left flex items-center cursor-pointer hover:text-slate-300 transition-colors ${
+                    sortKey === "privacy" ? "text-emerald-400" : ""
+                  }`}
+                  title={
+                    sortKey === "privacy"
+                      ? sortDir === "asc"
+                        ? "Public first"
+                        : "Private first"
+                      : "Sort by privacy"
+                  }
+                >
+                  Privacy
+                  <SortChevron active={sortKey === "privacy"} />
+                </button>
               </div>
 
               {/* League list (scrolls; hub itself stays fixed height) */}
@@ -468,12 +536,32 @@ export default function LeagueManagementPanel({
                     return (
                       <div
                         key={league.id}
-                        onClick={() => setActiveLeagueId(league.id)}
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setActiveLeagueId(league.id);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setActiveLeagueId(league.id);
+                          }
+                        }}
                         className={`grid grid-cols-12 gap-2 items-center p-2.5 rounded-xl cursor-pointer transition-colors group ${isJoined ? "bg-emerald-500/5 border border-emerald-500/30 hover:bg-emerald-500/10" : "bg-slate-950/40 border border-slate-800 hover:bg-slate-900"}`}
                       >
                         <div className="col-span-3 min-w-0">
-                          <h4 className="text-xs font-bold text-white truncate">
-                            {league.name}
+                          <h4 className="text-xs font-bold text-white truncate inline-flex items-center gap-1.5 max-w-full">
+                            {(league.isPrivate || league.isPublic === false) && (
+                              <Lock
+                                className="w-3 h-3 text-slate-400 shrink-0"
+                                strokeWidth={1.75}
+                                aria-label="Private league"
+                              />
+                            )}
+                            <span className="truncate">{league.name}</span>
                           </h4>
                           {isJoined && (
                             <span className="text-[8px] text-emerald-400 font-mono uppercase tracking-wide">
@@ -490,8 +578,16 @@ export default function LeagueManagementPanel({
                         <div className="col-span-2 min-w-0 text-[10px] text-slate-400 font-mono capitalize truncate">
                           {comp ? sportLabel(comp.sport) : "—"}
                         </div>
-                        <div className="col-span-2 text-[10px] text-slate-400 font-mono">
-                          {getLeagueSeason(league, comp)}
+                        <div className="col-span-2 text-[10px] font-mono">
+                          {league.isPrivate || league.isPublic === false ? (
+                            <span className="text-slate-400 bg-slate-800/80 border border-slate-700 px-1.5 py-0.5 rounded uppercase text-[8px]">
+                              Private
+                            </span>
+                          ) : (
+                            <span className="text-blue-400 bg-blue-500/15 px-1.5 py-0.5 rounded uppercase text-[8px]">
+                              Public
+                            </span>
+                          )}
                         </div>
                       </div>
                     );
@@ -597,9 +693,11 @@ export default function LeagueManagementPanel({
                     onChange={(e) => setLeagueSeasonInput(e.target.value)}
                     className="w-full text-xs bg-slate-950 border border-slate-800 p-2 rounded text-white focus:outline-hidden font-sans"
                   >
-                    <option value="2026">2026</option>
-                    <option value="2025">2025</option>
-                    <option value="2024">2024</option>
+                    {availableSeasons.map((season) => (
+                      <option key={season} value={season}>
+                        {season}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>

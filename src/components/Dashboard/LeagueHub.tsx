@@ -1,11 +1,15 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 import { motion } from "motion/react";
-import { Trophy, Award, ChevronRight } from "lucide-react";
+import { Trophy, Award, ChevronRight, Lock, Settings } from "lucide-react";
 import { UserProfile, Match, League } from "../../types";
 import { getCompetitions } from "../../competitions";
 import { calculatePoints } from "../../utils";
 import { getCountryFlag, MetallicTickWithLightning } from "./shared";
 import type { LeaderboardRecord } from "../../supabase";
+import InviteButton from "../League/InviteButton";
+import LeagueSettingsModal, {
+  type LeagueSettingsPayload,
+} from "../League/LeagueSettingsModal";
 
 type LeagueMemberDisplay = LeaderboardRecord & {
   displayPoints: number;
@@ -31,6 +35,10 @@ interface LeagueHubProps {
   onBack: () => void;
   onRequestLeave: (leagueId: string) => void;
   onJoinLeague: (league: League, password: string) => Promise<void>;
+  onUpdateLeagueSettings: (
+    leagueId: string,
+    settings: LeagueSettingsPayload,
+  ) => Promise<void>;
   triggerToast: (msg: string) => void;
 }
 
@@ -52,8 +60,20 @@ function LeagueDetailView({
   onBack,
   onRequestLeave,
   onJoinLeague,
+  onUpdateLeagueSettings,
   triggerToast,
 }: LeagueHubProps) {
+  const [showSettings, setShowSettings] = useState(false);
+  const isAdmin = activeLeague.creatorId === user.id;
+  const isMember = activeLeagueMembers.includes(user.id);
+  const isPrivate = !!activeLeague.isPrivate || activeLeague.isPublic === false;
+
+  /** Live predictor rows: strictly this league's members (never global bleed). */
+  const scopedMembers = useMemo(() => {
+    const memberSet = new Set(activeLeagueMembers);
+    return leagueMembersMemoized.filter((m) => memberSet.has(m.playerId));
+  }, [leagueMembersMemoized, activeLeagueMembers]);
+
   const compName =
     getCompetitions().find((c) => c.id === activeLeague.competitionId)?.name ||
     "Multi-Tournament";
@@ -80,8 +100,15 @@ function LeagueDetailView({
             </button>
           </div>
 
-          <h1 className="text-2xl sm:text-3xl font-extrabold font-display text-white tracking-tight pt-1">
-            {activeLeague.name}
+          <h1 className="text-2xl sm:text-3xl font-extrabold font-display text-white tracking-tight pt-1 inline-flex items-center gap-2.5 flex-wrap">
+            {isPrivate && (
+              <Lock
+                className="w-5 h-5 sm:w-6 sm:h-6 text-slate-400 shrink-0"
+                strokeWidth={1.75}
+                aria-label="Private league"
+              />
+            )}
+            <span>{activeLeague.name}</span>
           </h1>
           <p className="text-slate-400 text-xs font-sans">
             Tournament:{" "}
@@ -94,9 +121,9 @@ function LeagueDetailView({
         </div>
 
         {/* Registered users at the far right of header */}
-        <div className="text-right shrink-0 relative z-10 flex flex-col items-end gap-2">
-          <span className="text-xs bg-emerald-500/10 text-emerald-400 font-bold border border-emerald-500/20 px-3.5 py-2.5 rounded-xl block font-mono">
-            👥 {leagueMembersMemoized.length} Registered Players
+        <div className="text-right shrink-0 relative z-10 flex flex-col items-stretch sm:items-end gap-2 w-full sm:w-auto">
+          <span className="text-xs bg-emerald-500/10 text-emerald-400 font-bold border border-emerald-500/20 px-3.5 py-2.5 rounded-xl block font-mono text-center sm:text-right">
+            👥 {scopedMembers.length} Registered Players
           </span>
         </div>
       </div>
@@ -115,7 +142,7 @@ function LeagueDetailView({
           </div>
 
           <div className="space-y-1.5">
-            {leagueMembersMemoized.map((member, idx) => {
+            {scopedMembers.map((member, idx) => {
               const isMe = member.playerId === user.id;
               const matchUser = registeredUsers.find(
                 (r) => r.id === member.playerId,
@@ -261,28 +288,47 @@ function LeagueDetailView({
             })}
           </div>
 
-          <div className="mt-2 pt-4 border-t border-slate-800/65 flex justify-between items-center">
-            <span className="text-[10px] font-mono text-slate-500 uppercase">
-              League Join Code:
-            </span>
-            <span className="text-xs font-mono text-emerald-400 font-bold bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20 select-all cursor-text">
-              {activeLeague.id}
-            </span>
-          </div>
+          <div className="mt-2 pt-4 border-t border-slate-800/65 space-y-3">
+            <div className="flex justify-between items-center gap-3">
+              <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">
+                League code
+              </span>
+              <span className="text-xs font-mono text-emerald-400 font-bold bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20 select-all cursor-text">
+                {activeLeague.id}
+              </span>
+            </div>
 
-          {/* Leave or Join League button at the bottom of Standings box */}
-          <div className="border-t border-slate-805/80 pt-4 mt-2">
-            {activeLeagueMembers.includes(user.id) ? (
+            {isMember && (
+              <InviteButton
+                league={activeLeague}
+                onToast={triggerToast}
+                className="w-full [&_button]:w-full"
+              />
+            )}
+
+            <hr className="border-slate-800" />
+
+            {isAdmin && (
               <button
+                type="button"
+                onClick={() => setShowSettings(true)}
+                className="w-full inline-flex items-center justify-center gap-2 text-xs font-mono font-bold uppercase tracking-wider bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-slate-200 py-2.5 rounded-xl cursor-pointer transition-colors"
+              >
+                <Settings className="w-3.5 h-3.5" />
+                League Settings
+              </button>
+            )}
+
+            {isMember ? (
+              <button
+                type="button"
                 onClick={() => onRequestLeave(activeLeague.id)}
                 className="w-full text-xs font-mono font-bold bg-red-950/15 hover:bg-red-950/40 border border-red-500/20 hover:border-red-500/40 text-red-400 py-2.5 rounded-xl cursor-pointer transition-colors text-center block"
               >
-                {activeLeague.creatorId === user.id
-                  ? "DELETE LEAGUE"
-                  : "LEAVE LEAGUE"}
+                {isAdmin ? "Delete League" : "Leave League"}
               </button>
             ) : isJoiningActiveLeague ? (
-              <div className="space-y-2 w-full mt-2 border border-blue-500/30 rounded-xl p-3 bg-blue-950/10">
+              <div className="space-y-2 w-full border border-blue-500/30 rounded-xl p-3 bg-blue-950/10">
                 <input
                   type="password"
                   placeholder="Enter League Password"
@@ -292,12 +338,14 @@ function LeagueDetailView({
                 />
                 <div className="flex gap-2">
                   <button
+                    type="button"
                     onClick={() => setIsJoiningActiveLeague(false)}
                     className="flex-1 text-xs font-mono font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 py-2 rounded-lg cursor-pointer transition-colors text-center"
                   >
                     CANCEL
                   </button>
                   <button
+                    type="button"
                     onClick={async () => {
                       if (activeLeagueJoinPassword === activeLeague.password) {
                         try {
@@ -319,6 +367,7 @@ function LeagueDetailView({
               </div>
             ) : (
               <button
+                type="button"
                 onClick={() => {
                   setIsJoiningActiveLeague(true);
                   setActiveLeagueJoinPassword("");
@@ -439,7 +488,7 @@ function LeagueDetailView({
                         </span>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
-                          {leagueMembersMemoized.map((member) => {
+                          {scopedMembers.map((member) => {
                             const memberPred = member.predictions?.[match.id];
                             const hasPred = memberPred && memberPred.submitted;
                             const isMe = member.playerId === user.id;
@@ -531,9 +580,17 @@ function LeagueDetailView({
           )}
         </div>
       </div>
+
+      {showSettings && isAdmin && (
+        <LeagueSettingsModal
+          league={activeLeague}
+          memberCount={scopedMembers.length}
+          onClose={() => setShowSettings(false)}
+          onSave={(payload) => onUpdateLeagueSettings(activeLeague.id, payload)}
+        />
+      )}
     </motion.div>
   );
 }
 
 export default LeagueDetailView;
-export { default as LeagueManagementPanel } from './LeagueManagementPanel';

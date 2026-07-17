@@ -13,7 +13,7 @@
 //   SUPABASE_SERVICE_ROLE_KEY    — service role key (auto-injected on deploy)
 // ============================================================================
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -121,7 +121,11 @@ function extractFinalScores(sport: Sport, item: any): FinalScores | null {
     : extractRugbyFinalScores(item);
 }
 
-/** Keep in sync with src/utils.ts calculateFootballPoints */
+/**
+ * Football scoring (5 / 3 / 1 / 0).
+ * Keep in sync with src/utils.ts calculateFootballPoints and
+ * SQL public.pitchside_football_points.
+ */
 function calculateFootballPoints(
   predictedHome: number,
   predictedAway: number,
@@ -146,7 +150,8 @@ function calculateFootballPoints(
   const actualMargin = actualHome - actualAway;
   if (predictedMargin === actualMargin) return 3;
 
-  return 2;
+  // Correct outcome, wrong margin (e.g. predicted 2–0, finished 1–0)
+  return 1;
 }
 
 /** Keep in sync with src/utils.ts calculateRugbyPoints / pitchside_rugby_points */

@@ -41,7 +41,7 @@ const FOOTBALL_ROWS: ScoringRow[] = [
     accent: "text-blue-400 bg-blue-500/15",
   },
   {
-    points: "2",
+    points: "1",
     title: "Correct Winner",
     desc: "Right result, wrong margin.",
     icon: <Trophy className="h-4 w-4" />,
@@ -177,7 +177,7 @@ export default function SportIntroModal({ sport, onDismiss }: SportIntroModalPro
               <>
                 <LifeBuoy className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
                 <p className="text-[11px] leading-relaxed text-emerald-200/90">
-                  <span className="font-bold text-emerald-300">The Forgiveness Mechanic:</span>{" "}
+                  <span className="font-bold text-emerald-300">The Football Forgiveness Mechanic:</span>{" "}
                   your worst rounds get automatically dropped in long league seasons, so a bad
                   week won't sink you.
                 </p>
@@ -187,7 +187,7 @@ export default function SportIntroModal({ sport, onDismiss }: SportIntroModalPro
                 <Ban className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
                 <p className="text-[11px] leading-relaxed text-slate-300">
                   <span className="font-bold text-white">No drops in Rugby.</span>{" "}
-                  Tournaments are short, so every single prediction counts toward your total.
+                  Every prediction counts toward your total.
                 </p>
               </>
             )}

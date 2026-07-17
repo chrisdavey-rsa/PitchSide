@@ -8,6 +8,7 @@ import { UserProfile } from '../types';
 import { useAdminData } from './admin/useAdminData';
 import AdminLayout, { AdminTab } from './admin/AdminLayout';
 import AdminDashboard from './admin/AdminDashboard';
+import AnalyticsDashboard from './admin/AnalyticsDashboard';
 import PredictionsViewer from './admin/PredictionsViewer';
 import PlayerManager from './admin/PlayerManager';
 import FixturesManager from './admin/FixturesManager';
@@ -20,6 +21,8 @@ interface AdminPanelProps {
   registeredUsers: UserProfile[];
   onToggleAdmin: (userId: string) => void;
   onDeleteUser: (userId: string) => void;
+  /** Session user must be admin; analytics and panel are gated on this. */
+  isAdmin: boolean;
 }
 
 export default function AdminPanel({
@@ -27,6 +30,7 @@ export default function AdminPanel({
   registeredUsers,
   onToggleAdmin,
   onDeleteUser,
+  isAdmin,
 }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
   const [fixtureFilter, setFixtureFilter] = useState<'all' | 'upcoming' | 'completed'>('all');
@@ -64,6 +68,10 @@ export default function AdminPanel({
     []
   );
 
+  if (!isAdmin) {
+    return null;
+  }
+
   return (
     <AdminLayout
       onClose={onClose}
@@ -77,6 +85,10 @@ export default function AdminPanel({
     >
       {activeTab === 'dashboard' && (
         <AdminDashboard onNavigate={handleNavigate} />
+      )}
+
+      {activeTab === 'analytics' && (
+        <AnalyticsDashboard isAdmin={isAdmin} />
       )}
 
       {activeTab === 'predictions' && (

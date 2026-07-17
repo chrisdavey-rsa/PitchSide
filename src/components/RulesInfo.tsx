@@ -104,10 +104,10 @@ export default function RulesInfo({ user, onClose }: RulesInfoProps) {
               </div>
 
               <div className="flex items-start gap-3">
-                <div className="w-10 h-6 shrink-0 bg-slate-500/30 text-slate-300 font-mono text-xs font-bold flex items-center justify-center rounded-sm">2 pts</div>
+                <div className="w-10 h-6 shrink-0 bg-slate-500/30 text-slate-300 font-mono text-xs font-bold flex items-center justify-center rounded-sm">1 pt</div>
                 <div>
                   <h4 className="text-sm font-semibold text-white">Correct Winner / Incorrect Margin</h4>
-                  <p className="text-xs text-slate-400">Picking the correct outcome but with a different margin. E.g., predicted 1–0 when actual result is 3–0.</p>
+                  <p className="text-xs text-slate-400">Picking the correct outcome but with a different margin. E.g., predicted 2–0 when the match finished 1–0.</p>
                 </div>
               </div>
 
@@ -181,10 +181,10 @@ export default function RulesInfo({ user, onClose }: RulesInfoProps) {
         </div>
       </div>
 
-      {/* ================= FORGIVENESS MECHANIC ================= */}
+      {/* ================= FOOTBALL FORGIVENESS MECHANIC ================= */}
       <h3 className="text-lg font-bold font-display text-white mt-8 mb-3 flex items-center gap-2">
         <span className="w-1.5 h-5 bg-emerald-400 rounded-full" />
-        The Forgiveness Mechanic
+        The Football Forgiveness Mechanic
       </h3>
       <div className="p-5 bg-slate-950/40 rounded-xl border border-emerald-900/30">
         <div className="flex items-center gap-2 mb-3">
@@ -192,7 +192,8 @@ export default function RulesInfo({ user, onClose }: RulesInfoProps) {
           <h4 className="text-base font-bold font-display text-emerald-300">Your Best Results Count — Worst Weeks Are Dropped</h4>
         </div>
         <p className="text-sm text-slate-300 leading-relaxed mb-4">
-          Nobody predicts a perfect season. To keep the leaderboard fair, each competition lets you
+          Nobody predicts a perfect football season. To keep the leaderboard fair, each football
+          competition lets you
           <span className="text-white font-semibold"> drop a number of your worst results</span>. Once
           you've played more games than your drop allowance, your lowest-scoring weeks stop counting
           toward your total — so a couple of bad rounds won't sink your season.
@@ -222,7 +223,7 @@ export default function RulesInfo({ user, onClose }: RulesInfoProps) {
         </div>
 
         <div className="bg-slate-900/50 rounded-lg border border-slate-800 p-3.5">
-          <p className="text-xs font-bold text-slate-300 uppercase font-mono mb-2">Drop Allowance By Competition</p>
+          <p className="text-xs font-bold text-slate-300 uppercase font-mono mb-2">Football Drop Allowance By Competition</p>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
             <div className="bg-slate-950/50 rounded-md p-2 border border-slate-800">
               <div className="text-white font-semibold">Premier League</div>
@@ -237,14 +238,14 @@ export default function RulesInfo({ user, onClose }: RulesInfoProps) {
               <div className="text-emerald-400 font-mono">4 drops</div>
             </div>
             <div className="bg-slate-950/50 rounded-md p-2 border border-slate-800">
-              <div className="text-white font-semibold">Cups & Rugby</div>
+              <div className="text-white font-semibold">Other Football</div>
               <div className="text-slate-500 font-mono">0 drops</div>
             </div>
           </div>
           <p className="text-[11px] text-slate-500 mt-2.5 leading-relaxed">
-            Knockout cups and rugby tournaments are short, so every game counts — no drops. Long league
-            seasons grant more forgiveness. Drops only kick in once you've played more games than the
-            allowance, so you always keep a full set of results.
+            Long football league seasons grant more forgiveness. Drops only kick in once you've played
+            more games than the allowance, so you always keep a full set of results. Rugby has no drops
+            — every rugby prediction counts toward your total.
           </p>
         </div>
       </div>

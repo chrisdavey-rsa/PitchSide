@@ -28,14 +28,3 @@ export const RUGBY_COMPETITIONS: Competition[] = [
 ];
 
 export const ALL_COMPETITIONS = [...FOOTBALL_COMPETITIONS, ...RUGBY_COMPETITIONS];
-
-export interface LeaderboardUser {
-  rank: number;
-  nickname: string;
-  points: number;
-  predictionsMade: number;
-  accuracy: string;
-  isCurrentUser?: boolean;
-}
-
-export const INITIAL_LEADERBOARD: LeaderboardUser[] = [];

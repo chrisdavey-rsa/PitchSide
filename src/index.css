@@ -125,6 +125,37 @@
   animation: psMarkDotPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 1s forwards;
 }
 
+/* Weekly streak tier styles */
+@keyframes streakBluePulse {
+  0%,
+  100% {
+    text-shadow: 0 0 6px rgba(56, 189, 248, 0.35);
+  }
+  50% {
+    text-shadow: 0 0 14px rgba(56, 189, 248, 0.75);
+  }
+}
+.streak-tier-blue {
+  color: #38bdf8;
+  animation: streakBluePulse 2.4s ease-in-out infinite;
+}
+@keyframes streakEliteShimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+.streak-tier-elite {
+  background: linear-gradient(90deg, #fbbf24, #f97316, #fbbf24);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: streakEliteShimmer 3s linear infinite;
+}
+
 /* Custom scrollbar to keep layout premium */
 ::-webkit-scrollbar {
   width: 6px;
@@ -173,8 +204,9 @@
   position: absolute;
   top: -30%;
   left: -20%;
-  width: 150%;
-  height: 160%;
+  width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
   pointer-events: none;
   z-index: -20;
   transform: rotate(-30deg);
@@ -211,6 +243,38 @@
 @keyframes shimmer {
   0% { transform: translateX(-150%); }
   100% { transform: translateX(150%); }
+}
+
+/* Power-up wallet: sequential shimmer across stacked mobile icons */
+@keyframes powerUpWalletShimmer {
+  0% {
+    transform: translateX(-150%);
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  18% {
+    transform: translateX(150%);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(150%);
+    opacity: 0;
+  }
+}
+.power-up-wallet-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.22) 50%,
+    transparent 100%
+  );
+  animation: powerUpWalletShimmer
+    calc(var(--wallet-count, 2) * 1.75s)
+    ease-in-out
+    infinite;
+  animation-delay: calc(var(--wallet-index, 0) * 1.75s);
 }
 
 .sparkling-light-particle {

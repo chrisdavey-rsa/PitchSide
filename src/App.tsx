@@ -4,9 +4,10 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Routes, Route, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { Award, Lock, Star } from 'lucide-react';
-import { dbFetchPlayers, dbDeletePlayerAccount, dbSaveArchivedPlayer, dbSaveUnsubscribedEmail, dbUpdatePlayerAdmin, dbFetchPredictions, supabase } from './supabase';
+import { dbFetchPlayers, dbDeletePlayerAccount, dbSaveArchivedPlayer, dbSaveUnsubscribedEmail, dbUpdatePlayerAdmin, dbFetchPredictions, supabase, testSupabaseConnection } from './supabase';
 import { UserProfile } from './types';
 import PitchSideLogo from './components/PitchSideLogo';
 import PitchSideMark from './components/PitchSideMark';
@@ -18,12 +19,26 @@ import Dashboard from './components/Dashboard';
 import RulesInfo from './components/RulesInfo';
 import AdminPanel from './components/AdminPanel';
 import AccountPortal from './components/AccountPortal';
+import PWAInstallBanner from './components/PWAInstallBanner';
+import JoinLeague from './pages/JoinLeague';
 import { RadialOrigin, radialClip } from './radial';
+import { useBodyScrollLock } from './hooks/useBodyScrollLock';
+import { useOverlayHistory, retainOverlayHistoryDuringTransition, transferOverlay } from './hooks/useOverlayHistory';
+import { readPendingInvite } from './lib/pendingInvite';
 
 /** Which guest auth screen is currently shown. */
 type GuestAuthView = 'login' | 'signup' | 'reset-request' | 'reset-update';
 
+/**
+ * Router-aware application shell. Must render as a descendant of <BrowserRouter>
+ * (mounted in main.tsx) because it calls useNavigate().
+ */
 export default function App() {
+  return <AppShell />;
+}
+
+function AppShell() {
+  const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [isSplash, setIsSplash] = useState(true);
   const [guestAuthView, setGuestAuthView] = useState<GuestAuthView>('login');
@@ -45,7 +60,27 @@ export default function App() {
     setAccountOrigin(origin ?? null);
     setShowAccount(true);
   };
+  const closeRules = useCallback(() => setShowRules(false), []);
+  const closeAdmin = useCallback(() => setShowAdmin(false), []);
+  const closeAccount = useCallback(() => setShowAccount(false), []);
+  const suppressRulesBackdropCloseRef = useRef(true);
+
+  useEffect(() => {
+    if (!showRules) return;
+    suppressRulesBackdropCloseRef.current = true;
+    const timer = window.setTimeout(() => {
+      suppressRulesBackdropCloseRef.current = false;
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [showRules]);
+
   const [externalLeagueSelection, setExternalLeagueSelection] = useState<string | null>(null);
+
+  // Lock background scroll + intercept mobile edge-swipe back for App-level overlays
+  useBodyScrollLock(showRules || showAdmin || showAccount);
+  useOverlayHistory(showRules, closeRules, 'rules');
+  useOverlayHistory(showAdmin, closeAdmin, 'admin');
+  // Account portal owns its own overlay-history entry (and nested scroll lock)
 
   const [registeredUsers, setRegisteredUsers] = useState<UserProfile[]>([]);
 
@@ -85,21 +120,11 @@ export default function App() {
 
   // Verify Supabase connection on load
   useEffect(() => {
-    const testSupabaseConnection = async () => {
-      if (!supabase) return;
-      try {
-        // The table containing players/users is called profiles
-        const { data, error } = await supabase.from('profiles').select('*').limit(1);
-        if (error) {
-          console.error("Supabase connection failed:", error);
-        } else {
-          console.log("Supabase connected successfully:", data);
-        }
-      } catch (err) {
-        console.error("Supabase connection error:", err);
+    void testSupabaseConnection().then((result) => {
+      if (!result.ok) {
+        console.error('Supabase connection failed:', result.error);
       }
-    };
-    testSupabaseConnection();
+    });
   }, []);
 
   // Listen for Supabase auth events: password recovery links & email verification redirects
@@ -240,9 +265,18 @@ export default function App() {
   const handleAuthSuccess = (user: UserProfile) => {
     setCurrentUser(user);
     localStorage.setItem('pitchside_logged_in', JSON.stringify(user));
+    const pendingInvite = readPendingInvite();
+    if (pendingInvite) {
+      navigate(`/join/${pendingInvite}`);
+    }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await supabase?.auth.signOut();
+    } catch (err) {
+      console.warn('Supabase signOut failed during logout:', err);
+    }
     setCurrentUser(null);
     localStorage.removeItem('pitchside_logged_in');
   };
@@ -344,7 +378,8 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-slate-950">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-slate-950 overflow-x-hidden">
+      {!isSplash && <PWAInstallBanner />}
       <AnimatePresence mode="wait">
         {isSplash ? (
           /* Splash Screen Overlay Intro */
@@ -388,22 +423,43 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.4 }}
-            className="flex-1 flex flex-col p-4 sm:p-6 lg:p-8 relative"
+            className="flex-1 flex flex-col min-h-0 p-4 sm:p-6 lg:p-8 relative overflow-x-hidden"
           >
-            {/* Background elements */}
-            <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-blue-500/5 rounded-full blur-3xl pointer-events-none -z-10" />
-            <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-red-500/5 rounded-full blur-3xl pointer-events-none -z-10" />
-            <div className="magical-diagonal-ribbon pointer-events-none -z-20" />
-            
-            {/* Twinkling star sparkles along the diagonal */}
-            <div className="absolute inset-0 overflow-hidden pointer-events-none -z-15">
-              <div className="sparkling-light-particle top-[15%] left-[25%] text-sm" style={{ animationDelay: '0s' }}>✨</div>
-              <div className="sparkling-light-particle top-[40%] left-[45%] text-sm text-emerald-400" style={{ animationDelay: '1.5s' }}>✦</div>
-              <div className="sparkling-light-particle top-[65%] left-[65%] text-sm text-blue-400" style={{ animationDelay: '0.8s' }}>✨</div>
-              <div className="sparkling-light-particle top-[25%] left-[75%] text-sm" style={{ animationDelay: '2.2s' }}>✦</div>
-              <div className="sparkling-light-particle top-[80%] left-[35%] text-sm text-purple-400" style={{ animationDelay: '3.1s' }}>✨</div>
+            {/* Background elements — fixed to viewport so they never inflate scroll height */}
+            <div className="fixed inset-0 overflow-hidden pointer-events-none -z-10">
+              <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-blue-500/5 rounded-full blur-3xl" />
+              <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-red-500/5 rounded-full blur-3xl" />
+              <div className="magical-diagonal-ribbon" />
+              <div className="absolute inset-0">
+                <div className="sparkling-light-particle top-[15%] left-[25%] text-sm" style={{ animationDelay: '0s' }}>✨</div>
+                <div className="sparkling-light-particle top-[40%] left-[45%] text-sm text-emerald-400" style={{ animationDelay: '1.5s' }}>✦</div>
+                <div className="sparkling-light-particle top-[65%] left-[65%] text-sm text-blue-400" style={{ animationDelay: '0.8s' }}>✨</div>
+                <div className="sparkling-light-particle top-[25%] left-[75%] text-sm" style={{ animationDelay: '2.2s' }}>✦</div>
+                <div className="sparkling-light-particle top-[80%] left-[35%] text-sm text-purple-400" style={{ animationDelay: '3.1s' }}>✨</div>
+              </div>
             </div>
 
+            <Routes>
+              <Route
+                path="/join/:leagueId"
+                element={
+                  <JoinLeague
+                    currentUser={currentUser}
+                    onRequestAuth={(mode) => {
+                      setGuestAuthView(mode === "signup" ? "signup" : "login");
+                      navigate("/");
+                    }}
+                    onJoined={(id) => {
+                      setExternalLeagueSelection(id);
+                      setDashboardWelcome("Welcome to the league — you're in!");
+                    }}
+                  />
+                }
+              />
+              <Route
+                path="*"
+                element={
+                  <>
             {currentUser ? (
               /* Authenticated Platform Dashboard */
               <Dashboard
@@ -504,6 +560,10 @@ export default function App() {
                 </div>
               </div>
             )}
+                  </>
+                }
+              />
+            </Routes>
             {/* Footer hugs the content so short pages don't leave a dead gap */}
             <footer className="pt-6 pb-4 mt-6 text-center text-[10px] text-slate-600 font-mono tracking-widest uppercase border-t border-slate-900/40 w-full max-w-6xl mx-auto flex-shrink-0">
               © {new Date().getFullYear()} PitchSide Predictor • All Rights Reserved
@@ -522,11 +582,17 @@ export default function App() {
             <div
               className="flex min-h-full items-start justify-center p-4 sm:py-16"
               onClick={(e) => {
-                if (e.target === e.currentTarget) setShowRules(false);
+                if (e.target !== e.currentTarget) return;
+                if (suppressRulesBackdropCloseRef.current) return;
+                closeRules();
               }}
             >
-              <div className="w-full max-w-4xl">
-                <RulesInfo user={currentUser} onClose={() => setShowRules(false)} />
+              <div
+                className="w-full max-w-4xl"
+                onClick={(e) => e.stopPropagation()}
+                onTouchEnd={(e) => e.stopPropagation()}
+              >
+                <RulesInfo user={currentUser} onClose={closeRules} />
               </div>
             </div>
           </motion.div>
@@ -535,12 +601,13 @@ export default function App() {
 
       {/* MODAL LAYER: Administrative panel container portal */}
       <AnimatePresence>
-        {showAdmin && (
+        {showAdmin && currentUser?.isAdmin && (
           <AdminPanel
-            onClose={() => setShowAdmin(false)}
+            onClose={closeAdmin}
             registeredUsers={registeredUsers}
             onToggleAdmin={handleToggleAdmin}
             onDeleteUser={handleDeleteUser}
+            isAdmin={currentUser.isAdmin}
           />
         )}
       </AnimatePresence>
@@ -552,10 +619,20 @@ export default function App() {
             user={currentUser}
             registeredUsers={registeredUsers}
             origin={accountOrigin}
-            onClose={() => setShowAccount(false)}
+            onClose={closeAccount}
+            onLogout={handleLogout}
+            onOpenRules={() => {
+              retainOverlayHistoryDuringTransition();
+              closeAccount();
+              requestAnimationFrame(() => openRules());
+            }}
             onSelectLeague={(leagueId) => {
+              // Hand swipe-back history from Account → League hub without a flash-close.
+              transferOverlay("account", "league-hub", () => {
+                /* league-hub close is owned by Dashboard once mounted */
+              });
               setExternalLeagueSelection(leagueId);
-              setShowAccount(false);
+              closeAccount();
             }}
             onUpdateUser={(updatedUser) => {
               setCurrentUser(updatedUser);

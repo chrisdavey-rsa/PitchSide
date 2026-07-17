@@ -9,7 +9,7 @@ interface GeneralSettingsProps {
   user: UserProfile;
   onUpdateUser: (updatedUser: UserProfile) => void;
   setStatusMsg: (msg: { text: string; mode: 'success' | 'error' | 'none' }) => void;
-  setActiveTab: (tab: 'change-email') => void;
+  setActiveTab: (tab: 'change-email' | 'general' | 'change-password' | 'historic-scores' | 'leagues' | 'delete-account') => void;
 }
 
 export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ user, onUpdateUser, setStatusMsg, setActiveTab }) => {

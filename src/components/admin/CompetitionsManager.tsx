@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Plus } from 'lucide-react';
 import { SportType } from '../../types';
+import { getAvailableSeasons, getLatestSeason } from '../../seasons';
 
 interface CompetitionsManagerProps {
   onSuccess: (msg: string) => void;
@@ -11,7 +12,7 @@ export default function CompetitionsManager({ onSuccess, onError }: Competitions
   const [newCompName, setNewCompName] = useState('');
   const [newCompSport, setNewCompSport] = useState<SportType>(SportType.FOOTBALL);
   const [newCompNationality, setNewCompNationality] = useState('Global');
-  const [newCompSeason, setNewCompSeason] = useState('2026');
+  const [newCompSeason, setNewCompSeason] = useState(getLatestSeason);
 
   const handleAddCompetition = (e: React.FormEvent) => {
     e.preventDefault();
@@ -101,9 +102,11 @@ export default function CompetitionsManager({ onSuccess, onError }: Competitions
                 onChange={(e) => setNewCompSeason(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white focus:border-blue-500 focus:outline-hidden"
               >
-                <option value="2026">2026</option>
-                <option value="2025">2025</option>
-                <option value="2024">2024</option>
+                {getAvailableSeasons().map((season) => (
+                  <option key={season} value={season}>
+                    {season}
+                  </option>
+                ))}
               </select>
             </div>
           </div>

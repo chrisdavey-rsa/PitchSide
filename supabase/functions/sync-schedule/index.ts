@@ -13,7 +13,7 @@
 //   SUPABASE_SERVICE_ROLE_KEY    — service role key (auto-injected on deploy)
 // ============================================================================
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -74,6 +74,7 @@ function normalizeFixture(sport: Sport, item: any) {
   return {
     id: `${sport}-${apiId}`,
     competition_id: league.id != null ? String(league.id) : null,
+    competition_name: league.name ?? item.league?.name ?? null,
     sport,
     home_team: teams.home?.name ?? null,
     away_team: teams.away?.name ?? null,

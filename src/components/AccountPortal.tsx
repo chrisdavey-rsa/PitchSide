@@ -1,21 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { UserProfile } from '../types';
 import { getCompetitions } from '../competitions';
-import { useUnreadMessages } from '../hooks/useUnreadMessages';
 import { useLeaguesQuery, useUserLeaguesQuery } from '../hooks/usePitchsideQueries';
+import { useOverlayHistory } from '../hooks/useOverlayHistory';
 import { RadialOrigin, radialClip } from '../radial';
 import { btnClose } from '../ui';
 
-import { SidebarNav } from './AccountPortal/SidebarNav';
+import { SidebarNav, AccountTab } from './AccountPortal/SidebarNav';
 import { GeneralSettings } from './AccountPortal/GeneralSettings';
 import { ChangeEmail } from './AccountPortal/ChangeEmail';
 import { ChangePassword } from './AccountPortal/ChangePassword';
 import { HistoricScores } from './AccountPortal/HistoricScores';
 import { MyLeagues } from './AccountPortal/MyLeagues';
 import { DeleteAccount } from './AccountPortal/DeleteAccount';
-import { Messages } from './AccountPortal/Messages';
+import { MobileAccountHub } from './AccountPortal/MobileAccountHub';
+import { getLatestSeason } from '../seasons';
 
 export interface AccountPortalProps {
   user: UserProfile;
@@ -23,46 +24,94 @@ export interface AccountPortalProps {
   onClose: () => void;
   onUpdateUser: (updatedUser: UserProfile) => void;
   onSelectLeague?: (leagueId: string) => void;
+  onOpenRules?: () => void;
+  onLogout?: () => void;
   origin?: RadialOrigin | null;
 }
 
-export default function AccountPortal({ user, registeredUsers, onClose, onUpdateUser, onSelectLeague, origin }: AccountPortalProps) {
-  const [activeTab, setActiveTab] = useState<'general' | 'change-email' | 'change-password' | 'historic-scores' | 'leagues' | 'messages' | 'delete-account'>('leagues');
+export default function AccountPortal({
+  user,
+  registeredUsers,
+  onClose,
+  onUpdateUser,
+  onSelectLeague,
+  onOpenRules,
+  onLogout,
+  origin,
+}: AccountPortalProps) {
+  const [activeTab, setActiveTab] = useState<AccountTab>('leagues');
 
   const { data: realLeagues = [] } = useLeaguesQuery();
   const { data: userLeagues = [] } = useUserLeaguesQuery(user.id);
-  const unreadMessagesCount = useUnreadMessages(user.id);
 
   const [statusMsg, setStatusMsg] = useState<{ text: string; mode: 'success' | 'error' | 'none' }>({ text: '', mode: 'none' });
 
-  const [selectedSeason, setSelectedSeason] = useState<'2026' | '2025' | '2024'>('2026');
+  const [selectedSeason, setSelectedSeason] = useState(getLatestSeason);
   const [selectedHistoricLeague, setSelectedHistoricLeague] = useState<string>('global');
+
+  useOverlayHistory(true, onClose, 'account');
+
+  const suppressBackdropCloseRef = useRef(true);
+  useEffect(() => {
+    suppressBackdropCloseRef.current = true;
+    const timer = window.setTimeout(() => {
+      suppressBackdropCloseRef.current = false;
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const handleBackdropClose = () => {
+    if (suppressBackdropCloseRef.current) return;
+    onClose();
+  };
 
   return (
     <motion.div
       {...radialClip(origin)}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 md:p-12 font-sans overflow-hidden"
+      className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-6 md:p-12 font-sans overflow-hidden"
     >
-      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
+      <div
+        className="absolute inset-0 bg-slate-950/80 backdrop-blur-md"
+        onClick={handleBackdropClose}
+        onTouchEnd={(e) => {
+          if (suppressBackdropCloseRef.current) return;
+          if (e.target !== e.currentTarget) return;
+          onClose();
+        }}
+      />
       
       <div
-        className="relative w-full max-w-5xl h-[85vh] sm:h-[600px] bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl flex flex-col md:flex-row overflow-hidden"
+        className="relative w-full max-w-5xl h-[100dvh] sm:h-[min(85vh,820px)] bg-slate-950 border-0 sm:border border-slate-800 sm:rounded-2xl shadow-2xl flex flex-col md:flex-row overflow-hidden pb-[calc(4.5rem+env(safe-area-inset-bottom,0px))] md:pb-0"
+        onClick={(e) => e.stopPropagation()}
+        onTouchEnd={(e) => e.stopPropagation()}
       >
+        {/* Mobile Account Hub — tailored for <768px */}
+        <MobileAccountHub
+          user={user}
+          userLeagues={userLeagues}
+          selectedSeason={selectedSeason}
+          setSelectedSeason={setSelectedSeason}
+          getCompetitions={getCompetitions}
+          onSelectLeague={onSelectLeague}
+          onOpenRules={() => onOpenRules?.()}
+          onClose={onClose}
+          onLogout={onLogout}
+        />
+
+        {/* Desktop layout */}
         <SidebarNav 
           activeTab={activeTab} 
           setActiveTab={setActiveTab} 
           setStatusMsg={setStatusMsg}
-          unreadMessagesCount={unreadMessagesCount}
         />
 
-        <div className="flex-1 p-6 overflow-y-auto flex flex-col justify-between h-full">
+        <div className="hidden md:flex flex-1 p-6 overflow-y-auto flex-col justify-between h-full">
           <div>
             <div className="flex items-center justify-between pb-4 border-b border-slate-800/70 mb-5 relative z-10">
               <div>
                 <h4 className="text-base font-extrabold font-display text-white tracking-wide uppercase">
                   {activeTab === 'general' && 'General Account Details'}
                   {activeTab === 'leagues' && 'My Registered Leagues'}
-                  {activeTab === 'messages' && 'Secure Messages'}
                   {activeTab === 'change-email' && 'Change Email'}
                   {activeTab === 'change-password' && 'Change Password'}
                   {activeTab === 'historic-scores' && 'Contestant Historic Scores'}
@@ -70,7 +119,6 @@ export default function AccountPortal({ user, registeredUsers, onClose, onUpdate
                 </h4>
                 <p className="text-[10px] text-slate-500 font-mono uppercase tracking-wider">
                   {activeTab === 'leagues' && 'League Memberships by Season'}
-                  {activeTab === 'messages' && 'Direct communications from platform administrators'}
                   {activeTab === 'historic-scores' && 'Performance Vectors & Seasonal Archives'}
                   {activeTab === 'delete-account' && 'Irreversible Personal Data Erasure'}
                 </p>
@@ -160,10 +208,6 @@ export default function AccountPortal({ user, registeredUsers, onClose, onUpdate
                 user={user} 
                 setStatusMsg={setStatusMsg} 
               />
-            )}
-
-            {activeTab === 'messages' && (
-              <Messages userId={user.id} />
             )}
           </div>
 

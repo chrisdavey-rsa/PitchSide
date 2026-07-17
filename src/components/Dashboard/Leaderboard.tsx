@@ -14,6 +14,8 @@ export interface LeaderboardItem {
   displayGhostPoints: number;
   displayDropsUsed: number;
   displayDropsAllowed: number;
+  /** Amber "As It Stands" live points — never mixed into locked displayPoints. */
+  displayProvisionalPoints?: number;
   isCurrentUser: boolean;
   isProfilePublic: boolean;
 }
@@ -164,7 +166,18 @@ export default function Leaderboard({
             isYou ? "text-emerald-400" : "text-slate-300"
           }`}
         >
-          {item.displayPoints}
+          <div className="inline-flex items-center justify-end gap-1.5">
+            <span>{item.displayPoints}</span>
+            {(item.displayProvisionalPoints ?? 0) > 0 && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-amber-300"
+                title="As It Stands — provisional points from live matches. Not yet locked into your total."
+              >
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+                +{item.displayProvisionalPoints} (Live)
+              </span>
+            )}
+          </div>
         </td>
       </tr>
     );

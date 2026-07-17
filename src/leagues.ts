@@ -17,6 +17,9 @@ export interface LeagueFilterCriteria {
   season: string | "ALL";
 }
 
+export type LeagueSortKey = "name" | "members" | "privacy";
+export type LeagueSortDir = "asc" | "desc";
+
 /**
  * Shared league search/filter used by the League Hub View tab. Free-text search
  * works together with the sport / competition / season dropdown filters.
@@ -50,6 +53,36 @@ export function filterLeagues(
     }
 
     return true;
+  });
+}
+
+function isLeaguePrivate(league: League): boolean {
+  return !!(league.isPrivate || league.isPublic === false);
+}
+
+/**
+ * Sort leagues for directory / My Leagues views.
+ * Default: name A→Z. Privacy asc = Public first; desc = Private first.
+ */
+export function sortLeagues(
+  leagues: League[],
+  key: LeagueSortKey = "name",
+  dir: LeagueSortDir = "asc",
+): League[] {
+  const mul = dir === "asc" ? 1 : -1;
+  return [...leagues].sort((a, b) => {
+    if (key === "name") {
+      return mul * a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+    }
+    if (key === "members") {
+      const diff = (a.members?.length ?? 0) - (b.members?.length ?? 0);
+      if (diff !== 0) return mul * diff;
+      return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+    }
+    // privacy
+    const diff = Number(isLeaguePrivate(a)) - Number(isLeaguePrivate(b));
+    if (diff !== 0) return mul * diff;
+    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
   });
 }
 
