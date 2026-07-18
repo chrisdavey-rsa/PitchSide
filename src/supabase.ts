@@ -7,6 +7,12 @@ import { createClient } from "@supabase/supabase-js";
 import { UserProfile, Prediction, League, SportType, Match, ActiveCompetition } from "./types";
 import { calculatePoints } from "./utils";
 import { ALL_COMPETITIONS } from "./data";
+import { GLOBAL_LEAGUE_ID } from "./lib/leaguesConfig";
+import {
+  parseSeenFeatures,
+  type SeenFeatureKey,
+  type SeenFeatures,
+} from "./lib/seenFeatures";
 
 // Retrieve environment variables and clean them of common copy-paste errors
 const metaEnv = (import.meta as any).env || {};
@@ -88,6 +94,7 @@ export async function dbFetchPlayers(): Promise<UserProfile[]> {
     nationality: d.nationality || "United Kingdom",
     supportedTeam: d.supported_team || "None",
     preferredSport: d.preferred_sport as SportType | undefined,
+    seenFeatures: parseSeenFeatures(d.seen_features),
   }));
 
   return mapped.filter((item) => !MOCK_NICKNAMES_FILTER.includes(item.nickname.toLowerCase()));
@@ -112,6 +119,43 @@ export async function dbCreatePlayer(profile: UserProfile): Promise<void> {
 
   const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "id" });
   if (error) throw error;
+}
+
+/** Read profiles.seen_features for walkthrough / tutorial gating. */
+export async function dbFetchSeenFeatures(userId: string): Promise<SeenFeatures> {
+  if (!supabase) return {};
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("seen_features")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  return parseSeenFeatures(data?.seen_features);
+}
+
+/**
+ * Mark a feature as seen (JSONB merge). Safe to call repeatedly.
+ * Returns the updated map.
+ */
+export async function dbMarkFeatureSeen(
+  userId: string,
+  featureKey: SeenFeatureKey,
+): Promise<SeenFeatures> {
+  if (!supabase) throw new Error("Database not connected.");
+
+  const current = await dbFetchSeenFeatures(userId);
+  if (current[featureKey]) return current;
+
+  const next: SeenFeatures = { ...current, [featureKey]: true };
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({ seen_features: next })
+    .eq("id", userId)
+    .select("seen_features")
+    .maybeSingle();
+
+  if (error) throw error;
+  return parseSeenFeatures(data?.seen_features ?? next);
 }
 
 export async function dbUpdatePlayerAdmin(userId: string, isAdmin: boolean): Promise<void> {
@@ -171,6 +215,44 @@ export async function dbFetchPredictions(
     });
   }
   return result;
+}
+
+/** Submitted prediction rows for league standings (sport + horizon aggregation). */
+export type LeagueSubmittedPredictionRow = {
+  userId: string;
+  matchId: string;
+  sport: SportType;
+  home: number;
+  away: number;
+  submitted: boolean;
+  pointsWon: number | null;
+};
+
+export async function dbFetchLeagueSubmittedPredictions(
+  userIds: string[],
+): Promise<LeagueSubmittedPredictionRow[]> {
+  if (!supabase) throw new Error("Database not connected.");
+  if (userIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("predictions")
+    .select(
+      "user_id, match_id, sport, predicted_home_score, predicted_away_score, submitted, points_won",
+    )
+    .in("user_id", userIds)
+    .eq("submitted", true);
+
+  if (error) throw error;
+
+  return (data || []).map((p: any) => ({
+    userId: p.user_id as string,
+    matchId: p.match_id as string,
+    sport: (p.sport as SportType) || SportType.FOOTBALL,
+    home: Number(p.predicted_home_score) || 0,
+    away: Number(p.predicted_away_score) || 0,
+    submitted: true,
+    pointsWon: p.points_won != null ? Number(p.points_won) : null,
+  }));
 }
 
 /**
@@ -404,14 +486,20 @@ function mapLeagueRow(d: any, members: string[] = []): League {
     typeof d.is_private === "boolean"
       ? d.is_private
       : !(d.is_public ?? true);
-  const rawMax = d.max_players ?? d.max_participants ?? 20;
-  const maxPlayers = Math.min(20, Math.max(1, Number(rawMax) || 20));
+
+  const isGlobal = d.id === GLOBAL_LEAGUE_ID;
+  const maxPlayers = isGlobal
+    ? null
+    : Math.min(
+        20,
+        Math.max(1, Number(d.max_players ?? d.max_participants ?? 20) || 20),
+      );
 
   return {
     id: d.id,
     name: d.name,
     password: d.password || "",
-    competitionId: d.competition_id,
+    competitionId: d.competition_id ?? null,
     creatorId: d.creator_id,
     creatorName: d.creator_name,
     members,
@@ -474,21 +562,24 @@ export async function dbFetchLeagueById(leagueId: string): Promise<League | null
 export async function dbCreateLeague(league: League): Promise<void> {
   if (!supabase) throw new Error("Database not connected.");
   const isPrivate = league.isPrivate ?? !(league.isPublic ?? true);
-  const maxPlayers = Math.min(
-    20,
-    Math.max(1, league.maxPlayers ?? league.maxParticipants ?? 20),
-  );
+  const rawMax = league.maxPlayers ?? league.maxParticipants;
+  const maxPlayers =
+    rawMax == null
+      ? 20
+      : Math.min(20, Math.max(1, Number(rawMax) || 20));
   const payload = {
     id: league.id,
     name: league.name,
     password: league.password || "",
-    competition_id: league.competitionId,
+    // New Game Rules: social leagues are not locked to one competition.
+    competition_id: league.competitionId ?? null,
     creator_id: league.creatorId,
     creator_name: league.creatorName,
     is_private: isPrivate,
     is_public: !isPrivate,
     max_players: maxPlayers,
     max_participants: maxPlayers,
+    season: league.season || null,
     created_at: league.createdAt || new Date().toISOString(),
     updated_at: league.updatedAt || new Date().toISOString(),
   };
@@ -523,9 +614,67 @@ export async function dbUpdateLeagueSettings(
   if (error) throw error;
 }
 
+/**
+ * Look up a league by id + password (join flow).
+ * Private leagues are filtered from browse lists, so join must hit the DB directly.
+ */
+export async function dbFetchLeagueByIdAndPassword(
+  leagueId: string,
+  password: string,
+): Promise<League | null> {
+  if (!supabase) throw new Error("Database not connected.");
+
+  const payload = {
+    leagueId,
+    passwordLength: password.length,
+  };
+  console.log("[dbFetchLeagueByIdAndPassword] query payload", payload);
+
+  const { data, error } = await supabase
+    .from("leagues")
+    .select("*")
+    .eq("id", leagueId)
+    .eq("password", password)
+    .maybeSingle();
+
+  console.log("[dbFetchLeagueByIdAndPassword] result", {
+    found: !!data,
+    error: error?.message ?? null,
+    code: error?.code ?? null,
+  });
+
+  if (error) throw error;
+  if (!data) return null;
+
+  const membership = await dbFetchLeaguesMembership([leagueId]);
+  return mapLeagueRow(data, membership[leagueId] || []);
+}
+
 export async function dbJoinLeague(leagueId: string, userId: string): Promise<void> {
   if (!supabase) throw new Error("Database not connected.");
-  const { error } = await supabase.from("league_members").insert({ league_id: leagueId, user_id: userId });
+
+  const payload = {
+    league_id: leagueId,
+    user_id: userId,
+    joined_at: new Date().toISOString(),
+  };
+  console.log("[dbJoinLeague] insert payload", payload);
+
+  const { data, error } = await supabase
+    .from("league_members")
+    .insert(payload)
+    .select("league_id, user_id, joined_at")
+    .maybeSingle();
+
+  console.log("[dbJoinLeague] insert result", {
+    data,
+    error: error
+      ? { message: error.message, code: error.code, details: error.details }
+      : null,
+  });
+
+  // Already a member — treat as success (unique on league_id + user_id).
+  if (error?.code === "23505") return;
   if (error) throw error;
 }
 

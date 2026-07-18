@@ -6,6 +6,7 @@
 import { User as SupabaseUser } from '@supabase/supabase-js';
 import { UserProfile, SportType } from '../../types';
 import { dbFetchPlayers, isSupabaseConfigured, supabase } from '../../supabase';
+import { parseSeenFeatures } from '../../lib/seenFeatures';
 
 /** Auth redirect types Supabase puts in the URL hash after email-link clicks. */
 export type AuthHashType = 'signup' | 'recovery' | 'invite' | 'magiclink' | 'email' | null;
@@ -67,6 +68,7 @@ export async function profileFromSession(
       supportedTeam: row.supported_team || 'Unknown',
       preferredSport: (row.preferred_sport as SportType) || undefined,
       isProfilePublic: row.is_profile_public ?? undefined,
+      seenFeatures: parseSeenFeatures(row.seen_features),
     };
   }
 

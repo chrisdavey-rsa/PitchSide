@@ -2,6 +2,8 @@ export const queryKeys = {
   matches: ['matches'] as const,
   activeCompetitions: ['activeCompetitions'] as const,
   predictions: (userId: string) => ['predictions', userId] as const,
+  leagueStandingsPredictions: (leagueId: string) =>
+    ['leagueStandingsPredictions', leagueId] as const,
   leagues: ['leagues'] as const,
   userLeagues: (userId: string) => ['userLeagues', userId] as const,
   leagueMembers: (leagueId: string) => ['leagueMembers', leagueId] as const,

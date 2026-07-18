@@ -13,9 +13,16 @@ interface SidebarNavProps {
   activeTab: AccountTab;
   setActiveTab: (tab: AccountTab) => void;
   setStatusMsg: (msg: { text: string; mode: 'success' | 'error' | 'none' }) => void;
+  /** Player username (nickname) shown under the ACCOUNT heading. */
+  username?: string;
 }
 
-export const SidebarNav: React.FC<SidebarNavProps> = ({ activeTab, setActiveTab, setStatusMsg }) => {
+export const SidebarNav: React.FC<SidebarNavProps> = ({
+  activeTab,
+  setActiveTab,
+  setStatusMsg,
+  username,
+}) => {
   return (
     <div className="hidden md:flex w-full md:w-64 bg-slate-950/40 p-5 md:p-6 border-b md:border-b-0 md:border-r border-slate-800/80 flex-col justify-between shrink-0 relative mt-1 overflow-y-auto md:overflow-y-visible">
       <div className="space-y-6">
@@ -25,6 +32,11 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ activeTab, setActiveTab,
           </div>
           <div className="min-w-0 flex-1">
             <h3 className="text-sm font-bold font-display text-white tracking-wide uppercase">ACCOUNT</h3>
+            {username ? (
+              <p className="text-xs text-slate-400 font-mono truncate mt-0.5" title={username}>
+                {username}
+              </p>
+            ) : null}
           </div>
         </div>
 

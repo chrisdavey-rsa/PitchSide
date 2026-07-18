@@ -22,6 +22,11 @@ export interface UserProfile {
   password?: string;
   isProfilePublic?: boolean;
   suspendedUntil?: string;
+  /**
+   * Persistent feature-tour map from profiles.seen_features (JSONB).
+   * Keys like main_walkthrough, football_intro, golf_tutorial — see src/lib/seenFeatures.ts.
+   */
+  seenFeatures?: Record<string, boolean>;
 }
 
 export enum SportType {
@@ -111,18 +116,22 @@ export interface League {
   id: string;
   name: string;
   password?: string;
-  competitionId: string;
+  /**
+   * Deprecated under New Game Rules — leagues are multi-sport social groups.
+   * Null/undefined means all competitions. Legacy leagues may still have a value.
+   */
+  competitionId?: string | null;
   creatorId: string;
   creatorName: string;
   members: string[];
   /** Hidden from the global directory when true (alias of !isPublic). */
   isPrivate?: boolean;
-  /** Hard membership cap (1–20). */
-  maxPlayers?: number;
+  /** Hard membership cap (1–20). Null/undefined on the Global League = uncapped. */
+  maxPlayers?: number | null;
   /** Legacy mirror of !isPrivate — kept for existing UI. */
   isPublic?: boolean;
   /** Legacy mirror of maxPlayers. */
-  maxParticipants?: number;
+  maxParticipants?: number | null;
   season?: string;
   createdAt: string;
   updatedAt: string;

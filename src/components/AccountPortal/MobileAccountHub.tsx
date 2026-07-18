@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
 import {
   X,
   User,
@@ -22,7 +21,8 @@ interface MobileAccountHubProps {
   getCompetitions: () => Competition[];
   onSelectLeague?: (leagueId: string) => void;
   onOpenRules: () => void;
-  onClose: () => void;
+  /** Omit in embedded tab mode — no close control. */
+  onClose?: () => void;
   onLogout?: () => void;
 }
 
@@ -37,7 +37,7 @@ export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
   onClose,
   onLogout,
 }) => {
-  const [leaguesOpen, setLeaguesOpen] = useState(false);
+  const [leaguesOpen, setLeaguesOpen] = useState(true);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const initials =
     (user.nickname || `${user.firstName?.[0] ?? ''}${user.surname?.[0] ?? ''}` || '?')
@@ -57,15 +57,17 @@ export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
             Profile &amp; participation
           </p>
         </div>
-        <button
-          id="acc-close-btn-mobile"
-          onClick={onClose}
-          className={btnClose}
-          title="Return to Dashboard"
-          type="button"
-        >
-          <X className="w-4 h-4" />
-        </button>
+        {onClose && (
+          <button
+            id="acc-close-btn-mobile"
+            onClick={onClose}
+            className={btnClose}
+            title="Return to Dashboard"
+            type="button"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-5 space-y-5">
@@ -158,27 +160,19 @@ export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
               />
             </button>
 
-            <AnimatePresence initial={false}>
-              {leaguesOpen && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.22, ease: 'easeInOut' }}
-                  className="overflow-hidden border-t border-slate-800/60"
-                >
-                  <div className="p-3">
-                    <MyLeagues
-                      userLeagues={userLeagues}
-                      selectedSeason={selectedSeason}
-                      setSelectedSeason={setSelectedSeason}
-                      getCompetitions={getCompetitions}
-                      onSelectLeague={onSelectLeague}
-                    />
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            {leaguesOpen && (
+              <div className="border-t border-slate-800/60">
+                <div className="p-3">
+                  <MyLeagues
+                    userLeagues={userLeagues}
+                    selectedSeason={selectedSeason}
+                    setSelectedSeason={setSelectedSeason}
+                    getCompetitions={getCompetitions}
+                    onSelectLeague={onSelectLeague}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

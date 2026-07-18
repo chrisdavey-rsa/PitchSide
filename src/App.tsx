@@ -21,7 +21,7 @@ import AdminPanel from './components/AdminPanel';
 import AccountPortal from './components/AccountPortal';
 import PWAInstallBanner from './components/PWAInstallBanner';
 import JoinLeague from './pages/JoinLeague';
-import { RadialOrigin, radialClip } from './radial';
+import { RadialOrigin } from './radial';
 import { useBodyScrollLock } from './hooks/useBodyScrollLock';
 import { useOverlayHistory, retainOverlayHistoryDuringTransition, transferOverlay } from './hooks/useOverlayHistory';
 import { readPendingInvite } from './lib/pendingInvite';
@@ -47,32 +47,28 @@ function AppShell() {
   const emailVerifyPending = useRef(false);
 
   const [showRules, setShowRules] = useState(false);
-  const [rulesOrigin, setRulesOrigin] = useState<RadialOrigin | null>(null);
   const [showAdmin, setShowAdmin] = useState(false);
   const [showAccount, setShowAccount] = useState(false);
-  const [accountOrigin, setAccountOrigin] = useState<RadialOrigin | null>(null);
 
-  const openRules = (origin?: RadialOrigin) => {
-    setRulesOrigin(origin ?? null);
+  const openRules = (_origin?: RadialOrigin) => {
     setShowRules(true);
   };
-  const openAccount = (origin?: RadialOrigin) => {
-    setAccountOrigin(origin ?? null);
+  const openAccount = (_origin?: RadialOrigin) => {
     setShowAccount(true);
   };
-  const closeRules = useCallback(() => setShowRules(false), []);
-  const closeAdmin = useCallback(() => setShowAdmin(false), []);
-  const closeAccount = useCallback(() => setShowAccount(false), []);
-  const suppressRulesBackdropCloseRef = useRef(true);
-
-  useEffect(() => {
-    if (!showRules) return;
-    suppressRulesBackdropCloseRef.current = true;
-    const timer = window.setTimeout(() => {
-      suppressRulesBackdropCloseRef.current = false;
-    }, 400);
-    return () => window.clearTimeout(timer);
-  }, [showRules]);
+  const closeRules = useCallback(() => {
+    // Avoid history.back() on X — keep the user on the Dashboard SPA route.
+    retainOverlayHistoryDuringTransition();
+    setShowRules(false);
+  }, []);
+  const closeAdmin = useCallback(() => {
+    retainOverlayHistoryDuringTransition();
+    setShowAdmin(false);
+  }, []);
+  const closeAccount = useCallback(() => {
+    retainOverlayHistoryDuringTransition();
+    setShowAccount(false);
+  }, []);
 
   const [externalLeagueSelection, setExternalLeagueSelection] = useState<string | null>(null);
 
@@ -472,6 +468,17 @@ function AppShell() {
                 externalSelectedLeagueId={externalLeagueSelection}
                 onClearExternalLeagueSelection={() => setExternalLeagueSelection(null)}
                 initialToast={dashboardWelcome}
+                onUserUpdate={(updated) => {
+                  setCurrentUser(updated);
+                  try {
+                    localStorage.setItem(
+                      "pitchside_logged_in",
+                      JSON.stringify(updated),
+                    );
+                  } catch {
+                    /* ignore */
+                  }
+                }}
               />
             ) : guestAuthView === 'reset-request' || guestAuthView === 'reset-update' ? (
               <div className="flex-1 flex items-center justify-center py-6">
@@ -572,77 +579,64 @@ function AppShell() {
         )}
       </AnimatePresence>
 
-      {/* MODAL LAYER: Interactive scoring rules guidelines guide panel */}
-      <AnimatePresence>
-        {showRules && (
-          <motion.div
-            {...radialClip(rulesOrigin)}
-            className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs overflow-y-auto"
+      {/* Desktop Settings → Rules (instant overlay, no radial animation) */}
+      {showRules && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs overflow-y-auto">
+          <div
+            className="flex min-h-full items-start justify-center p-4 sm:py-16"
+            onClick={(e) => {
+              if (e.target !== e.currentTarget) return;
+              closeRules();
+            }}
           >
             <div
-              className="flex min-h-full items-start justify-center p-4 sm:py-16"
-              onClick={(e) => {
-                if (e.target !== e.currentTarget) return;
-                if (suppressRulesBackdropCloseRef.current) return;
-                closeRules();
-              }}
+              className="w-full max-w-4xl"
+              onClick={(e) => e.stopPropagation()}
             >
-              <div
-                className="w-full max-w-4xl"
-                onClick={(e) => e.stopPropagation()}
-                onTouchEnd={(e) => e.stopPropagation()}
-              >
-                <RulesInfo user={currentUser} onClose={closeRules} />
-              </div>
+              <RulesInfo user={currentUser} onClose={closeRules} />
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
+        </div>
+      )}
 
-      {/* MODAL LAYER: Administrative panel container portal */}
-      <AnimatePresence>
-        {showAdmin && currentUser?.isAdmin && (
-          <AdminPanel
-            onClose={closeAdmin}
-            registeredUsers={registeredUsers}
-            onToggleAdmin={handleToggleAdmin}
-            onDeleteUser={handleDeleteUser}
-            isAdmin={currentUser.isAdmin}
-          />
-        )}
-      </AnimatePresence>
+      {showAdmin && currentUser?.isAdmin && (
+        <AdminPanel
+          onClose={closeAdmin}
+          registeredUsers={registeredUsers}
+          onToggleAdmin={handleToggleAdmin}
+          onDeleteUser={handleDeleteUser}
+          isAdmin={currentUser.isAdmin}
+        />
+      )}
 
-      {/* MODAL LAYER: Personal User Account Portal */}
-      <AnimatePresence>
-        {showAccount && currentUser && (
-          <AccountPortal
-            user={currentUser}
-            registeredUsers={registeredUsers}
-            origin={accountOrigin}
-            onClose={closeAccount}
-            onLogout={handleLogout}
-            onOpenRules={() => {
-              retainOverlayHistoryDuringTransition();
-              closeAccount();
-              requestAnimationFrame(() => openRules());
-            }}
-            onSelectLeague={(leagueId) => {
-              // Hand swipe-back history from Account → League hub without a flash-close.
-              transferOverlay("account", "league-hub", () => {
-                /* league-hub close is owned by Dashboard once mounted */
-              });
-              setExternalLeagueSelection(leagueId);
-              closeAccount();
-            }}
-            onUpdateUser={(updatedUser) => {
-              setCurrentUser(updatedUser);
-              localStorage.setItem('pitchside_logged_in', JSON.stringify(updatedUser));
-              const updated = registeredUsers.map((u) => (u.id === updatedUser.id ? updatedUser : u));
-              setRegisteredUsers(updated);
-            }}
-          />
-        )}
-      </AnimatePresence>
+      {/* Desktop Settings → Account */}
+      {showAccount && currentUser && (
+        <AccountPortal
+          variant="overlay"
+          user={currentUser}
+          registeredUsers={registeredUsers}
+          onClose={closeAccount}
+          onLogout={handleLogout}
+          onOpenRules={() => {
+            retainOverlayHistoryDuringTransition();
+            closeAccount();
+            requestAnimationFrame(() => openRules());
+          }}
+          onSelectLeague={(leagueId) => {
+            transferOverlay("account", "league-hub", () => {
+              /* league-hub close is owned by Dashboard once mounted */
+            });
+            setExternalLeagueSelection(leagueId);
+            closeAccount();
+          }}
+          onUpdateUser={(updatedUser) => {
+            setCurrentUser(updatedUser);
+            localStorage.setItem('pitchside_logged_in', JSON.stringify(updatedUser));
+            const updated = registeredUsers.map((u) => (u.id === updatedUser.id ? updatedUser : u));
+            setRegisteredUsers(updated);
+          }}
+        />
+      )}
     </div>
   );
 }

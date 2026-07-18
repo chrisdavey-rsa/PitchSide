@@ -4,6 +4,7 @@ import { motion } from "motion/react";
 import { Users, LogIn, UserPlus, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
 import type { UserProfile, League } from "../types";
 import { dbFetchLeagueById, dbJoinLeague } from "../supabase";
+import { isGlobalLeague } from "../lib/leaguesConfig";
 import {
   storePendingInvite,
   clearPendingInvite,
@@ -84,7 +85,11 @@ export default function JoinLeague({
     }
 
     const memberCap = league.maxPlayers ?? league.maxParticipants;
-    if (memberCap != null && league.members.length >= memberCap) {
+    if (
+      !isGlobalLeague(league.id) &&
+      memberCap != null &&
+      league.members.length >= memberCap
+    ) {
       setError(`This league is full (max ${memberCap} players).`);
       return;
     }
@@ -94,6 +99,10 @@ export default function JoinLeague({
     setStatus(null);
 
     try {
+      console.log("[JoinLeague] insert membership", {
+        leagueId: league.id,
+        userId: currentUser.id,
+      });
       await dbJoinLeague(league.id, currentUser.id);
       clearPendingInvite();
       setStatus(`You're in — welcome to ${league.name}!`);
@@ -102,6 +111,7 @@ export default function JoinLeague({
         navigate("/");
       }, 700);
     } catch (err: unknown) {
+      console.error("[JoinLeague] join failed", err);
       const code =
         err && typeof err === "object" && "code" in err
           ? String((err as { code?: string }).code)

@@ -33,8 +33,10 @@ export function filterLeagues(
 
   return leagues.filter((league) => {
     const competition = competitions.find((c) => c.id === league.competitionId);
+    const isMultiSport = !league.competitionId;
 
-    if (sport !== "ALL" && competition?.sport !== sport) return false;
+    // Multi-sport social leagues match any sport filter; legacy leagues match their sport.
+    if (sport !== "ALL" && !isMultiSport && competition?.sport !== sport) return false;
     if (competitionId !== "ALL" && league.competitionId !== competitionId) return false;
 
     const leagueSeason = getLeagueSeason(league, competition);
@@ -43,6 +45,7 @@ export function filterLeagues(
     if (query) {
       const haystack = [
         league.name,
+        isMultiSport ? "all sports" : "",
         competition?.name ?? "",
         competition?.sport ?? "",
         leagueSeason,

@@ -27,11 +27,27 @@ function pushBrowserHistory() {
   historyActive = true;
 }
 
-function popBrowserHistory() {
-  if (!historyActive || retainHistoryPopCount > 0) return;
+/** Strip the overlay marker without navigating away from the SPA document. */
+function clearOverlayHistoryMarker() {
   historyActive = false;
   suppressNextPop = true;
-  window.history.back();
+  try {
+    const prev = (window.history.state as Record<string, unknown> | null) ?? {};
+    if (OVERLAY_KEY in prev) {
+      const next = { ...prev };
+      delete next[OVERLAY_KEY];
+      window.history.replaceState(next, '', window.location.href);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function popBrowserHistory() {
+  if (!historyActive) return;
+  // Never history.back() here — that can leave PitchSide when the prior
+  // entry is an external referrer. replaceState keeps the user on Dashboard.
+  clearOverlayHistoryMarker();
 }
 
 function handlePopState() {
@@ -79,8 +95,14 @@ function unregisterOverlay(id: string) {
   const wasTop = idx === stack.length - 1;
   stack.splice(idx, 1);
 
-  // Only pop browser history when the stack is fully empty (and not mid-transition).
+  // When the stack empties, always clear historyActive so the next overlay
+  // can pushState. Prefer replaceState over history.back() so X / close
+  // never exits the app.
   if (stack.length === 0 && wasTop) {
+    if (retainHistoryPopCount > 0) {
+      clearOverlayHistoryMarker();
+      return;
+    }
     popBrowserHistory();
   }
 }

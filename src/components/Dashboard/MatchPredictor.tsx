@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { AnimatePresence } from "motion/react";
 import {
   ShieldAlert,
   Plus,
@@ -21,6 +21,12 @@ import type { PredictionEntry } from "../../supabase";
 import SportEntryTile from "./SportEntryTile";
 import { useOverlayHistory } from "../../hooks/useOverlayHistory";
 import { useBodyScrollLock } from "../../hooks/useBodyScrollLock";
+import {
+  SeenFeature,
+  hasSeenFeature,
+  type SeenFeatureKey,
+  type SeenFeatures,
+} from "../../lib/seenFeatures";
 
 /** Wallet chips: power-up id paired with its current (hardcoded) status. */
 const WALLET_CHIPS: { id: string; status: string }[] = [
@@ -51,6 +57,8 @@ function getMatchStatusDisplay(match: Match) {
 }
 
 interface MatchPredictorProps {
+  /** `page` = Predictions tab (no giant sport tiles). `classic` = legacy tiles. */
+  layout?: "classic" | "page";
   isUserInAnyLeague: boolean;
   selectedSport: SportType | null;
   setSelectedSport: (sport: SportType | null) => void;
@@ -63,12 +71,36 @@ interface MatchPredictorProps {
   selectedCompetition?: Competition;
   predictions: Record<string, PredictionEntry>;
   isEmailVerified: boolean;
+  seenFeatures?: SeenFeatures;
+  onFeatureSeen: (featureKey: SeenFeatureKey) => void | Promise<unknown>;
   onScoreChange: (matchId: string, side: "home" | "away", val: string) => void;
   onRugbyPredictionChange: (matchId: string, winner: "home" | "away" | "draw" | null, marginStr: string) => void;
   onSubmitPrediction: (matchId: string) => void;
 }
 
+/** Kickoff key: same calendar day + clock minute → one visual group. */
+function kickoffGroupKey(matchDate: string): string {
+  const d = new Date(matchDate);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}T${d.getHours()}:${d.getMinutes()}`;
+}
+
+function kickoffGroupLabel(matchDate: string): string {
+  const d = new Date(matchDate);
+  const datePart = d.toLocaleDateString(undefined, {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+  const timePart = d.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return `${datePart} · ${timePart}`;
+}
+
 export default function MatchPredictor({
+  layout = "classic",
   selectedSport,
   setSelectedSport,
   selectedCompId,
@@ -80,38 +112,42 @@ export default function MatchPredictor({
   selectedCompetition,
   predictions,
   isEmailVerified,
+  seenFeatures,
+  onFeatureSeen,
   onScoreChange,
   onRugbyPredictionChange,
   onSubmitPrediction,
 }: MatchPredictorProps) {
-  // Just-in-time onboarding: show a sport intro the first time a player opens
-  // a Football or Rugby competition (tracked per-sport in localStorage).
+  const isPage = layout === "page";
+  // Just-in-time onboarding: first open of Football / Rugby (profiles.seen_features).
   const [introSport, setIntroSport] = useState<"football" | "rugby" | null>(null);
 
   useEffect(() => {
     if (
       selectedSport === SportType.FOOTBALL &&
-      !localStorage.getItem("hasSeenFootballIntro")
+      !hasSeenFeature(seenFeatures, SeenFeature.FootballIntro)
     ) {
       setIntroSport("football");
     } else if (
       selectedSport === SportType.RUGBY &&
-      !localStorage.getItem("hasSeenRugbyIntro")
+      !hasSeenFeature(seenFeatures, SeenFeature.RugbyIntro)
     ) {
       setIntroSport("rugby");
+    } else {
+      setIntroSport(null);
     }
-  }, [selectedSport]);
+  }, [selectedSport, seenFeatures]);
 
   const dismissIntro = useCallback(() => {
     setIntroSport((current) => {
       if (current === "football") {
-        localStorage.setItem("hasSeenFootballIntro", "true");
+        void onFeatureSeen(SeenFeature.FootballIntro);
       } else if (current === "rugby") {
-        localStorage.setItem("hasSeenRugbyIntro", "true");
+        void onFeatureSeen(SeenFeature.RugbyIntro);
       }
       return null;
     });
-  }, []);
+  }, [onFeatureSeen]);
 
   useBodyScrollLock(!!introSport);
   useOverlayHistory(!!introSport, dismissIntro, "sport-intro");
@@ -124,7 +160,8 @@ export default function MatchPredictor({
         )}
       </AnimatePresence>
 
-      {/* TWO LARGE TILE BUTTONS SECTION (Football & Rugby) */}
+      {/* Classic layout: large Football / Rugby entry tiles */}
+      {!isPage && (
           <div
             id="tour-match-predictor"
             className="grid grid-cols-2 md:grid-cols-2 gap-3 sm:gap-6 pt-2 auto-rows-fr"
@@ -143,13 +180,15 @@ export default function MatchPredictor({
                 onSelect={() => setSelectedSport(SportType.RUGBY)}
               />
             </div>
+      )}
 
           {/* DETAILED DRILL-DOWN SUB VIEW */}
           {selectedSport && (
-            <motion.div
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-slate-900/60 rounded-3xl border border-slate-800 p-6 shadow-xl"
+            <div
+              id={isPage ? "tour-match-predictor" : undefined}
+              className={`bg-slate-900/60 rounded-3xl border border-slate-800 shadow-xl ${
+                isPage ? "p-4 sm:p-6 w-full" : "p-6"
+              }`}
             >
               {/* Leagues filtering tab */}
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-800/80 pb-5 mb-5">
@@ -241,23 +280,7 @@ export default function MatchPredictor({
 
               {/* SPECIFIC COMPETITION FIXTURES PREDICTOR */}
               {selectedCompId && filteredCompetitions.length > 0 && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="mt-6 pt-5 border-t border-slate-800 space-y-4"
-                >
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-950/40 p-4 rounded-xl border border-slate-800">
-                    <div>
-                      <h4 className="text-sm font-bold font-display text-white">
-                        {selectedCompetition?.name} Match Day Predicter
-                      </h4>
-                      <p className="text-xs text-slate-400">
-                        Input your predictions below.
-                      </p>
-                    </div>
-
-                  </div>
-
+                <div className="mt-6 pt-5 border-t border-slate-800 space-y-4">
                   {/* POWER-UP WALLET: inactive launch teaser (coming soon) */}
                   <div className="flex flex-col gap-2.5 md:flex-row md:flex-wrap md:items-center rounded-xl border border-slate-800/70 bg-slate-950/30 px-4 py-3">
                     <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500 shrink-0">
@@ -307,15 +330,16 @@ export default function MatchPredictor({
                       </p>
                     </div>
                   ) : (
-                    <div className="space-y-4">
+                    <div className="space-y-4 w-full">
                       {sortedActiveMatches.map((match, index) => {
                         const matchDate = new Date(match.matchDate);
-                        const dateKey = matchDate.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
                         const timeKey = matchDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
+                        const groupKey = kickoffGroupKey(match.matchDate);
                         const prevMatch = index > 0 ? sortedActiveMatches[index - 1] : null;
-                        const prevDateKey = prevMatch ? new Date(prevMatch.matchDate).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : null;
-                        const showDateSeparator = dateKey !== prevDateKey;
+                        const prevGroupKey = prevMatch
+                          ? kickoffGroupKey(prevMatch.matchDate)
+                          : null;
+                        const showKickoffHeader = groupKey !== prevGroupKey;
 
                         const savedPred = predictions[match.id] || {
                           home: 0,
@@ -323,7 +347,17 @@ export default function MatchPredictor({
                           submitted: false,
                           provisionalPoints: 0,
                         };
+                        const hasPick = Object.prototype.hasOwnProperty.call(
+                          predictions,
+                          match.id,
+                        );
                         const isSubmitted = savedPred.submitted;
+                        const homeLeading = (savedPred.home || 0) > (savedPred.away || 0);
+                        const awayLeading = (savedPred.away || 0) > (savedPred.home || 0);
+                        const isDrawPick =
+                          hasPick &&
+                          (savedPred.home || 0) === (savedPred.away || 0);
+                        const showActiveGreen = hasPick || isSubmitted;
                         const isLive = match.status === "live";
                         const isMatchStarted =
                           isLive || new Date() > new Date(match.matchDate);
@@ -351,17 +385,19 @@ export default function MatchPredictor({
 
                         return (
                           <React.Fragment key={match.id}>
-                            {showDateSeparator && (
+                            {showKickoffHeader && (
                               <div className="text-center pt-4 pb-2">
-                                <span className="inline-block text-slate-300 text-xs font-semibold px-4 py-1.5 uppercase tracking-widest font-mono">
-                                  {dateKey}
+                                <span className="inline-block text-slate-300 text-[11px] font-semibold px-4 py-1.5 uppercase tracking-wider font-mono">
+                                  {kickoffGroupLabel(match.matchDate)}
                                 </span>
                               </div>
                             )}
                             <div
-                              className={`relative p-5 rounded-2xl border transition-all ${
+                              className={`relative p-4 sm:p-5 rounded-2xl border transition-all w-full ${
                                 isLive
                                   ? "border-rose-500/40 bg-slate-900 shadow-[0_0_24px_rgba(244,63,94,0.08)]"
+                                  : showActiveGreen
+                                  ? "border-emerald-500 bg-slate-900 shadow-[0_0_20px_rgba(16,185,129,0.12)]"
                                   : match.matchTag
                                   ? "border-amber-500/30 bg-slate-900"
                                   : isLocked
@@ -372,24 +408,10 @@ export default function MatchPredictor({
                               {/* HIGH STAKES TAG: premium gold/neon badge with a subtle pulse */}
                               {match.matchTag && (
                                 <div className="absolute -top-2.5 left-4 z-10">
-                                  <motion.span
-                                    initial={{ opacity: 0, y: 4 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    className="relative inline-flex items-center gap-1 rounded-full border border-amber-400/60 bg-slate-950/90 px-2.5 py-0.5 text-[9px] font-bold font-mono uppercase tracking-widest text-amber-300"
-                                  >
-                                    <motion.span
-                                      aria-hidden
-                                      animate={{ opacity: [0.35, 0.8, 0.35] }}
-                                      transition={{
-                                        repeat: Infinity,
-                                        duration: 2.4,
-                                        ease: "easeInOut",
-                                      }}
-                                      className="pointer-events-none absolute inset-0 rounded-full border border-amber-300/50 shadow-[0_0_12px_rgba(251,191,36,0.45)]"
-                                    />
+                                  <span className="relative inline-flex items-center gap-1 rounded-full border border-amber-400/60 bg-slate-950/90 px-2.5 py-0.5 text-[9px] font-bold font-mono uppercase tracking-widest text-amber-300">
                                     <Sparkles className="relative h-2.5 w-2.5" />
                                     <span className="relative">{match.matchTag}</span>
-                                  </motion.span>
+                                  </span>
                                 </div>
                               )}
 
@@ -523,7 +545,16 @@ export default function MatchPredictor({
                                         <Plus className="w-2.5 h-2.5 relative z-10" />
                                       </button>
                                     </div>
-                                    <h5 className="mt-2 font-extrabold font-display text-xs sm:text-sm tracking-tight text-white break-words w-full leading-snug">
+                                    <h5
+                                      className={`mt-2 font-extrabold font-display text-[11px] sm:text-sm tracking-tight truncate w-full max-w-full leading-snug px-0.5 ${
+                                        showActiveGreen && homeLeading
+                                          ? "text-emerald-400"
+                                          : showActiveGreen && isDrawPick
+                                            ? "text-emerald-300/80"
+                                            : "text-white"
+                                      }`}
+                                      title={match.homeTeam}
+                                    >
                                       {match.homeTeam}
                                     </h5>
                                   </div>
@@ -596,13 +627,22 @@ export default function MatchPredictor({
                                         <Plus className="w-2.5 h-2.5 relative z-10" />
                                       </button>
                                     </div>
-                                    <h5 className="mt-2 font-extrabold font-display text-xs sm:text-sm tracking-tight text-white break-words w-full leading-snug">
+                                    <h5
+                                      className={`mt-2 font-extrabold font-display text-[11px] sm:text-sm tracking-tight truncate w-full max-w-full leading-snug px-0.5 ${
+                                        showActiveGreen && awayLeading
+                                          ? "text-emerald-400"
+                                          : showActiveGreen && isDrawPick
+                                            ? "text-emerald-300/80"
+                                            : "text-white"
+                                      }`}
+                                      title={match.awayTeam}
+                                    >
                                       {match.awayTeam}
                                     </h5>
                                   </div>
                                 </div>
                               ) : (
-                                <div className="flex-1 w-full flex flex-col items-center gap-3 bg-slate-950/40 p-4 border border-slate-850/60 rounded-2xl relative">
+                                <div className="flex-1 w-full flex flex-col items-center gap-3 bg-slate-950/40 p-3 sm:p-4 border border-slate-850/60 rounded-2xl relative">
                                   <span className={matchStatus.className}>
                                     {matchStatus.label}
                                   </span>
@@ -623,17 +663,18 @@ export default function MatchPredictor({
                                           currentMargin.toString(),
                                         );
                                       }}
-                                      className={`px-2 py-2 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center transition-all cursor-pointer select-none ${
-                                        (savedPred.home || 0) >
-                                        (savedPred.away || 0)
-                                          ? "bg-emerald-550/10 border-emerald-500/40 text-emerald-300"
+                                      className={`px-1.5 py-2.5 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center transition-all cursor-pointer select-none min-w-0 ${
+                                        homeLeading
+                                          ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300"
                                           : "bg-slate-950/20 border-slate-850 text-slate-500 hover:bg-slate-900/50 hover:text-slate-350"
                                       }`}
                                     >
-                                      <span className="text-[8px] font-mono text-slate-500 uppercase font-bold mb-0.5">
-                                        Home Win
-                                      </span>
-                                      <span className="font-display font-black text-center truncate w-full">
+                                      <span
+                                        className={`font-display font-black text-center truncate w-full text-[11px] sm:text-xs ${
+                                          homeLeading ? "text-emerald-400" : ""
+                                        }`}
+                                        title={match.homeTeam}
+                                      >
                                         {match.homeTeam}
                                       </span>
                                     </button>
@@ -648,18 +689,21 @@ export default function MatchPredictor({
                                           "0",
                                         );
                                       }}
-                                      className={`px-2 py-2 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center transition-all cursor-pointer select-none ${
-                                        (savedPred.home || 0) ===
-                                        (savedPred.away || 0)
-                                          ? "bg-emerald-550/10 border-emerald-500/40 text-emerald-300"
+                                      className={`px-1.5 py-2.5 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center transition-all cursor-pointer select-none min-w-0 ${
+                                        isDrawPick ||
+                                        ((savedPred.home || 0) ===
+                                          (savedPred.away || 0) &&
+                                          hasPick)
+                                          ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300"
                                           : "bg-slate-950/20 border-slate-850 text-slate-500 hover:bg-slate-900/50 hover:text-slate-350"
                                       }`}
                                     >
-                                      <span className="text-[8px] font-mono text-slate-500 uppercase font-bold mb-0.5">
+                                      <span
+                                        className={`font-display font-black text-center w-full text-[11px] sm:text-xs ${
+                                          isDrawPick ? "text-emerald-400" : ""
+                                        }`}
+                                      >
                                         Draw
-                                      </span>
-                                      <span className="font-display font-black text-center truncate w-full">
-                                        Equal Points
                                       </span>
                                     </button>
 
@@ -678,17 +722,18 @@ export default function MatchPredictor({
                                           currentMargin.toString(),
                                         );
                                       }}
-                                      className={`px-2 py-2 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center transition-all cursor-pointer select-none ${
-                                        (savedPred.away || 0) >
-                                        (savedPred.home || 0)
-                                          ? "bg-emerald-555/10 border-emerald-500/40 text-emerald-300"
+                                      className={`px-1.5 py-2.5 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center transition-all cursor-pointer select-none min-w-0 ${
+                                        awayLeading
+                                          ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300"
                                           : "bg-slate-950/20 border-slate-850 text-slate-500 hover:bg-slate-900/50 hover:text-slate-350"
                                       }`}
                                     >
-                                      <span className="text-[8px] font-mono text-slate-500 uppercase font-bold mb-0.5">
-                                        Away Win
-                                      </span>
-                                      <span className="font-display font-black text-center truncate w-full">
+                                      <span
+                                        className={`font-display font-black text-center truncate w-full text-[11px] sm:text-xs ${
+                                          awayLeading ? "text-emerald-400" : ""
+                                        }`}
+                                        title={match.awayTeam}
+                                      >
                                         {match.awayTeam}
                                       </span>
                                     </button>
@@ -749,7 +794,7 @@ export default function MatchPredictor({
                                           Your Prediction
                                         </span>
                                         <span className="font-display font-black text-emerald-400 text-sm">
-                                          Draw (Equal Points)
+                                          Draw
                                         </span>
                                       </div>
                                     )
@@ -760,9 +805,7 @@ export default function MatchPredictor({
 
                             {/* ANTICIPATION MECHANIC: consensus stays hidden until the guess is locked */}
                             {isSubmitted && (
-                              <motion.div
-                                initial={{ opacity: 0, height: 0 }}
-                                animate={{ opacity: 1, height: "auto" }}
+                              <div
                                 className="mt-5 border-t border-slate-800/60 pt-4 overflow-hidden"
                               >
                                 <div className="flex items-center justify-center gap-1.5">
@@ -774,7 +817,7 @@ export default function MatchPredictor({
                                 <p className="mt-1 text-center text-xs italic text-slate-600">
                                   Consensus revealing soon…
                                 </p>
-                              </motion.div>
+                              </div>
                             )}
                             </div>
                           </React.Fragment>
@@ -782,9 +825,9 @@ export default function MatchPredictor({
                       })}
                     </div>
                   )}
-                </motion.div>
+                </div>
               )}
-            </motion.div>
+            </div>
           )}
     </>
   );

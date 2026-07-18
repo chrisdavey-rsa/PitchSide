@@ -1,81 +1,147 @@
-import React from 'react';
-import { UserCheck, HelpCircle, Lock, Users } from 'lucide-react';
-import { UserProfile } from '../../types';
-import { RadialOrigin, radialOriginFromEvent } from '../../radial';
+import React from "react";
+import { UserCheck, HelpCircle, Users, Trophy } from "lucide-react";
+import { UserProfile } from "../../types";
+import PitchSideMark from "../PitchSideMark";
+
+export type MobileNavTab =
+  | "leagues"
+  | "leaderboards"
+  | "predictions"
+  | "account"
+  | "rules";
 
 interface MobileNavigationProps {
   user: UserProfile;
-  onOpenAccount: (origin?: RadialOrigin) => void;
-  onOpenRules: (origin?: RadialOrigin) => void;
-  onOpenAdmin: () => void;
-  onOpenLeagues: (origin?: RadialOrigin) => void;
+  activeTab: MobileNavTab;
+  onSelectTab: (tab: MobileNavTab) => void;
   isUserInAnyLeague?: boolean;
 }
 
+const tabBase =
+  "flex flex-col items-center justify-end gap-0.5 min-w-0 flex-1 py-1 cursor-pointer";
+
 export default function MobileNavigation({
   user,
-  onOpenAccount,
-  onOpenRules,
-  onOpenAdmin,
-  onOpenLeagues,
+  activeTab,
+  onSelectTab,
   isUserInAnyLeague = true,
 }: MobileNavigationProps) {
   const highlightLeagues = !isUserInAnyLeague;
+  void user;
 
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 w-full bg-slate-950/95 backdrop-blur-lg border-t border-slate-800 z-[110] flex items-center justify-around px-2 py-3 safe-area-pb pointer-events-auto">
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onOpenAccount(radialOriginFromEvent(e));
-        }}
-        className="flex flex-col items-center gap-1 p-2 text-slate-400 hover:text-white transition-colors"
-      >
-        <UserCheck className="w-5 h-5 text-emerald-450" />
-        <span className="text-[10px] font-medium">Account</span>
-      </button>
-
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onOpenLeagues(radialOriginFromEvent(e));
-        }}
-        className={`relative overflow-hidden flex flex-col items-center gap-1 p-2 transition-colors ${
-          highlightLeagues
-            ? "text-emerald-300 ring-2 ring-emerald-400 rounded-lg shadow-[0_0_16px_rgba(16,185,129,0.35)]"
-            : "text-slate-400 hover:text-white"
-        }`}
-      >
-        {highlightLeagues && (
-          <span className="pointer-events-none absolute inset-0 -translate-x-full bg-linear-to-r from-transparent via-emerald-300/25 to-transparent animate-[shimmer_2.2s_ease-in-out_infinite]" />
-        )}
-        <Users className="w-5 h-5 text-yellow-500" />
-        <span className="text-[10px] font-medium">Leagues</span>
-      </button>
-
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onOpenRules(radialOriginFromEvent(e));
-        }}
-        className="flex flex-col items-center gap-1 p-2 text-slate-400 hover:text-white transition-colors"
-      >
-        <HelpCircle className="w-5 h-5 text-blue-400" />
-        <span className="text-[10px] font-medium">Rules</span>
-      </button>
-
-      {user.isAdmin && (
+    <nav
+      aria-label="Main"
+      className="md:hidden fixed bottom-0 left-0 right-0 w-full bg-slate-950/95 backdrop-blur-lg border-t border-slate-800 z-[110] safe-area-pb pointer-events-auto"
+    >
+      <div className="relative flex items-end justify-between px-1 pt-2 pb-2 max-w-lg mx-auto">
         <button
-          onClick={onOpenAdmin}
-          className="flex flex-col items-center gap-1 p-2 text-purple-400 hover:text-purple-300 transition-colors"
+          type="button"
+          aria-current={activeTab === "leagues" ? "page" : undefined}
+          onClick={() => onSelectTab("leagues")}
+          className={`${tabBase} ${
+            highlightLeagues
+              ? "text-emerald-300"
+              : activeTab === "leagues"
+                ? "text-white"
+                : "text-slate-500"
+          }`}
         >
-          <Lock className="w-5 h-5" />
-          <span className="text-[10px] font-medium">Admin</span>
+          <Users
+            className={`w-5 h-5 ${
+              highlightLeagues
+                ? "text-emerald-400"
+                : activeTab === "leagues"
+                  ? "text-yellow-400"
+                  : "text-slate-500"
+            }`}
+          />
+          <span className="text-[9px] font-medium font-sans truncate w-full text-center">
+            Leagues
+          </span>
         </button>
-      )}
-    </div>
+
+        <button
+          type="button"
+          aria-current={activeTab === "leaderboards" ? "page" : undefined}
+          onClick={() => onSelectTab("leaderboards")}
+          className={`${tabBase} ${
+            activeTab === "leaderboards" ? "text-white" : "text-slate-500"
+          }`}
+        >
+          <Trophy
+            className={`w-5 h-5 ${
+              activeTab === "leaderboards" ? "text-amber-400" : "text-slate-500"
+            }`}
+          />
+          <span className="text-[9px] font-medium font-sans truncate w-full text-center">
+            Boards
+          </span>
+        </button>
+
+        <div className="relative flex-1 flex justify-center -mt-5">
+          <button
+            type="button"
+            aria-label="Predictions"
+            aria-current={activeTab === "predictions" ? "page" : undefined}
+            onClick={() => onSelectTab("predictions")}
+            className="flex flex-col items-center gap-0.5 cursor-pointer"
+          >
+            <span
+              className={`relative flex items-center justify-center w-14 h-14 rounded-2xl shadow-lg shadow-emerald-950/50 border ${
+                activeTab === "predictions"
+                  ? "border-emerald-400/60 bg-slate-900 ring-2 ring-emerald-500/40"
+                  : "border-slate-700 bg-slate-900"
+              }`}
+            >
+              <PitchSideMark size={40} className="rounded-xl" />
+            </span>
+            <span
+              className={`text-[9px] font-bold font-sans ${
+                activeTab === "predictions" ? "text-emerald-300" : "text-slate-400"
+              }`}
+            >
+              Predictions
+            </span>
+          </button>
+        </div>
+
+        <button
+          type="button"
+          aria-current={activeTab === "account" ? "page" : undefined}
+          onClick={() => onSelectTab("account")}
+          className={`${tabBase} ${
+            activeTab === "account" ? "text-white" : "text-slate-500"
+          }`}
+        >
+          <UserCheck
+            className={`w-5 h-5 ${
+              activeTab === "account" ? "text-emerald-400" : "text-slate-500"
+            }`}
+          />
+          <span className="text-[9px] font-medium font-sans truncate w-full text-center">
+            Account
+          </span>
+        </button>
+
+        <button
+          type="button"
+          aria-current={activeTab === "rules" ? "page" : undefined}
+          onClick={() => onSelectTab("rules")}
+          className={`${tabBase} ${
+            activeTab === "rules" ? "text-white" : "text-slate-500"
+          }`}
+        >
+          <HelpCircle
+            className={`w-5 h-5 ${
+              activeTab === "rules" ? "text-blue-400" : "text-slate-500"
+            }`}
+          />
+          <span className="text-[9px] font-medium font-sans truncate w-full text-center">
+            Rules
+          </span>
+        </button>
+      </div>
+    </nav>
   );
 }

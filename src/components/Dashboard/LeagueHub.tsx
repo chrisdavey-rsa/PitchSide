@@ -1,15 +1,17 @@
 import React, { useMemo, useState } from "react";
-import { motion } from "motion/react";
-import { Trophy, Award, ChevronRight, Lock, Settings } from "lucide-react";
+import { Award, Lock, Settings } from "lucide-react";
 import { UserProfile, Match, League } from "../../types";
 import { getCompetitions } from "../../competitions";
 import { calculatePoints } from "../../utils";
-import { getCountryFlag, MetallicTickWithLightning } from "./shared";
+import { MetallicTickWithLightning } from "./shared";
 import type { LeaderboardRecord } from "../../supabase";
+import type { PredictionEntry } from "../../supabase";
 import InviteButton from "../League/InviteButton";
 import LeagueSettingsModal, {
   type LeagueSettingsPayload,
 } from "../League/LeagueSettingsModal";
+import { isGlobalLeague } from "../../lib/leaguesConfig";
+import LeagueHubStandings from "./LeagueHubStandings";
 
 type LeagueMemberDisplay = LeaderboardRecord & {
   displayPoints: number;
@@ -26,6 +28,8 @@ interface LeagueHubProps {
   activeLeagueMatches: Match[];
   allMatches: Match[];
   activeLeagueMembers: string[];
+  /** Current user's predictions (for unlock after lock-in). */
+  predictions: Record<string, PredictionEntry>;
   expandedStandingsUser: string | null;
   setExpandedStandingsUser: (id: string | null) => void;
   isJoiningActiveLeague: boolean;
@@ -51,6 +55,7 @@ function LeagueDetailView({
   activeLeagueMatches,
   allMatches,
   activeLeagueMembers,
+  predictions,
   expandedStandingsUser,
   setExpandedStandingsUser,
   isJoiningActiveLeague,
@@ -64,9 +69,11 @@ function LeagueDetailView({
   triggerToast,
 }: LeagueHubProps) {
   const [showSettings, setShowSettings] = useState(false);
-  const isAdmin = activeLeague.creatorId === user.id;
+  const isAdmin =
+    activeLeague.creatorId === user.id && !isGlobalLeague(activeLeague.id);
   const isMember = activeLeagueMembers.includes(user.id);
   const isPrivate = !!activeLeague.isPrivate || activeLeague.isPublic === false;
+  const canLeaveOrDelete = isMember && !isGlobalLeague(activeLeague.id);
 
   /** Live predictor rows: strictly this league's members (never global bleed). */
   const scopedMembers = useMemo(() => {
@@ -76,15 +83,10 @@ function LeagueDetailView({
 
   const compName =
     getCompetitions().find((c) => c.id === activeLeague.competitionId)?.name ||
-    "Multi-Tournament";
+    (!activeLeague.competitionId ? "All Sports" : "Multi-Tournament");
 
   return (
-    <motion.div
-      key="league-detail-page"
-      initial={{ opacity: 0, y: 15 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="space-y-6"
-    >
+    <div key="league-detail-page" className="space-y-6">
       {/* League Header Panel */}
       <div className="bg-slate-900/60 rounded-3xl border border-slate-800/70 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 relative overflow-hidden backdrop-blur-xs">
         <div className="absolute top-0 right-0 w-36 h-36 bg-emerald-500/5 rounded-full blur-2xl" />
@@ -111,7 +113,7 @@ function LeagueDetailView({
             <span>{activeLeague.name}</span>
           </h1>
           <p className="text-slate-400 text-xs font-sans">
-            Tournament:{" "}
+            Scope:{" "}
             <span className="text-white font-mono font-semibold">{compName}</span>{" "}
             • Created by{" "}
             <span className="text-slate-300 font-semibold">
@@ -120,175 +122,28 @@ function LeagueDetailView({
           </p>
         </div>
 
-        {/* Registered users at the far right of header */}
         <div className="text-right shrink-0 relative z-10 flex flex-col items-stretch sm:items-end gap-2 w-full sm:w-auto">
           <span className="text-xs bg-emerald-500/10 text-emerald-400 font-bold border border-emerald-500/20 px-3.5 py-2.5 rounded-xl block font-mono text-center sm:text-right">
-            👥 {scopedMembers.length} Registered Players
+            👥 {activeLeagueMembers.length} Registered Players
           </span>
         </div>
       </div>
 
       {/* Grid split of details */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-        {/* STANDINGS TABLE COLUMN (1/3) */}
-        <div className="bg-slate-900/60 rounded-2xl border border-slate-800/70 p-5 flex flex-col gap-4 backdrop-blur-xs">
-          <div className="flex items-center justify-between pb-2.5 border-b border-slate-800/65">
-            <div className="flex items-center gap-2">
-              <Trophy className="w-4 h-4 text-slate-400" />
-              <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono">
-                Standings
-              </h3>
-            </div>
-          </div>
+        <div className="flex flex-col gap-4">
+          <LeagueHubStandings
+            leagueId={activeLeague.id}
+            user={user}
+            registeredUsers={registeredUsers}
+            activeLeagueMembers={activeLeagueMembers}
+            userPredictions={predictions}
+            horizonMatches={allMatches}
+            expandedStandingsUser={expandedStandingsUser}
+            setExpandedStandingsUser={setExpandedStandingsUser}
+          />
 
-          <div className="space-y-1.5">
-            {scopedMembers.map((member, idx) => {
-              const isMe = member.playerId === user.id;
-              const matchUser = registeredUsers.find(
-                (r) => r.id === member.playerId,
-              );
-              const userFlag = getCountryFlag(matchUser?.nationality);
-
-              return (
-                <div key={member.playerId} className="group flex flex-col gap-1">
-                  <div
-                    onClick={() =>
-                      setExpandedStandingsUser(
-                        expandedStandingsUser === member.playerId
-                          ? null
-                          : member.playerId,
-                      )
-                    }
-                    className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer select-none ${
-                      isMe
-                        ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
-                        : "bg-slate-950/45 border-slate-850/60 hover:bg-slate-950/70 hover:border-slate-800"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 truncate">
-                      <span
-                        className={`font-mono text-[10px] font-black min-w-5 h-5 flex items-center justify-center rounded-full ${
-                          idx === 0
-                            ? "bg-yellow-500/20 text-yellow-300"
-                            : idx === 1
-                              ? "bg-slate-400/20 text-slate-300"
-                              : "text-slate-500"
-                        }`}
-                      >
-                        #{idx + 1}
-                      </span>
-                      <span
-                        className={`font-semibold text-xs truncate max-w-[110px] ${isMe ? "text-emerald-300" : "text-slate-200"}`}
-                      >
-                        {member.nickname}
-                      </span>
-                      <span
-                        className="text-sm shrink-0"
-                        title={matchUser?.nationality || "United Kingdom"}
-                      >
-                        {userFlag}
-                      </span>
-                      {isMe && (
-                        <span className="text-[8px] font-mono bg-emerald-500/20 text-emerald-450 font-bold px-1.5 py-0.2 rounded shrink-0">
-                          YOU
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex flex-col items-end gap-1 shrink-0 pr-1">
-                      <div className="text-right font-mono text-[11px] flex items-center gap-1.5">
-                        <span
-                          className={`font-bold text-xs ${isMe ? "text-emerald-450" : "text-white"}`}
-                        >
-                          {member.displayPoints} pts
-                        </span>
-                        <ChevronRight
-                          className={`w-3 h-3 text-slate-500 transition-transform ${expandedStandingsUser === member.playerId ? "rotate-90" : ""}`}
-                        />
-                      </div>
-                      <div className="flex gap-2 text-[9px] font-mono font-medium text-slate-500">
-                        <span>{member.displayPredictions} Picks</span>
-                        <span>{member.displayAccuracy}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Mini interactive dropdown */}
-                  {expandedStandingsUser === member.playerId &&
-                    (() => {
-                      let correctPredictions = 0;
-                      let perfectCount = 0;
-                      const upreds = member.predictions || {};
-                      Object.keys(upreds).forEach((matchId) => {
-                        const pObj = upreds[matchId];
-                        if (pObj && pObj.submitted) {
-                          const matchedMatch = allMatches.find(
-                            (m) => m.id === matchId,
-                          );
-                          if (
-                            matchedMatch &&
-                            matchedMatch.status === "completed" &&
-                            matchedMatch.homeScore !== undefined &&
-                            matchedMatch.awayScore !== undefined
-                          ) {
-                            const pts = calculatePoints(
-                              matchedMatch.sport,
-                              pObj.home,
-                              pObj.away,
-                              matchedMatch.homeScore,
-                              matchedMatch.awayScore,
-                            );
-                            if (pts > 0) correctPredictions++;
-                            if (pts === 5) perfectCount++;
-                          }
-                        }
-                      });
-                      return (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: "auto" }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="bg-slate-950/85 border border-slate-850/80 rounded-xl p-3 mx-1 text-[11px] font-mono text-slate-400 space-y-1.5 block"
-                        >
-                          <div className="flex justify-between items-center text-slate-500 border-b border-slate-900/40 pb-1 mb-1">
-                            <span>STATISTICS</span>
-                            <span className="text-[9px] bg-slate-900 px-1 py-0.2 rounded text-slate-400">
-                              PITCHSIDE ENGINE
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Total Predictions:</span>
-                            <strong className="text-slate-250 font-bold text-slate-200">
-                              {member.predictionsMade}
-                            </strong>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Outcome Success:</span>
-                            <strong className="text-emerald-400 font-bold">
-                              {correctPredictions}
-                            </strong>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Perfect Hits:</span>
-                            <strong className="text-yellow-400 font-bold">
-                              {perfectCount}
-                            </strong>
-                          </div>
-                          <div className="flex justify-between border-t border-slate-900/40 pt-1.5 mt-1">
-                            <span>Match Accuracy:</span>
-                            <strong className="text-blue-400 font-bold">
-                              {member.accuracy}
-                            </strong>
-                          </div>
-                        </motion.div>
-                      );
-                    })()}
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="mt-2 pt-4 border-t border-slate-800/65 space-y-3">
+          <div className="bg-slate-900/60 rounded-2xl border border-slate-800/70 p-5 space-y-3 backdrop-blur-xs">
             <div className="flex justify-between items-center gap-3">
               <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">
                 League code
@@ -319,7 +174,7 @@ function LeagueDetailView({
               </button>
             )}
 
-            {isMember ? (
+            {canLeaveOrDelete ? (
               <button
                 type="button"
                 onClick={() => onRequestLeave(activeLeague.id)}
@@ -327,6 +182,10 @@ function LeagueDetailView({
               >
                 {isAdmin ? "Delete League" : "Leave League"}
               </button>
+            ) : isMember && isGlobalLeague(activeLeague.id) ? (
+              <p className="text-[10px] font-mono text-slate-500 text-center leading-relaxed px-2">
+                Home ranking — every PitchSide player is in the Global League.
+              </p>
             ) : isJoiningActiveLeague ? (
               <div className="space-y-2 w-full border border-blue-500/30 rounded-xl p-3 bg-blue-950/10">
                 <input
@@ -349,7 +208,10 @@ function LeagueDetailView({
                     onClick={async () => {
                       if (activeLeagueJoinPassword === activeLeague.password) {
                         try {
-                          await onJoinLeague(activeLeague, activeLeagueJoinPassword);
+                          await onJoinLeague(
+                            activeLeague,
+                            activeLeagueJoinPassword,
+                          );
                           setIsJoiningActiveLeague(false);
                           setActiveLeagueJoinPassword("");
                         } catch {
@@ -436,14 +298,12 @@ function LeagueDetailView({
                       </div>
                     )}
                     <div className="bg-slate-950/40 hover:bg-slate-950/60 border border-slate-850 hover:border-slate-800 p-4 rounded-2xl transition-all">
-                      {/* Top Row: Date & Time */}
                       <div className="flex flex-col items-center justify-center text-center mb-4">
                         <span className="inline-block bg-slate-900 border border-slate-700 text-slate-400 text-[10px] font-mono px-3 py-0.5 rounded-full">
                           {timeKey}
                         </span>
                       </div>
 
-                      {/* Home vs Away & Real Full-time Result Display */}
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-950/50 p-3 rounded-xl border border-slate-800/40">
                         <div className="flex-1 text-center sm:text-left">
                           <span className="font-extrabold font-display text-sm text-white block">
@@ -481,7 +341,6 @@ function LeagueDetailView({
                         </div>
                       </div>
 
-                      {/* Participant Locks Comparer Sub-Grid */}
                       <div className="mt-3.5 space-y-1.5">
                         <span className="text-[9px] font-mono uppercase tracking-widest text-slate-500 block">
                           Participant Saved Picks:
@@ -589,7 +448,7 @@ function LeagueDetailView({
           onSave={(payload) => onUpdateLeagueSettings(activeLeague.id, payload)}
         />
       )}
-    </motion.div>
+    </div>
   );
 }
 

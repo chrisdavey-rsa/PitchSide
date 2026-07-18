@@ -24,6 +24,7 @@ import { useCommunityShieldScheduled } from './events/CommunityShieldEvent';
 import { POWER_UPS } from '../data/powerUps';
 import PowerUpModal from './powerups/PowerUpModal';
 import { btnClose } from '../ui';
+import { retainOverlayHistoryDuringTransition } from '../hooks/useOverlayHistory';
 
 interface RulesInfoProps {
   user?: UserProfile | null;
@@ -33,6 +34,14 @@ interface RulesInfoProps {
 export default function RulesInfo({ user, onClose }: RulesInfoProps) {
   const communityShieldScheduled = useCommunityShieldScheduled();
   const [activePowerUp, setActivePowerUp] = useState<string | null>(null);
+
+  const handleReturnToDashboard = () => {
+    if (!onClose) return;
+    // Close back to Dashboard — never history.back() / window.close().
+    retainOverlayHistoryDuringTransition();
+    onClose();
+  };
+
   return (
     <div
       className="bg-slate-900/90 backdrop-blur-md rounded-2xl border border-slate-800 p-6 shadow-2xl text-slate-100 max-w-4xl mx-auto my-4 overflow-hidden relative"
@@ -40,8 +49,10 @@ export default function RulesInfo({ user, onClose }: RulesInfoProps) {
       {onClose && (
         <button
           id="close-rules-btn"
-          onClick={onClose}
+          type="button"
+          onClick={handleReturnToDashboard}
           className={`absolute top-4 right-4 z-10 ${btnClose}`}
+          title="Return to Dashboard"
         >
           <X className="w-5 h-5" />
         </button>

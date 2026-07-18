@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import { motion } from "motion/react";
 import { Award, X, Search, Eye, EyeOff, Wand2, Lock, ChevronUp, ChevronDown } from "lucide-react";
 import { btnPrimary, btnSecondary, btnClose } from "../../ui";
 import { getCompetitions } from "../../competitions";
@@ -16,6 +15,7 @@ import {
   type LeagueSortDir,
 } from "../../leagues";
 import { getAvailableSeasons } from "../../seasons";
+import { isGlobalLeague } from "../../lib/leaguesConfig";
 
 type LeagueMemberDisplay = LeaderboardRecord & {
   displayPoints: number;
@@ -137,7 +137,6 @@ export default function LeagueManagementPanel({
 
   const competitions = getCompetitions();
   const availableSports = getAvailableSports(competitions);
-  const createCompetitions = competitions.filter((c) => c.sport === leagueSportInput);
   const joinedLeagueIds = new Set(userLeagues.map((l) => l.id));
 
   const filteredLeagues = sortLeagues(
@@ -176,24 +175,14 @@ export default function LeagueManagementPanel({
     { key: "create", label: "Create" },
   ];
 
-  const handleSportChange = (sport: SportType) => {
-    setLeagueSportInput(sport);
-    // Reset the competition cleanly if it no longer belongs to the chosen sport.
-    const sportComps = competitions.filter((c) => c.sport === sport);
-    if (!sportComps.some((c) => c.id === leagueCompSelect)) {
-      setLeagueCompSelect(sportComps[0]?.id ?? "");
-    }
-  };
-
   const handleGeneratePassword = () => {
     setLeaguePasswordInput(generateStrongPassword());
     setShowLeaguePassword(true);
   };
 
   return (
-    <motion.div
-      transition={{ duration: 0.5, ease: "easeInOut" }}
-      className={`bg-slate-900/60 rounded-2xl border border-slate-800/70 p-5 md:p-7 flex flex-col relative overflow-hidden backdrop-blur-xs h-[480px] md:h-[min(85vh,820px)] transition-all ${!isUserInAnyLeague ? "ring-2 ring-emerald-500 shadow-[0_0_30px_rgba(16,185,129,0.2)]" : ""}`}
+    <div
+      className={`bg-slate-900/60 rounded-2xl border border-slate-800/70 p-5 md:p-7 flex flex-col relative overflow-hidden backdrop-blur-xs h-[480px] md:h-[min(85vh,820px)] ${!isUserInAnyLeague ? "ring-2 ring-emerald-500 shadow-[0_0_30px_rgba(16,185,129,0.2)]" : ""}`}
     >
       {/* Header with title, submenu and optional close */}
       <div className="flex items-center justify-between pb-2 border-b border-slate-800/60 gap-3 shrink-0">
@@ -239,9 +228,10 @@ export default function LeagueManagementPanel({
             (() => {
               const activeLeague = leagues.find((l) => l.id === activeLeagueId);
               if (!activeLeague) return null;
-              const compName =
-                competitions.find((c) => c.id === activeLeague.competitionId)?.name ||
-                "Multi-Tournament";
+              const scopeLabel = activeLeague.competitionId
+                ? competitions.find((c) => c.id === activeLeague.competitionId)?.name ||
+                  "Legacy competition"
+                : "All sports";
 
               return (
                 <div className="h-full overflow-y-auto pr-1 space-y-3">
@@ -251,7 +241,7 @@ export default function LeagueManagementPanel({
                         {activeLeague.name}
                       </h4>
                       <p className="text-[9px] text-slate-500 truncate max-w-[120px] font-mono font-medium">
-                        {compName}
+                        {scopeLabel}
                       </p>
                     </div>
                     <div className="text-right">
@@ -304,7 +294,8 @@ export default function LeagueManagementPanel({
                     </button>
 
                     <div className="flex items-center gap-2">
-                      {activeLeague.creatorId === user.id && (
+                      {!isGlobalLeague(activeLeague.id) &&
+                        activeLeague.creatorId === user.id && (
                         <button
                           onClick={() => {
                             if (editingLeagueId === activeLeague.id) {
@@ -323,6 +314,7 @@ export default function LeagueManagementPanel({
                           Manage Settings
                         </button>
                       )}
+                      {!isGlobalLeague(activeLeague.id) && (
                       <button
                         onClick={() => handleLeaveLeague(activeLeague.id)}
                         className="text-red-400 hover:text-red-300 px-2 py-1 rounded border border-red-500/10 hover:border-red-500/30 cursor-pointer transition-colors"
@@ -331,6 +323,7 @@ export default function LeagueManagementPanel({
                           ? "Delete/Disband"
                           : "Leave League"}
                       </button>
+                      )}
                     </div>
                   </div>
 
@@ -502,7 +495,7 @@ export default function LeagueManagementPanel({
                   Members
                   <SortChevron active={sortKey === "members"} />
                 </button>
-                <span className="col-span-3">Competition</span>
+                <span className="col-span-3">Scope</span>
                 <span className="col-span-2">Sport</span>
                 <button
                   type="button"
@@ -573,10 +566,10 @@ export default function LeagueManagementPanel({
                           {league.members?.length ?? 0}
                         </div>
                         <div className="col-span-3 min-w-0 text-[10px] text-slate-400 font-mono truncate">
-                          {comp?.name || "Global"}
+                          {comp?.name || "All sports"}
                         </div>
                         <div className="col-span-2 min-w-0 text-[10px] text-slate-400 font-mono capitalize truncate">
-                          {comp ? sportLabel(comp.sport) : "—"}
+                          {comp ? sportLabel(comp.sport) : "Multi"}
                         </div>
                         <div className="col-span-2 text-[10px] font-mono">
                           {league.isPrivate || league.isPublic === false ? (
@@ -668,23 +661,7 @@ export default function LeagueManagementPanel({
               </div>
 
               <div className="flex gap-2">
-                <div className="w-1/2">
-                  <span className="text-[9px] text-slate-500 font-mono block uppercase mb-1">
-                    Sport
-                  </span>
-                  <select
-                    value={leagueSportInput}
-                    onChange={(e) => handleSportChange(e.target.value as SportType)}
-                    className="w-full text-xs bg-slate-950 border border-slate-800 p-2 rounded text-white focus:outline-hidden font-sans"
-                  >
-                    {availableSports.map((sport) => (
-                      <option key={sport} value={sport}>
-                        {sportLabel(sport)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="w-1/2">
+                <div className="w-full">
                   <span className="text-[9px] text-slate-500 font-mono block uppercase mb-1">
                     Season
                   </span>
@@ -702,26 +679,10 @@ export default function LeagueManagementPanel({
                 </div>
               </div>
 
-              <div>
-                <span className="text-[9px] text-slate-500 font-mono block uppercase mb-1">
-                  Competition
-                </span>
-                <select
-                  value={leagueCompSelect}
-                  onChange={(e) => setLeagueCompSelect(e.target.value)}
-                  className="w-full text-xs bg-slate-950 border border-slate-800 p-2 rounded text-white focus:outline-hidden font-sans"
-                >
-                  {createCompetitions.length === 0 ? (
-                    <option value="">No competitions available</option>
-                  ) : (
-                    createCompetitions.map((comp) => (
-                      <option key={comp.id} value={comp.id}>
-                        {comp.name}
-                      </option>
-                    ))
-                  )}
-                </select>
-              </div>
+              <p className="text-[10px] text-slate-500 font-sans leading-relaxed rounded-lg border border-slate-800/80 bg-slate-950/40 px-3 py-2">
+                Your league covers <span className="text-slate-300 font-semibold">all Football and Rugby</span> fixtures.
+                Friends compete across every competition — no single-tournament lock.
+              </p>
 
               <div>
                 <span className="text-[9px] text-slate-500 font-mono block uppercase mb-1">
@@ -825,6 +786,6 @@ export default function LeagueManagementPanel({
           </div>
         )}
       </div>
-    </motion.div>
+    </div>
   );
 }
