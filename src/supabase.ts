@@ -810,6 +810,21 @@ export async function dbFetchLeagueByIdAndPassword(
 }
 
 /**
+ * Fetch a league join password for Invite Friend links.
+ * Server only returns the secret when `auth.uid()` is a league member.
+ */
+export async function dbGetLeaguePassword(leagueId: string): Promise<string> {
+  if (!supabase) throw new Error("Database not connected.");
+  const { data, error } = await supabase.rpc("get_league_password", {
+    _league_id: leagueId,
+  });
+  if (error) {
+    throw new Error(error.message || "Unable to fetch league password.");
+  }
+  return typeof data === "string" ? data : "";
+}
+
+/**
  * Join a league via `join_league_secure` RPC (server-side password check + insert).
  * Direct client INSERT into `league_members` is blocked by RLS.
  */

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { motion } from "motion/react";
 import { Users, LogIn, UserPlus, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
 import type { UserProfile, League } from "../types";
@@ -22,15 +22,25 @@ export default function JoinLeague({
   onRequestAuth,
   onJoined,
 }: JoinLeagueProps) {
-  const { leagueId = "" } = useParams<{ leagueId: string }>();
+  const { leagueId: leagueIdParam = "" } = useParams<{ leagueId: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+
+  // Support `/join/:leagueId?code=` and `/join?id=&code=`
+  const leagueId = (leagueIdParam || searchParams.get("id") || "").trim();
+  const codeFromUrl = (searchParams.get("code") || "").trim();
 
   const [league, setLeague] = useState<League | null>(null);
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [joinPassword, setJoinPassword] = useState("");
+  const [joinPassword, setJoinPassword] = useState(codeFromUrl);
+  const autoJoinAttempted = useRef(false);
+
+  useEffect(() => {
+    setJoinPassword(codeFromUrl);
+  }, [codeFromUrl]);
 
   useEffect(() => {
     if (!leagueId) {
@@ -39,9 +49,9 @@ export default function JoinLeague({
       return;
     }
 
-    // Keep guests on-track through signup / login.
+    // Keep guests on-track through signup / login (preserve password code).
     if (!currentUser) {
-      storePendingInvite(leagueId);
+      storePendingInvite(leagueId, codeFromUrl || undefined);
     }
 
     let cancelled = false;
@@ -70,71 +80,87 @@ export default function JoinLeague({
     return () => {
       cancelled = true;
     };
-  }, [leagueId, currentUser]);
+  }, [leagueId, currentUser, codeFromUrl]);
 
   const alreadyMember =
     !!currentUser && !!league && league.members.includes(currentUser.id);
 
-  const handleJoin = async () => {
-    if (!currentUser || !league) return;
+  const completeJoin = useCallback(
+    async (password: string) => {
+      if (!currentUser || !league) return;
 
-    if (alreadyMember) {
-      clearPendingInvite();
-      onJoined(league.id);
-      navigate("/");
-      return;
-    }
-
-    const memberCap = league.maxPlayers ?? league.maxParticipants;
-    if (
-      !isGlobalLeague(league.id) &&
-      memberCap != null &&
-      league.members.length >= memberCap
-    ) {
-      setError(`This league is full (max ${memberCap} players).`);
-      return;
-    }
-
-    if (!joinPassword.trim()) {
-      setError("Enter the league join password to continue.");
-      return;
-    }
-
-    setJoining(true);
-    setError(null);
-    setStatus(null);
-
-    try {
-      await dbJoinLeague(league.id, currentUser.id, joinPassword.trim());
-      clearPendingInvite();
-      setStatus(`You're in — welcome to ${league.name}!`);
-      window.setTimeout(() => {
-        onJoined(league.id);
-        navigate("/");
-      }, 700);
-    } catch (err: unknown) {
-      console.error("[JoinLeague] join failed", err);
-      const message = err instanceof Error ? err.message : String(err);
-      if (/incorrect password/i.test(message)) {
-        setError("Incorrect password. Please try again.");
-        return;
-      }
-      if (/league is full/i.test(message)) {
-        setError("This league is full.");
-        return;
-      }
-      // Idempotent: already a member → treat as success.
-      if (/duplicate|unique|already/i.test(message)) {
+      if (alreadyMember) {
         clearPendingInvite();
         onJoined(league.id);
         navigate("/");
         return;
       }
-      setError("Couldn't join this league. Please try again.");
-    } finally {
-      setJoining(false);
-    }
+
+      const memberCap = league.maxPlayers ?? league.maxParticipants;
+      if (
+        !isGlobalLeague(league.id) &&
+        memberCap != null &&
+        league.members.length >= memberCap
+      ) {
+        setError(`This league is full (max ${memberCap} players).`);
+        return;
+      }
+
+      if (!password.trim()) {
+        setError("Enter the league join password to continue.");
+        return;
+      }
+
+      setJoining(true);
+      setError(null);
+      setStatus(null);
+
+      try {
+        await dbJoinLeague(league.id, currentUser.id, password.trim());
+        clearPendingInvite();
+        setStatus(`You're in — welcome to ${league.name}!`);
+        window.setTimeout(() => {
+          onJoined(league.id);
+          navigate("/");
+        }, 700);
+      } catch (err: unknown) {
+        console.error("[JoinLeague] join failed", err);
+        const message = err instanceof Error ? err.message : String(err);
+        if (/incorrect password/i.test(message)) {
+          setError("Incorrect password. Please try again.");
+          return;
+        }
+        if (/league is full/i.test(message)) {
+          setError("This league is full.");
+          return;
+        }
+        if (/duplicate|unique|already/i.test(message)) {
+          clearPendingInvite();
+          onJoined(league.id);
+          navigate("/");
+          return;
+        }
+        setError("Couldn't join this league. Please try again.");
+      } finally {
+        setJoining(false);
+      }
+    },
+    [alreadyMember, currentUser, league, navigate, onJoined],
+  );
+
+  const handleJoin = () => {
+    void completeJoin(joinPassword);
   };
+
+  // Seamless join when the invite URL already includes `?code=`
+  useEffect(() => {
+    if (autoJoinAttempted.current) return;
+    if (!currentUser || !league || loading || alreadyMember) return;
+    if (!codeFromUrl) return;
+
+    autoJoinAttempted.current = true;
+    void completeJoin(codeFromUrl);
+  }, [alreadyMember, codeFromUrl, completeJoin, currentUser, league, loading]);
 
   return (
     <div className="min-h-[70vh] flex items-center justify-center p-4">
@@ -221,7 +247,7 @@ export default function JoinLeague({
                   <button
                     type="button"
                     onClick={() => {
-                      storePendingInvite(league.id);
+                      storePendingInvite(league.id, codeFromUrl || joinPassword || undefined);
                       onRequestAuth("login");
                     }}
                     className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold font-display text-sm py-3 rounded-xl cursor-pointer transition-colors"
@@ -232,7 +258,7 @@ export default function JoinLeague({
                   <button
                     type="button"
                     onClick={() => {
-                      storePendingInvite(league.id);
+                      storePendingInvite(league.id, codeFromUrl || joinPassword || undefined);
                       onRequestAuth("signup");
                     }}
                     className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold font-display text-sm py-3 rounded-xl border border-slate-700 cursor-pointer transition-colors"
@@ -255,6 +281,13 @@ export default function JoinLeague({
                   )}
                   Open League
                 </button>
+              ) : joining && codeFromUrl ? (
+                <div className="flex flex-col items-center gap-3 py-4 text-slate-400">
+                  <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
+                  <span className="text-xs font-mono uppercase tracking-widest">
+                    Joining league…
+                  </span>
+                </div>
               ) : (
                 <div className="space-y-3">
                   <div>
@@ -273,6 +306,11 @@ export default function JoinLeague({
                       placeholder="Enter the league password"
                       className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-emerald-500/50"
                     />
+                    {codeFromUrl ? (
+                      <p className="mt-1.5 text-[10px] text-slate-500 font-mono">
+                        Password loaded from your invite link.
+                      </p>
+                    ) : null}
                   </div>
                   <button
                     type="button"

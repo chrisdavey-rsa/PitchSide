@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Share2, Link2, Check } from "lucide-react";
 import type { League } from "../../types";
+import { dbGetLeaguePassword } from "../../supabase";
 
 interface InviteButtonProps {
   league: League;
@@ -9,10 +10,15 @@ interface InviteButtonProps {
   className?: string;
 }
 
-function buildShareUrl(leagueId: string): string {
+/** Share URL: `/join/:leagueId?code=<password>` (password fetched via member-only RPC). */
+export function buildInviteShareUrl(leagueId: string, password: string): string {
   const origin =
     typeof window !== "undefined" ? window.location.origin : "https://pitchside.app";
-  return `${origin}/join/${leagueId}`;
+  const url = new URL(`${origin}/join/${encodeURIComponent(leagueId)}`);
+  if (password) {
+    url.searchParams.set("code", password);
+  }
+  return url.toString();
 }
 
 export default function InviteButton({
@@ -25,35 +31,38 @@ export default function InviteButton({
 
   const handleInvite = async () => {
     if (busy) return;
-    const shareUrl = buildShareUrl(league.id);
-    const payload = {
-      title: "Join my PitchSide league",
-      text: "Come predict the scores with me on PitchSide!",
-      url: shareUrl,
-    };
-
     setBusy(true);
+
     try {
+      const password = await dbGetLeaguePassword(league.id);
+      const shareUrl = buildInviteShareUrl(league.id, password);
+      const payload = {
+        title: "Join my PitchSide league",
+        text: "Come predict the scores with me on PitchSide!",
+        url: shareUrl,
+      };
+
       if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
-        await navigator.share(payload);
-        return;
+        try {
+          await navigator.share(payload);
+          return;
+        } catch (err) {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+          // Fall through to clipboard if share fails for other reasons.
+        }
       }
 
       await navigator.clipboard.writeText(shareUrl);
       setCopied(true);
-      onToast?.("Link copied to clipboard!");
+      onToast?.("Invite link copied to clipboard!");
       window.setTimeout(() => setCopied(false), 2200);
     } catch (err) {
-      // User cancelled the native share sheet — not an error.
-      if (err instanceof DOMException && err.name === "AbortError") return;
-
-      try {
-        await navigator.clipboard.writeText(shareUrl);
-        setCopied(true);
-        onToast?.("Link copied to clipboard!");
-        window.setTimeout(() => setCopied(false), 2200);
-      } catch {
-        onToast?.("Unable to share — copy the join code instead.");
+      console.error("[InviteButton] share failed", err);
+      const message = err instanceof Error ? err.message : String(err);
+      if (/not a member/i.test(message)) {
+        onToast?.("Only league members can create invite links.");
+      } else {
+        onToast?.("Unable to create invite link. Please try again.");
       }
     } finally {
       setBusy(false);
@@ -80,7 +89,7 @@ export default function InviteButton({
             ) : (
               <Link2 className="w-4 h-4" />
             )}
-            Invite friends
+            {busy ? "Preparing link…" : "Invite friends"}
           </>
         )}
       </button>

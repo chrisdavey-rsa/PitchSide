@@ -25,7 +25,7 @@ import { RadialOrigin } from './radial';
 import { useBodyScrollLock } from './hooks/useBodyScrollLock';
 import { useSupabaseRealtime } from './hooks/useSupabaseRealtime';
 import { useOverlayHistory, retainOverlayHistoryDuringTransition, transferOverlay } from './hooks/useOverlayHistory';
-import { readPendingInvite } from './lib/pendingInvite';
+import { pendingInviteToPath, readPendingInvite } from './lib/pendingInvite';
 
 /** Which guest auth screen is currently shown. */
 type GuestAuthView = 'login' | 'signup' | 'reset-request' | 'reset-update';
@@ -254,7 +254,7 @@ function AppShell() {
     localStorage.setItem('pitchside_logged_in', JSON.stringify(user));
     const pendingInvite = readPendingInvite();
     if (pendingInvite) {
-      navigate(`/join/${pendingInvite}`);
+      navigate(pendingInviteToPath(pendingInvite));
     }
   };
 
@@ -430,6 +430,23 @@ function AppShell() {
             <Routes>
               <Route
                 path="/join/:leagueId"
+                element={
+                  <JoinLeague
+                    currentUser={currentUser}
+                    onRequestAuth={(mode) => {
+                      setGuestAuthView(mode === "signup" ? "signup" : "login");
+                      navigate("/");
+                    }}
+                    onJoined={(id) => {
+                      setExternalLeagueSelection(id);
+                      setDashboardWelcome("Welcome to the league — you're in!");
+                    }}
+                  />
+                }
+              />
+              {/* Query-style invites: /join?id=LG_XXX&code=password */}
+              <Route
+                path="/join"
                 element={
                   <JoinLeague
                     currentUser={currentUser}

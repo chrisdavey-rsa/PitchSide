@@ -206,19 +206,20 @@ function LeagueDetailView({
                   <button
                     type="button"
                     onClick={async () => {
-                      if (activeLeagueJoinPassword === activeLeague.password) {
-                        try {
-                          await onJoinLeague(
-                            activeLeague,
-                            activeLeagueJoinPassword,
-                          );
-                          setIsJoiningActiveLeague(false);
-                          setActiveLeagueJoinPassword("");
-                        } catch {
-                          triggerToast("⚠️ Failed to join league.");
-                        }
-                      } else {
-                        triggerToast("⚠️ Incorrect password.");
+                      if (!activeLeagueJoinPassword.trim()) {
+                        triggerToast("⚠️ Enter the league password.");
+                        return;
+                      }
+                      try {
+                        // Password verified server-side via join_league_secure.
+                        await onJoinLeague(
+                          activeLeague,
+                          activeLeagueJoinPassword.trim(),
+                        );
+                        setIsJoiningActiveLeague(false);
+                        setActiveLeagueJoinPassword("");
+                      } catch {
+                        triggerToast("⚠️ Failed to join league.");
                       }
                     }}
                     className="flex-1 text-xs font-mono font-bold bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-lg cursor-pointer transition-colors text-center"
