@@ -106,7 +106,7 @@ function AppShell() {
       }
     }
 
-    // Hold the splash long enough for the mark to draw in and settle
+    // Hold the splash for the perimeter-trace + glow cycle (must stay 2200ms)
     const splashTimer = setTimeout(() => {
       setIsSplash(false);
     }, 2200);
