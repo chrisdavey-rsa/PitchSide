@@ -4,7 +4,7 @@
  * - Push placeholder ready for future "As It Stands" Web Push alerts.
  */
 
-const CACHE_VERSION = 'pitchside-v3';
+const CACHE_VERSION = 'pitchside-v4';
 const OFFLINE_URLS = ['/', '/index.html', '/manifest.json'];
 
 function isSupabaseRequest(urlString) {
@@ -66,6 +66,29 @@ self.addEventListener('fetch', (event) => {
 
   // Only cache-assist same-origin GET navigation / asset requests.
   if (request.method !== 'GET') {
+    return;
+  }
+
+  // Navigations (direct deep links / refresh): prefer network, then app shell.
+  // After vercel.json SPA rewrites, the network returns index.html for /join/*.
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response.ok) return response;
+          return caches.match('/index.html').then((cached) => cached || response);
+        })
+        .catch(() =>
+          caches.match('/index.html').then(
+            (cached) =>
+              cached ||
+              new Response('PitchSide offline', {
+                status: 503,
+                headers: { 'Content-Type': 'text/plain' },
+              }),
+          ),
+        ),
+    );
     return;
   }
 
