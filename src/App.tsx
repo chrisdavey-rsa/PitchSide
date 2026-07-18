@@ -19,7 +19,7 @@ import Dashboard from './components/Dashboard';
 import RulesInfo from './components/RulesInfo';
 import AdminPanel from './components/AdminPanel';
 import AccountPortal from './components/AccountPortal';
-import PWAInstallBanner from './components/PWAInstallBanner';
+import InstallPWA from './components/InstallPWA';
 import JoinLeague from './pages/JoinLeague';
 import { RadialOrigin } from './radial';
 import { useBodyScrollLock } from './hooks/useBodyScrollLock';
@@ -375,7 +375,7 @@ function AppShell() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-slate-950 overflow-x-hidden">
-      {!isSplash && <PWAInstallBanner />}
+      {!isSplash && <InstallPWA />}
       <AnimatePresence mode="wait">
         {isSplash ? (
           /* Splash Screen Overlay Intro */

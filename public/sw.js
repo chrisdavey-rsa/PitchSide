@@ -4,7 +4,7 @@
  * - Push placeholder ready for future "As It Stands" Web Push alerts.
  */
 
-const CACHE_VERSION = 'pitchside-v2';
+const CACHE_VERSION = 'pitchside-v3';
 const OFFLINE_URLS = ['/', '/index.html', '/manifest.json'];
 
 function isSupabaseRequest(urlString) {
@@ -54,7 +54,7 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// --- Fetch: network-first for same-origin GET only ------------------------
+// --- Fetch handler (required for Chrome installability / beforeinstallprompt) ---
 self.addEventListener('fetch', (event) => {
   const { request } = event;
 
@@ -82,6 +82,13 @@ self.addEventListener('fetch', (event) => {
         caches.match(request).then((cached) => cached || caches.match('/index.html'))
       )
   );
+});
+
+// Allow the page to force activation of a waiting worker.
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 // --- Push: placeholder for future Web Push notifications -------------------

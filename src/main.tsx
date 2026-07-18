@@ -19,13 +19,19 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 );
 
-// Register the service worker for PWA install + offline support (and the
-// foundation for future Web Push notifications).
-// Cache-bust query ensures browsers pick up sw.js changes (Supabase bypass).
+// Register the service worker for PWA installability (Chrome requires an active
+// SW with a fetch handler before it will fire beforeinstallprompt).
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js?v=2').catch((err) => {
-      console.warn('Service worker registration failed:', err);
-    });
+    navigator.serviceWorker
+      .register('/sw.js', { scope: '/', updateViaCache: 'none' })
+      .then((reg) => {
+        // Ensure a controlling worker as soon as possible (helps installability).
+        if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        void reg.update();
+      })
+      .catch((err) => {
+        console.warn('Service worker registration failed:', err);
+      });
   });
 }
