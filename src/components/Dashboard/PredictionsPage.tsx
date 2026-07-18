@@ -129,8 +129,6 @@ export default function PredictionsPage({
       </div>
 
       <MatchPredictor
-        layout="page"
-        isUserInAnyLeague={isUserInAnyLeague}
         selectedSport={selectedSport}
         setSelectedSport={setSelectedSport}
         selectedCompId={selectedCompId}

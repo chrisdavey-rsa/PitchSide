@@ -133,6 +133,8 @@ export interface League {
   /** Legacy mirror of maxPlayers. */
   maxParticipants?: number | null;
   season?: string;
+  /** Soft-deleted / archived — hidden from player-facing UIs. */
+  isArchived?: boolean;
   createdAt: string;
   updatedAt: string;
 }

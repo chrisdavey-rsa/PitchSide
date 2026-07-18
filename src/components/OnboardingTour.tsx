@@ -13,6 +13,10 @@ export interface TourStep {
   targetId: string;
   title: string;
   description: string;
+  /** Prefer tooltip above/below the target (auto picks based on space). */
+  placement?: "auto" | "above" | "below";
+  onEnter?: () => void;
+  onExit?: () => void;
 }
 
 interface OnboardingTourProps {
@@ -27,8 +31,7 @@ interface Rect {
   height: number;
 }
 
-const SPOTLIGHT_PADDING = 10;
-const TOOLTIP_WIDTH = 340;
+const SPOTLIGHT_PADDING = 8;
 
 export default function OnboardingTour({ steps, onComplete }: OnboardingTourProps) {
   const [stepIndex, setStepIndex] = useState(0);
@@ -61,13 +64,25 @@ export default function OnboardingTour({ steps, onComplete }: OnboardingTourProp
   useLayoutEffect(() => {
     const el = step ? document.getElementById(step.targetId) : null;
     if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      // Bottom-nav targets: keep them pinned; avoid scrolling the page under the bar.
+      const nearBottom =
+        el.getBoundingClientRect().bottom > window.innerHeight - 140;
+      if (!nearBottom) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
     }
     measure();
-    // Re-measure after any smooth-scroll settles.
     const t = window.setTimeout(measure, 400);
     return () => window.clearTimeout(t);
   }, [step, measure]);
+
+  useEffect(() => {
+    if (!step) return;
+    step.onEnter?.();
+    return () => {
+      step.onExit?.();
+    };
+  }, [step]);
 
   useEffect(() => {
     window.addEventListener("resize", measure);
@@ -95,30 +110,46 @@ export default function OnboardingTour({ steps, onComplete }: OnboardingTourProp
 
   const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 800;
   const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 1200;
+  const tooltipWidth = Math.min(340, viewportWidth - 32);
 
-  // Position the tooltip relative to the spotlight (below when there's room,
-  // otherwise above). Falls back to centered when there is no target.
   let tooltipStyle: React.CSSProperties;
   if (rect) {
     const spaceBelow = viewportHeight - (rect.top + rect.height);
-    const placeBelow = spaceBelow > 240;
-    let left = rect.left + rect.width / 2 - TOOLTIP_WIDTH / 2;
-    left = Math.max(16, Math.min(left, viewportWidth - TOOLTIP_WIDTH - 16));
-    tooltipStyle = placeBelow
-      ? { top: rect.top + rect.height + 14, left, width: TOOLTIP_WIDTH }
-      : { bottom: viewportHeight - rect.top + 14, left, width: TOOLTIP_WIDTH };
+    const spaceAbove = rect.top;
+    const nearBottom = rect.top + rect.height > viewportHeight - 160;
+
+    let placeBelow: boolean;
+    if (step.placement === "above") placeBelow = false;
+    else if (step.placement === "below") placeBelow = true;
+    else if (nearBottom) placeBelow = false;
+    else placeBelow = spaceBelow > 220 || spaceBelow >= spaceAbove;
+
+    let left = rect.left + rect.width / 2 - tooltipWidth / 2;
+    left = Math.max(16, Math.min(left, viewportWidth - tooltipWidth - 16));
+
+    if (placeBelow) {
+      const top = Math.min(rect.top + rect.height + 12, viewportHeight - 220);
+      tooltipStyle = { top: Math.max(12, top), left, width: tooltipWidth };
+    } else {
+      // Prefer CSS bottom so tooltips sit cleanly above the bottom nav.
+      const bottomGap = viewportHeight - rect.top + 12;
+      tooltipStyle = {
+        bottom: Math.max(12, Math.min(bottomGap, viewportHeight - 80)),
+        left,
+        width: tooltipWidth,
+      };
+    }
   } else {
     tooltipStyle = {
       top: "50%",
       left: "50%",
       transform: "translate(-50%, -50%)",
-      width: TOOLTIP_WIDTH,
+      width: tooltipWidth,
     };
   }
 
   const overlay = (
-    <div className="fixed inset-0 z-[100] font-sans">
-      {/* Click blocker so the tour drives interaction */}
+    <div className="fixed inset-0 z-[200] font-sans">
       <div className="absolute inset-0" />
 
       <AnimatePresence mode="wait">
@@ -157,19 +188,20 @@ export default function OnboardingTour({ steps, onComplete }: OnboardingTourProp
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 8, scale: 0.98 }}
           transition={{ type: "spring", damping: 24, stiffness: 320 }}
-          className="fixed z-[101] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-5"
+          className="fixed z-[201] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-5"
           style={tooltipStyle}
         >
           <div className="flex items-start justify-between gap-3 mb-2">
-            <div className="flex items-center gap-2">
-              <div className="bg-emerald-500/15 border border-emerald-500/30 p-1.5 rounded-lg">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="bg-emerald-500/15 border border-emerald-500/30 p-1.5 rounded-lg shrink-0">
                 <Sparkles className="w-4 h-4 text-emerald-400" />
               </div>
-              <h4 className="text-sm font-bold font-display text-white uppercase tracking-wide">
+              <h4 className="text-sm font-bold font-display text-white uppercase tracking-wide truncate">
                 {step.title}
               </h4>
             </div>
             <button
+              type="button"
               onClick={onComplete}
               className="text-slate-500 hover:text-slate-300 transition-colors cursor-pointer shrink-0"
               title="Skip tour"
@@ -180,8 +212,8 @@ export default function OnboardingTour({ steps, onComplete }: OnboardingTourProp
 
           <p className="text-xs text-slate-400 leading-relaxed">{step.description}</p>
 
-          <div className="flex items-center justify-between mt-5">
-            <div className="flex items-center gap-1.5">
+          <div className="flex items-center justify-between mt-5 gap-2">
+            <div className="flex items-center gap-1.5 flex-wrap">
               {steps.map((_, i) => (
                 <span
                   key={i}
@@ -192,9 +224,10 @@ export default function OnboardingTour({ steps, onComplete }: OnboardingTourProp
               ))}
             </div>
 
-            <div className="flex items-center gap-2 font-mono text-[11px] font-bold uppercase tracking-wider">
+            <div className="flex items-center gap-2 font-mono text-[11px] font-bold uppercase tracking-wider shrink-0">
               {!isFirst && (
                 <button
+                  type="button"
                   onClick={goBack}
                   className="flex items-center gap-1 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors"
                 >
@@ -203,6 +236,7 @@ export default function OnboardingTour({ steps, onComplete }: OnboardingTourProp
                 </button>
               )}
               <button
+                type="button"
                 onClick={goNext}
                 className="flex items-center gap-1 text-white bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 rounded-lg cursor-pointer transition-colors shadow-md shadow-emerald-950/40"
               >
@@ -213,6 +247,7 @@ export default function OnboardingTour({ steps, onComplete }: OnboardingTourProp
           </div>
 
           <button
+            type="button"
             onClick={onComplete}
             className="mt-3 w-full text-center text-[10px] font-mono uppercase tracking-widest text-slate-600 hover:text-slate-400 transition-colors cursor-pointer"
           >

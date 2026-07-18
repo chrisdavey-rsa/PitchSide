@@ -3,7 +3,7 @@ import { Trophy, ArrowUpDown, X } from "lucide-react";
 import { Match, SportType, UserProfile } from "../../types";
 import { calculatePoints } from "../../utils";
 import { getCountryFlag } from "../AccountPortal/data";
-import type { LeaderboardItem, LeaderboardScope } from "./Leaderboard";
+import type { LeaderboardItem, LeaderboardScope } from "./leaderboardTypes";
 import type { LeaderboardRecord } from "../../supabase";
 import {
   StandingsHorizon,
@@ -208,12 +208,6 @@ export default function LeaderboardsPage({
   ];
 
   const openPlayerForm = (player: LeaderboardItem) => {
-    console.log("[LeaderboardsPage] player form drill-down", {
-      playerId: player.playerId,
-      nickname: player.nickname,
-      sport,
-      horizon,
-    });
     setFormPlayer(player);
   };
 

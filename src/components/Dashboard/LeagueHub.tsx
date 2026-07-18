@@ -180,7 +180,7 @@ function LeagueDetailView({
                 onClick={() => onRequestLeave(activeLeague.id)}
                 className="w-full text-xs font-mono font-bold bg-red-950/15 hover:bg-red-950/40 border border-red-500/20 hover:border-red-500/40 text-red-400 py-2.5 rounded-xl cursor-pointer transition-colors text-center block"
               >
-                {isAdmin ? "Delete League" : "Leave League"}
+                {isAdmin ? "Archive League" : "Leave League"}
               </button>
             ) : isMember && isGlobalLeague(activeLeague.id) ? (
               <p className="text-[10px] font-mono text-slate-500 text-center leading-relaxed px-2">

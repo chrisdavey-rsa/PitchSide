@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type Dispatch, type SetStateAction } from 'react';
 import { dbFetchMatches, dbFetchLeagues, dbFetchArchivedPlayers } from '../../supabase';
 import { League, Match } from '../../types';
 
@@ -13,6 +13,8 @@ export interface AdminDataState {
   fetchFixtures: () => Promise<void>;
   fetchLeagues: () => Promise<void>;
   fetchArchives: () => Promise<void>;
+  /** Optimistic / local patch of the leagues list (admin UI). */
+  setLeagues: Dispatch<SetStateAction<League[]>>;
   handleRefresh: () => void;
 }
 
@@ -40,9 +42,11 @@ export function useAdminData(activeTab: string): AdminDataState {
   const fetchLeagues = useCallback(async () => {
     setLoadingLeagues(true);
     try {
-      // dbFetchLeagues hydrates `members` from league_members (ignores JSONB).
-      // Admin view includes private leagues that normal browse hides.
-      const data = await dbFetchLeagues({ includeAllPrivate: true });
+      // Admin: private + archived so Active / Archived tabs both work.
+      const data = await dbFetchLeagues({
+        includeAllPrivate: true,
+        includeArchived: true,
+      });
       setLeagues(data);
     } catch (e) {
       console.warn('useAdminData: Failed to fetch leagues', e);
@@ -94,6 +98,7 @@ export function useAdminData(activeTab: string): AdminDataState {
     fetchFixtures,
     fetchLeagues,
     fetchArchives,
+    setLeagues,
     handleRefresh,
   };
 }

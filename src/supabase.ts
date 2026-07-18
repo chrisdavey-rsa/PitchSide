@@ -508,6 +508,8 @@ function mapLeagueRow(d: any, members: string[] = []): League {
     maxPlayers,
     maxParticipants: maxPlayers,
     season: d.season || undefined,
+    // Strict true only — null/undefined/false all count as active.
+    isArchived: d.is_archived === true,
     createdAt: d.created_at || new Date().toISOString(),
     updatedAt: d.updated_at || new Date().toISOString(),
   };
@@ -518,16 +520,25 @@ export type FetchLeaguesOptions = {
   viewerUserId?: string | null;
   /** Admin / ops: return every league including private ones. */
   includeAllPrivate?: boolean;
+  /** Admin: include soft-deleted (archived) leagues. Default false for player UIs. */
+  includeArchived?: boolean;
 };
 
 export async function dbFetchLeagues(
   options: FetchLeaguesOptions = {},
 ): Promise<League[]> {
   if (!supabase) throw new Error("Database not connected.");
-  const { data, error } = await supabase
+  let query = supabase
     .from("leagues")
     .select("*")
     .order("created_at", { ascending: false });
+
+  // Player-facing default: only active leagues.
+  if (!options.includeArchived) {
+    query = query.eq("is_archived", false);
+  }
+
+  const { data, error } = await query;
   if (error) throw error;
   if (!data || data.length === 0) return [];
 
@@ -545,13 +556,14 @@ export async function dbFetchLeagues(
   });
 }
 
-/** Fetch a single league by id (invite / join deep-links). */
+/** Fetch a single league by id (invite / join deep-links). Archived → null. */
 export async function dbFetchLeagueById(leagueId: string): Promise<League | null> {
   if (!supabase) throw new Error("Database not connected.");
   const { data, error } = await supabase
     .from("leagues")
     .select("*")
     .eq("id", leagueId)
+    .eq("is_archived", false)
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
@@ -580,6 +592,7 @@ export async function dbCreateLeague(league: League): Promise<void> {
     max_players: maxPlayers,
     max_participants: maxPlayers,
     season: league.season || null,
+    is_archived: false,
     created_at: league.createdAt || new Date().toISOString(),
     updated_at: league.updatedAt || new Date().toISOString(),
   };
@@ -614,6 +627,100 @@ export async function dbUpdateLeagueSettings(
   if (error) throw error;
 }
 
+/** Soft-delete: archive a league (avoids FK hard-delete failures). */
+export async function dbArchiveLeague(leagueId: string): Promise<void> {
+  if (!supabase) throw new Error("Database not connected.");
+  try {
+    // PreferReturning: RLS can silently update 0 rows with no error — verify.
+    const { data, error } = await supabase
+      .from("leagues")
+      .update({ is_archived: true, updated_at: new Date().toISOString() })
+      .eq("id", leagueId)
+      .select("id, is_archived")
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) {
+      throw new Error(
+        "Archive failed: no row updated. Confirm is_archived exists and RLS allows admin UPDATE on leagues.",
+      );
+    }
+    if (data.is_archived !== true) {
+      throw new Error("Archive failed: league was not marked archived in the database.");
+    }
+  } catch (err) {
+    if (err instanceof Error) throw err;
+    throw new Error(
+      typeof err === "string" ? err : "Network error: Could not connect to the database.",
+    );
+  }
+}
+
+/** Restore a previously archived league. */
+export async function dbUnarchiveLeague(leagueId: string): Promise<void> {
+  if (!supabase) throw new Error("Database not connected.");
+  try {
+    const { data, error } = await supabase
+      .from("leagues")
+      .update({ is_archived: false, updated_at: new Date().toISOString() })
+      .eq("id", leagueId)
+      .select("id, is_archived")
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) {
+      throw new Error(
+        "Unarchive failed: no row updated. Confirm RLS allows admin UPDATE on leagues.",
+      );
+    }
+    if (data.is_archived === true) {
+      throw new Error("Unarchive failed: league is still marked archived.");
+    }
+  } catch (err) {
+    if (err instanceof Error) throw err;
+    throw new Error(
+      typeof err === "string" ? err : "Network error: Could not connect to the database.",
+    );
+  }
+}
+
+/** @deprecated Prefer dbArchiveLeague — hard delete is blocked by membership FKs. */
+export async function dbDeleteLeague(leagueId: string): Promise<void> {
+  return dbArchiveLeague(leagueId);
+}
+
+/** Admin patch for league name / privacy / cap / password. */
+export async function dbAdminUpdateLeague(
+  leagueId: string,
+  patch: {
+    name?: string;
+    isPrivate?: boolean;
+    maxPlayers?: number;
+    password?: string;
+  },
+): Promise<void> {
+  if (!supabase) throw new Error("Database not connected.");
+  const payload: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+  if (typeof patch.name === "string") {
+    payload.name = patch.name.trim();
+  }
+  if (typeof patch.isPrivate === "boolean") {
+    payload.is_private = patch.isPrivate;
+    payload.is_public = !patch.isPrivate;
+  }
+  if (typeof patch.maxPlayers === "number") {
+    const maxPlayers = Math.min(20, Math.max(1, patch.maxPlayers));
+    payload.max_players = maxPlayers;
+    payload.max_participants = maxPlayers;
+  }
+  if (typeof patch.password === "string") {
+    payload.password = patch.password;
+  }
+
+  const { error } = await supabase.from("leagues").update(payload).eq("id", leagueId);
+  if (error) throw error;
+}
+
 /**
  * Look up a league by id + password (join flow).
  * Private leagues are filtered from browse lists, so join must hit the DB directly.
@@ -624,24 +731,13 @@ export async function dbFetchLeagueByIdAndPassword(
 ): Promise<League | null> {
   if (!supabase) throw new Error("Database not connected.");
 
-  const payload = {
-    leagueId,
-    passwordLength: password.length,
-  };
-  console.log("[dbFetchLeagueByIdAndPassword] query payload", payload);
-
   const { data, error } = await supabase
     .from("leagues")
     .select("*")
     .eq("id", leagueId)
     .eq("password", password)
+    .eq("is_archived", false)
     .maybeSingle();
-
-  console.log("[dbFetchLeagueByIdAndPassword] result", {
-    found: !!data,
-    error: error?.message ?? null,
-    code: error?.code ?? null,
-  });
 
   if (error) throw error;
   if (!data) return null;
@@ -658,20 +754,12 @@ export async function dbJoinLeague(leagueId: string, userId: string): Promise<vo
     user_id: userId,
     joined_at: new Date().toISOString(),
   };
-  console.log("[dbJoinLeague] insert payload", payload);
 
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from("league_members")
     .insert(payload)
     .select("league_id, user_id, joined_at")
     .maybeSingle();
-
-  console.log("[dbJoinLeague] insert result", {
-    data,
-    error: error
-      ? { message: error.message, code: error.code, details: error.details }
-      : null,
-  });
 
   // Already a member — treat as success (unique on league_id + user_id).
   if (error?.code === "23505") return;
@@ -699,15 +787,17 @@ export async function dbFetchUserLeagues(userId: string): Promise<League[]> {
   );
   if (leagueIds.length === 0) return [];
 
-  // Step 2: fetch the league records themselves.
+  // Step 2: fetch active league records only (archived are hidden from players).
   const { data: leagueRows, error: leagueError } = await supabase
     .from("leagues")
     .select("*")
-    .in("id", leagueIds);
+    .in("id", leagueIds)
+    .eq("is_archived", false);
   if (leagueError) throw leagueError;
 
   // Step 3: hydrate full member lists from league_members (not the deprecated JSONB).
-  const membership = await dbFetchLeaguesMembership(leagueIds);
+  const activeIds = (leagueRows || []).map((d: any) => d.id as string);
+  const membership = await dbFetchLeaguesMembership(activeIds);
   return (leagueRows || []).map((d: any) => mapLeagueRow(d, membership[d.id] || []));
 }
 

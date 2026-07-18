@@ -35,13 +35,13 @@ import {
   dbJoinLeague,
   dbLeaveLeague,
   dbUpdateLeagueSettings,
+  dbArchiveLeague,
   dbFetchLeagueMembers,
   dbFetchLeagueById,
   dbFetchLeagueByIdAndPassword,
   dbFetchSeenFeatures,
   dbMarkFeatureSeen,
   isSupabaseConfigured,
-  supabase,
   filterMatchesToHorizon,
 } from "../supabase";
 import {
@@ -62,15 +62,14 @@ import { getCompetitions } from "../competitions";
 import { getLatestSeason } from "../seasons";
 import { isGlobalLeague } from "../lib/leaguesConfig";
 import { calculatePoints, computeWeeklyStreak } from "../utils";
-import GlobalNavigation from './Dashboard/GlobalNavigation';
+import TopNavigation from './Dashboard/TopNavigation';
 import WelcomeHeader from './Dashboard/WelcomeHeader';
-import type { LeaderboardScope } from './Dashboard/Leaderboard';
+import type { LeaderboardScope } from './Dashboard/leaderboardTypes';
 import LeagueHub from './Dashboard/LeagueHub';
 import LeagueManagementPanel from './Dashboard/LeagueManagementPanel';
 import MobileNavigation, { type MobileNavTab } from './Dashboard/MobileNavigation';
 import PredictionsPage from './Dashboard/PredictionsPage';
 import LeaderboardsPage from './Dashboard/LeaderboardsPage';
-import { getCountryFlag } from './Dashboard/shared';
 import OnboardingTour, { type TourStep } from './OnboardingTour';
 import CommunityShieldEvent, {
   isCommunityShieldOpen,
@@ -80,26 +79,20 @@ import AccountPortal from './AccountPortal';
 import RulesInfo from './RulesInfo';
 import { RadialOrigin } from '../radial';
 
-const ONBOARDING_STEPS: TourStep[] = [
-  {
-    targetId: "tour-match-predictor",
-    title: "Predict The Action",
-    description:
-      "Use the center Predictions tab to pick Football or Rugby, choose a competition, enter your scoreline, and lock it in before kick-off to earn points.",
-  },
-  {
-    targetId: "tour-league-manager",
-    title: "Leagues Are Your Home Base",
-    description:
-      "Use the Leagues tab to create a private league or join one with a code and password. You need to be in at least one league before Predictions unlocks.",
-  },
-  {
-    targetId: "tour-nav-buttons",
-    title: "Rules & Your Account",
-    description:
-      "Open Rules any time to see how scoring works, and use Account to manage your profile and leagues.",
-  },
-];
+const MOBILE_MQ = "(max-width: 767px)";
+
+function useIsMobileLayout() {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia(MOBILE_MQ).matches : false,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(MOBILE_MQ);
+    const onChange = () => setIsMobile(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return isMobile;
+}
 
 interface DashboardProps {
   user: UserProfile;
@@ -128,6 +121,8 @@ export default function Dashboard({
   initialToast,
   onUserUpdate,
 }: DashboardProps) {
+  const isMobileLayout = useIsMobileLayout();
+  const [tourForceSettings, setTourForceSettings] = useState(false);
   const authStatus = useAuthStatus();
   const queryClient = useQueryClient();
   useSupabaseRealtime(user?.id);
@@ -242,8 +237,95 @@ export default function Dashboard({
 
   const completeOnboarding = () => {
     setShowOnboarding(false);
+    setTourForceSettings(false);
     void markFeatureSeen(SeenFeature.MainWalkthrough);
   };
+
+  // Ensure tour targets are mounted (predictions panel + mobile bottom nav).
+  useEffect(() => {
+    if (!showOnboarding) return;
+    if (!selectedSport) {
+      setSelectedSport(user.preferredSport ?? SportType.FOOTBALL);
+    }
+    if (isMobileLayout) {
+      setMobileNavTab("predictions");
+    }
+  }, [showOnboarding, selectedSport, user.preferredSport, isMobileLayout]);
+
+  const onboardingSteps: TourStep[] = useMemo(() => {
+    if (isMobileLayout) {
+      return [
+        {
+          targetId: "tour-mobile-predictions",
+          title: "Predictions",
+          description:
+            "Centre tab — pick Football or Rugby, choose a competition, enter your scoreline, and lock it before kick-off.",
+          placement: "above",
+        },
+        {
+          targetId: "tour-mobile-leagues",
+          title: "Leagues",
+          description:
+            "Create a private league or join with a code. You need at least one league before Predictions unlocks.",
+          placement: "above",
+        },
+        {
+          targetId: "tour-mobile-boards",
+          title: "Leaderboards",
+          description:
+            "Compare season standings in your league and globally.",
+          placement: "above",
+        },
+        {
+          targetId: "tour-mobile-account",
+          title: "Account",
+          description:
+            "Your profile, league memberships, and log out live here.",
+          placement: "above",
+        },
+        {
+          targetId: "tour-mobile-rules",
+          title: "Rules",
+          description:
+            "Scoring, margins, and power-ups — open any time you need a refresher.",
+          placement: "above",
+        },
+      ];
+    }
+
+    return [
+      {
+        targetId: "tour-match-predictor",
+        title: "Predictions",
+        description:
+          "Pick Football or Rugby from the top bar, choose a competition, enter your scoreline, and lock it before kick-off.",
+        placement: "below",
+      },
+      {
+        targetId: "tour-league-manager",
+        title: "Leagues",
+        description:
+          "Create or join leagues with a code and password. You need at least one league before Predictions unlocks.",
+        placement: "below",
+      },
+      {
+        targetId: "tour-sports-switcher",
+        title: "Sports",
+        description:
+          "Switch between Football and Rugby fixtures from this menu.",
+        placement: "below",
+      },
+      {
+        targetId: "tour-settings-menu",
+        title: "Settings",
+        description:
+          "Account and Rules are inside this hamburger menu, next to Log out — tap it any time to manage your profile or review scoring.",
+        placement: "below",
+        onEnter: () => setTourForceSettings(true),
+        onExit: () => setTourForceSettings(false),
+      },
+    ];
+  }, [isMobileLayout]);
 
   const openLeaguesModal = (_origin?: RadialOrigin) => {
     setActiveLeagueId(null);
@@ -369,14 +451,12 @@ export default function Dashboard({
     return league?.members ?? [];
   }, [leagueMemberProfiles, leagues, userLeagues, activeLeagueId]);
   const [leagueToLeave, setLeagueToLeave] = useState<string | null>(null);
-  const [viewingProfile, setViewingProfile] = useState<any | null>(null);
 
   const closeLeaguesModal = useCallback(() => setShowLeagues(false), []);
   const closeLeagueHub = useCallback(() => {
     setActiveLeagueId(null);
     setMobileNavTab("leagues");
   }, []);
-  const closeViewingProfile = useCallback(() => setViewingProfile(null), []);
   const closeLeaveLeague = useCallback(() => setLeagueToLeave(null), []);
 
   const openLeagueHub = useCallback((leagueId: string) => {
@@ -425,10 +505,9 @@ export default function Dashboard({
   }, [activeCompetitions]);
 
   // Desktop leagues modal + confirm dialogs only (mobile tabs are not overlays)
-  useBodyScrollLock(showLeagues || !!viewingProfile || !!leagueToLeave);
+  useBodyScrollLock(showLeagues || !!leagueToLeave);
   useOverlayHistory(showLeagues, closeLeaguesModal, "leagues");
   useOverlayHistory(!!activeLeagueId, closeLeagueHub, "league-hub");
-  useOverlayHistory(!!viewingProfile, closeViewingProfile, "profile");
   useOverlayHistory(!!leagueToLeave, closeLeaveLeague, "leave-league");
 
   useEffect(() => {
@@ -721,12 +800,6 @@ export default function Dashboard({
     const codeInput = joinCodeInput.trim().toUpperCase();
     const passwordEntered = joinPasswordInput.trim();
 
-    console.log("[handleJoinLeague] submit", {
-      codeInput,
-      passwordLength: passwordEntered.length,
-      userId: user.id,
-    });
-
     if (!codeInput || !passwordEntered) {
       triggerToast("⚠️ League Code and Password are required.");
       return;
@@ -750,10 +823,6 @@ export default function Dashboard({
           null;
 
         if (cached) {
-          console.log("[handleJoinLeague] cache hit, verifying password", {
-            id: cached.id,
-            isPrivate: cached.isPrivate,
-          });
           if ((cached.password || "").trim() !== passwordEntered) {
             // Re-fetch by id in case browse list omitted the password field.
             const byId = await dbFetchLeagueById(cached.id);
@@ -782,13 +851,6 @@ export default function Dashboard({
         triggerToast("⚠️ Private league not found.");
         return;
       }
-
-      console.log("[handleJoinLeague] verified target", {
-        id: target.id,
-        name: target.name,
-        isPrivate: target.isPrivate,
-        memberCount: target.members?.length ?? 0,
-      });
 
       if (userLeagues.some((l) => l.id === target!.id)) {
         triggerToast("ℹ️ Already joined.");
@@ -833,18 +895,18 @@ export default function Dashboard({
     if (!target) return;
 
     if (target.creatorId === user.id) {
-      // Creator deletes the league
+      // Creator archives the league (soft-delete — avoids FK hard-delete blocks).
       try {
-        if (supabase) {
-          await supabase.from("leagues").delete().eq("id", leagueId);
-        }
+        await dbArchiveLeague(leagueId);
       } catch (err) {
-        console.error("Failed deleting league:", err);
+        console.error("Failed archiving league:", err);
+        triggerToast("⚠️ Could not archive this league. Try again.");
+        return;
       }
 
       invalidateLeagueQueries(leagueId);
       setActiveLeagueId(null);
-      triggerToast(`Deleted your league: "${target.name}".`);
+      triggerToast(`Archived your league: "${target.name}".`);
       return;
     }
 
@@ -1084,7 +1146,7 @@ export default function Dashboard({
 
   return (
     <div className="w-full max-w-6xl xl:max-w-7xl mx-auto flex flex-col gap-6 animate-fade-in pb-[calc(5.75rem+env(safe-area-inset-bottom,0px))] md:pb-0 min-h-0">
-      <GlobalNavigation
+      <TopNavigation
         user={user}
         onLogout={onLogout}
         onOpenRules={onOpenRules}
@@ -1098,6 +1160,7 @@ export default function Dashboard({
         }}
         selectedSport={selectedSport}
         isUserInAnyLeague={isUserInAnyLeague}
+        forceSettingsOpen={tourForceSettings}
         onResetState={() => {
           setActiveLeagueId(null);
           setMobileNavTab("predictions");
@@ -1135,11 +1198,6 @@ export default function Dashboard({
             onRequestLeave={(leagueId) => setLeagueToLeave(leagueId)}
             onJoinLeague={async (league, password) => {
               const trimmed = password.trim();
-              console.log("[LeagueHub onJoinLeague] submit", {
-                leagueId: league.id,
-                userId: user.id,
-                passwordLength: trimmed.length,
-              });
               try {
                 const verified = await dbFetchLeagueByIdAndPassword(
                   league.id,
@@ -1353,31 +1411,40 @@ export default function Dashboard({
         </>
       )}
 
-      {/* Leave League Confirmation Popup */}
-      {leagueToLeave && (
+      {/* Leave / Archive League Confirmation Popup */}
+      {leagueToLeave && (() => {
+        const leaveTarget =
+          userLeagues.find((l) => l.id === leagueToLeave) ||
+          leagues.find((l) => l.id === leagueToLeave);
+        const isCreatorArchive = !!(
+          leaveTarget && leaveTarget.creatorId === user.id
+        );
+        return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl space-y-4">
               <div className="text-center space-y-2">
                 <div className="w-12 h-12 rounded-full bg-red-500/15 border border-red-500/30 flex items-center justify-center mx-auto text-red-500 text-xl font-bold">
-                  âš ï¸
+                  ⚠️
                 </div>
                 <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">
-                  Confirm Leave
+                  {isCreatorArchive ? "Archive League" : "Confirm Leave"}
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Are you sure you want to leave this league? Your active
-                  standing will be removed, but your administrative historical
-                  statistics will be safely archived.
+                  {isCreatorArchive
+                    ? "Archive this league? It will be hidden from all players but can be restored later by an admin."
+                    : "Are you sure you want to leave this league? Your active standing will be removed."}
                 </p>
               </div>
               <div className="flex gap-2 font-mono text-xs">
                 <button
+                  type="button"
                   onClick={closeLeaveLeague}
                   className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 py-2 rounded-lg cursor-pointer transition-colors"
                 >
                   Cancel
                 </button>
                 <button
+                  type="button"
                   onClick={() => {
                     const id = leagueToLeave;
                     closeLeaveLeague();
@@ -1385,86 +1452,13 @@ export default function Dashboard({
                   }}
                   className="flex-1 bg-red-600 hover:bg-red-750 text-white font-bold py-2 rounded-lg cursor-pointer transition-all shadow-md shadow-red-950/40"
                 >
-                  Yes, Leave
+                  {isCreatorArchive ? "Yes, Archive" : "Yes, Leave"}
                 </button>
               </div>
             </div>
           </div>
-      )}
-
-      {/* View Player Profile Popup */}
-      {viewingProfile && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
-              <div className="flex justify-between items-start">
-                <div className="space-y-1">
-                  <h3 className="text-xl font-display font-bold text-white flex items-center gap-2">
-                    {viewingProfile.nickname}
-                    <span
-                      className="text-lg shrink-0 font-sans"
-                      title={viewingProfile.nationality || "United Kingdom"}
-                    >
-                      {getCountryFlag(viewingProfile.nationality)}
-                    </span>
-                  </h3>
-                  <span className="text-[10px] font-mono uppercase text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded-full">
-                    PitchSide Player
-                  </span>
-                </div>
-                <button
-                  onClick={closeViewingProfile}
-                  className="text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 mt-4">
-                <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800/60">
-                  <span className="text-[9px] font-mono text-slate-500 uppercase tracking-wider block mb-1">
-                    Overall Rank
-                  </span>
-                  <div className="text-2xl font-display font-bold text-white">
-                    #{viewingProfile.rank}
-                  </div>
-                </div>
-                <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800/60">
-                  <span className="text-[9px] font-mono text-slate-500 uppercase tracking-wider block mb-1">
-                    Total Points
-                  </span>
-                  <div className="text-2xl font-display font-bold text-emerald-400">
-                    {viewingProfile.points}
-                  </div>
-                </div>
-                <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800/60">
-                  <span className="text-[9px] font-mono text-slate-500 uppercase tracking-wider block mb-1">
-                    Guesses Made
-                  </span>
-                  <div className="text-xl font-display font-bold text-slate-200">
-                    {viewingProfile.predictionsMade}
-                  </div>
-                </div>
-                <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800/60">
-                  <span className="text-[9px] font-mono text-slate-500 uppercase tracking-wider block mb-1">
-                    Prediction Accuracy
-                  </span>
-                  <div className="text-xl font-display font-bold text-slate-200">
-                    {viewingProfile.accuracy}
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-2 text-center">
-                <button
-                  onClick={closeViewingProfile}
-                  className="w-full font-mono text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 transition-colors py-2.5 rounded-lg cursor-pointer"
-                >
-                  Close Profile
-                </button>
-              </div>
-            </div>
-          </div>
-      )}
+        );
+      })()}
 
       <MobileNavigation
         user={user}
@@ -1548,7 +1542,7 @@ export default function Dashboard({
       )}
 
       {walkthroughResolved && showOnboarding && !activeLeagueId && (
-        <OnboardingTour steps={ONBOARDING_STEPS} onComplete={completeOnboarding} />
+        <OnboardingTour steps={onboardingSteps} onComplete={completeOnboarding} />
       )}
 
       {showShieldEvent && !showOnboarding && !showLeagues && (

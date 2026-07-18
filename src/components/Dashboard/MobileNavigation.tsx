@@ -31,11 +31,13 @@ export default function MobileNavigation({
 
   return (
     <nav
+      id="tour-mobile-nav"
       aria-label="Main"
       className="md:hidden fixed bottom-0 left-0 right-0 w-full bg-slate-950/95 backdrop-blur-lg border-t border-slate-800 z-[110] safe-area-pb pointer-events-auto"
     >
       <div className="relative flex items-end justify-between px-1 pt-2 pb-2 max-w-lg mx-auto">
         <button
+          id="tour-mobile-leagues"
           type="button"
           aria-current={activeTab === "leagues" ? "page" : undefined}
           onClick={() => onSelectTab("leagues")}
@@ -62,6 +64,7 @@ export default function MobileNavigation({
         </button>
 
         <button
+          id="tour-mobile-boards"
           type="button"
           aria-current={activeTab === "leaderboards" ? "page" : undefined}
           onClick={() => onSelectTab("leaderboards")}
@@ -79,7 +82,7 @@ export default function MobileNavigation({
           </span>
         </button>
 
-        <div className="relative flex-1 flex justify-center -mt-5">
+        <div id="tour-mobile-predictions" className="relative flex-1 flex justify-center -mt-5">
           <button
             type="button"
             aria-label="Predictions"
@@ -107,6 +110,7 @@ export default function MobileNavigation({
         </div>
 
         <button
+          id="tour-mobile-account"
           type="button"
           aria-current={activeTab === "account" ? "page" : undefined}
           onClick={() => onSelectTab("account")}
@@ -125,6 +129,7 @@ export default function MobileNavigation({
         </button>
 
         <button
+          id="tour-mobile-rules"
           type="button"
           aria-current={activeTab === "rules" ? "page" : undefined}
           onClick={() => onSelectTab("rules")}

@@ -26,6 +26,8 @@ interface TopNavigationProps {
   onSelectSport?: (sport: SportType) => void;
   selectedSport?: SportType | null;
   isUserInAnyLeague?: boolean;
+  /** Force-open the Settings menu (used by the desktop onboarding tour). */
+  forceSettingsOpen?: boolean;
 }
 
 export default function TopNavigation({
@@ -39,6 +41,7 @@ export default function TopNavigation({
   onSelectSport,
   selectedSport = null,
   isUserInAnyLeague = true,
+  forceSettingsOpen = false,
 }: TopNavigationProps) {
   const highlightLeagues = !isUserInAnyLeague;
   const [sportsOpen, setSportsOpen] = useState(false);
@@ -46,6 +49,13 @@ export default function TopNavigation({
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const sportsRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (forceSettingsOpen) {
+      setSettingsOpen(true);
+      setSportsOpen(false);
+    }
+  }, [forceSettingsOpen]);
 
   useEffect(() => {
     if (!sportsOpen && !settingsOpen) return;
@@ -228,15 +238,18 @@ export default function TopNavigation({
 
           {/* Settings hamburger — Account + Rules */}
           <div
+            id="tour-settings-menu"
             ref={settingsRef}
             className={`relative ${settingsOpen ? "z-50" : ""}`}
           >
             <button
+              id="nav-settings-btn"
               type="button"
               aria-label="Settings"
               aria-expanded={settingsOpen}
               aria-haspopup="menu"
               onClick={() => {
+                if (forceSettingsOpen) return;
                 setSettingsOpen((o) => !o);
                 setSportsOpen(false);
               }}

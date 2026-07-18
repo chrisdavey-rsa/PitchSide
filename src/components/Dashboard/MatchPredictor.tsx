@@ -18,7 +18,6 @@ import LockGuessButton from "./LockGuessButton";
 import SportIntroModal from "../onboarding/SportIntroModal";
 import { getPowerUp } from "../../data/powerUps";
 import type { PredictionEntry } from "../../supabase";
-import SportEntryTile from "./SportEntryTile";
 import { useOverlayHistory } from "../../hooks/useOverlayHistory";
 import { useBodyScrollLock } from "../../hooks/useBodyScrollLock";
 import {
@@ -57,9 +56,6 @@ function getMatchStatusDisplay(match: Match) {
 }
 
 interface MatchPredictorProps {
-  /** `page` = Predictions tab (no giant sport tiles). `classic` = legacy tiles. */
-  layout?: "classic" | "page";
-  isUserInAnyLeague: boolean;
   selectedSport: SportType | null;
   setSelectedSport: (sport: SportType | null) => void;
   selectedCompId: string | null;
@@ -100,7 +96,6 @@ function kickoffGroupLabel(matchDate: string): string {
 }
 
 export default function MatchPredictor({
-  layout = "classic",
   selectedSport,
   setSelectedSport,
   selectedCompId,
@@ -118,7 +113,6 @@ export default function MatchPredictor({
   onRugbyPredictionChange,
   onSubmitPrediction,
 }: MatchPredictorProps) {
-  const isPage = layout === "page";
   // Just-in-time onboarding: first open of Football / Rugby (profiles.seen_features).
   const [introSport, setIntroSport] = useState<"football" | "rugby" | null>(null);
 
@@ -160,35 +154,10 @@ export default function MatchPredictor({
         )}
       </AnimatePresence>
 
-      {/* Classic layout: large Football / Rugby entry tiles */}
-      {!isPage && (
-          <div
-            id="tour-match-predictor"
-            className="grid grid-cols-2 md:grid-cols-2 gap-3 sm:gap-6 pt-2 auto-rows-fr"
-          >
-              <SportEntryTile
-                id="football-sport-tile"
-                sport="football"
-                selected={selectedSport === SportType.FOOTBALL}
-                onSelect={() => setSelectedSport(SportType.FOOTBALL)}
-              />
-
-              <SportEntryTile
-                id="rugby-sport-tile"
-                sport="rugby"
-                selected={selectedSport === SportType.RUGBY}
-                onSelect={() => setSelectedSport(SportType.RUGBY)}
-              />
-            </div>
-      )}
-
-          {/* DETAILED DRILL-DOWN SUB VIEW */}
           {selectedSport && (
             <div
-              id={isPage ? "tour-match-predictor" : undefined}
-              className={`bg-slate-900/60 rounded-3xl border border-slate-800 shadow-xl ${
-                isPage ? "p-4 sm:p-6 w-full" : "p-6"
-              }`}
+              id="tour-match-predictor"
+              className="bg-slate-900/60 rounded-3xl border border-slate-800 shadow-xl p-4 sm:p-6 w-full"
             >
               {/* Leagues filtering tab */}
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-800/80 pb-5 mb-5">

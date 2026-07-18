@@ -39,26 +39,3 @@ export function radialOriginFromEvent(
   return viewportCenter();
 }
 
-/** Distance from the origin to the furthest viewport corner (covers the screen). */
-function coverRadius(origin: RadialOrigin): number {
-  if (typeof window === "undefined") return 2000;
-  const dx = Math.max(origin.x, window.innerWidth - origin.x);
-  const dy = Math.max(origin.y, window.innerHeight - origin.y);
-  return Math.hypot(dx, dy) + 8;
-}
-
-/**
- * Motion props for a full-screen overlay that ripples open/closed from a point.
- * Spread onto a `motion.div` (`{...radialClip(origin)}`).
- */
-export function radialClip(origin: RadialOrigin | null | undefined) {
-  const o = origin ?? viewportCenter();
-  const collapsed = `circle(0px at ${o.x}px ${o.y}px)`;
-  const expanded = `circle(${coverRadius(o)}px at ${o.x}px ${o.y}px)`;
-  return {
-    initial: { clipPath: collapsed, WebkitClipPath: collapsed },
-    animate: { clipPath: expanded, WebkitClipPath: expanded },
-    exit: { clipPath: collapsed, WebkitClipPath: collapsed },
-    transition: RADIAL_TRANSITION,
-  };
-}

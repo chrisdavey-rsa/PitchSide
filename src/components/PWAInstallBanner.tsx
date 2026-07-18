@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
+import React, { useCallback, useEffect, useState } from "react";
+import { Download, X } from "lucide-react";
 
 const DISMISS_KEY = "pwa-install-banner-dismissed";
 const SHOW_DELAY_MS = 3000;
@@ -54,8 +54,9 @@ export default function PWAInstallBanner() {
   const [hydrated, setHydrated] = useState(false);
   const [eligible, setEligible] = useState(false);
   const [visible, setVisible] = useState(false);
-  const [iosExpanded, setIosExpanded] = useState(false);
-  const deferredPromptRef = useRef<BeforeInstallPromptEvent | null>(null);
+  const [deferredPrompt, setDeferredPrompt] =
+    useState<BeforeInstallPromptEvent | null>(null);
+  const isIOS = isIOSDevice();
 
   useEffect(() => {
     setHydrated(true);
@@ -72,10 +73,18 @@ export default function PWAInstallBanner() {
 
     const onBeforeInstallPrompt = (event: Event) => {
       event.preventDefault();
-      deferredPromptRef.current = event as BeforeInstallPromptEvent;
+      setDeferredPrompt(event as BeforeInstallPromptEvent);
+    };
+
+    const onAppInstalled = () => {
+      setDeferredPrompt(null);
+      setVisible(false);
+      setEligible(false);
+      localStorage.setItem(DISMISS_KEY, "true");
     };
 
     window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+    window.addEventListener("appinstalled", onAppInstalled);
 
     const timer = window.setTimeout(() => {
       setVisible(true);
@@ -83,75 +92,83 @@ export default function PWAInstallBanner() {
 
     return () => {
       window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", onAppInstalled);
       window.clearTimeout(timer);
     };
   }, [hydrated]);
 
   const dismiss = useCallback(() => {
     setVisible(false);
-    setIosExpanded(false);
     localStorage.setItem(DISMISS_KEY, "true");
     setEligible(false);
+    setDeferredPrompt(null);
   }, []);
 
-  const handleBannerClick = useCallback(async () => {
-    if (isIOSDevice()) {
-      setIosExpanded((prev) => !prev);
-      return;
-    }
+  const handleInstallClick = useCallback(async () => {
+    if (isIOS || !deferredPrompt) return;
 
-    const promptEvent = deferredPromptRef.current;
-    if (!promptEvent) return;
-
-    await promptEvent.prompt();
-    const { outcome } = await promptEvent.userChoice;
-    deferredPromptRef.current = null;
+    await deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    setDeferredPrompt(null);
 
     if (outcome === "accepted") {
       dismiss();
     }
-  }, [dismiss]);
+  }, [deferredPrompt, dismiss, isIOS]);
 
   if (!hydrated || !eligible) return null;
 
-  const isActive = visible;
+  const canNativeInstall = !isIOS && !!deferredPrompt;
 
   return (
     <div
       className="md:hidden fixed top-0 inset-x-0 z-[60] px-3 pt-[max(0.75rem,env(safe-area-inset-top))] pointer-events-none"
       role="region"
       aria-label="Install PitchSide app"
-      aria-hidden={!isActive}
+      aria-hidden={!visible}
     >
       <div
         className={`relative pointer-events-auto mx-auto max-w-lg rounded-xl border border-slate-700/80 bg-slate-900/95 backdrop-blur-md shadow-2xl shadow-black/40 transition-transform duration-500 ease-out ${
-          isActive ? "translate-y-0" : "-translate-y-[calc(100%+1rem)]"
+          visible ? "translate-y-0" : "-translate-y-[calc(100%+1rem)]"
         }`}
       >
-        <button
-          type="button"
-          onClick={handleBannerClick}
-          className="w-full text-left px-4 py-3 pr-10"
-        >
+        <div className="px-4 py-3 pr-10 space-y-3">
           <p className="text-sm font-medium text-slate-100 leading-snug">
-            Save to home screen for a better gameplay experience.
+            Save PitchSide to your home screen for a better gameplay experience.
           </p>
 
-          {iosExpanded && isIOSDevice() && (
-            <p className="mt-2 text-xs text-slate-400 leading-relaxed border-t border-slate-800/80 pt-2">
-              Tap the Share icon <IOSShareIcon /> below, then select{" "}
+          {isIOS ? (
+            <p className="text-xs text-slate-400 leading-relaxed border-t border-slate-800/80 pt-2.5">
+              Tap the Share icon <IOSShareIcon /> in Safari, then select{" "}
               <span className="text-slate-200 font-semibold">Add to Home Screen</span>.
             </p>
+          ) : (
+            <button
+              type="button"
+              onClick={handleInstallClick}
+              disabled={!canNativeInstall}
+              className={`inline-flex items-center justify-center gap-2 w-full sm:w-auto px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
+                canNativeInstall
+                  ? "bg-emerald-600 hover:bg-emerald-500 text-white"
+                  : "bg-slate-800 text-slate-500 cursor-not-allowed"
+              }`}
+            >
+              <Download className="w-4 h-4" />
+              Install
+            </button>
           )}
-        </button>
+
+          {!isIOS && !canNativeInstall && (
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              Install will activate when your browser is ready to add PitchSide.
+            </p>
+          )}
+        </div>
 
         <button
           type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            dismiss();
-          }}
-          className="absolute top-2.5 right-2.5 p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800/80 transition-colors"
+          onClick={dismiss}
+          className="absolute top-2.5 right-2.5 p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800/80 transition-colors cursor-pointer"
           aria-label="Dismiss install banner"
         >
           <X className="w-4 h-4" />

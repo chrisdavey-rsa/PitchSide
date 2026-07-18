@@ -1,10 +1,33 @@
 /* PitchSide Service Worker
- * - Network-first with cache fallback for offline resilience.
+ * - Network-first with cache fallback for offline resilience (same-origin GET only).
+ * - Never intercept Supabase API traffic or mutating HTTP methods.
  * - Push placeholder ready for future "As It Stands" Web Push alerts.
  */
 
-const CACHE_VERSION = 'pitchside-v1';
+const CACHE_VERSION = 'pitchside-v2';
 const OFFLINE_URLS = ['/', '/index.html', '/manifest.json'];
+
+function isSupabaseRequest(urlString) {
+  try {
+    const host = new URL(urlString).hostname;
+    return host === 'supabase.co' || host.endsWith('.supabase.co');
+  } catch {
+    return false;
+  }
+}
+
+function isMutatingMethod(method) {
+  const m = (method || 'GET').toUpperCase();
+  return m === 'POST' || m === 'PUT' || m === 'PATCH' || m === 'DELETE';
+}
+
+/** Requests the SW must never intercept — always hit the real network. */
+function shouldBypassServiceWorker(request) {
+  if (!request.url.startsWith('http')) return true;
+  if (isMutatingMethod(request.method)) return true;
+  if (isSupabaseRequest(request.url)) return true;
+  return false;
+}
 
 // --- Install: pre-cache the app shell -------------------------------------
 self.addEventListener('install', (event) => {
@@ -14,7 +37,6 @@ self.addEventListener('install', (event) => {
       .then((cache) => cache.addAll(OFFLINE_URLS))
       .catch(() => undefined)
   );
-  // Activate this worker as soon as it finishes installing.
   self.skipWaiting();
 });
 
@@ -32,19 +54,24 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// --- Fetch: network-first, falling back to cache --------------------------
+// --- Fetch: network-first for same-origin GET only ------------------------
 self.addEventListener('fetch', (event) => {
   const { request } = event;
 
-  // Only handle GET requests over http(s); let everything else pass through.
-  if (request.method !== 'GET' || !request.url.startsWith('http')) {
+  // Critical: let Supabase + POST/PUT/PATCH/DELETE go straight to the network.
+  // Returning without respondWith means the browser handles the request natively.
+  if (shouldBypassServiceWorker(request)) {
+    return;
+  }
+
+  // Only cache-assist same-origin GET navigation / asset requests.
+  if (request.method !== 'GET') {
     return;
   }
 
   event.respondWith(
     fetch(request)
       .then((response) => {
-        // Cache a copy of successful same-origin responses for offline use.
         const copy = response.clone();
         if (response.ok && new URL(request.url).origin === self.location.origin) {
           caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy)).catch(() => undefined);
@@ -58,8 +85,6 @@ self.addEventListener('fetch', (event) => {
 });
 
 // --- Push: placeholder for future Web Push notifications -------------------
-// When we wire up Web Push (e.g. "As It Stands" score alerts), the server will
-// send a payload here and we surface it via showNotification.
 self.addEventListener('push', (event) => {
   let payload = { title: 'PitchSide', body: 'You have a new update.' };
   try {

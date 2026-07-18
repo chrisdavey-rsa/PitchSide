@@ -99,10 +99,6 @@ export default function JoinLeague({
     setStatus(null);
 
     try {
-      console.log("[JoinLeague] insert membership", {
-        leagueId: league.id,
-        userId: currentUser.id,
-      });
       await dbJoinLeague(league.id, currentUser.id);
       clearPendingInvite();
       setStatus(`You're in — welcome to ${league.name}!`);

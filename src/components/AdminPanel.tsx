@@ -45,6 +45,8 @@ export default function AdminPanel({
     loadingArchives,
     refreshing,
     fetchArchives,
+    fetchLeagues,
+    setLeagues,
     handleRefresh,
   } = useAdminData(activeTab);
 
@@ -138,6 +140,9 @@ export default function AdminPanel({
           loadingLeagues={loadingLeagues}
           registeredUsers={registeredUsers}
           onSuccess={triggerSuccess}
+          onError={triggerError}
+          onRefreshLeagues={fetchLeagues}
+          onLeaguesChange={setLeagues}
         />
       )}
     </AdminLayout>
