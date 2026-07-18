@@ -56,10 +56,8 @@ export default function LeagueHubStandings({
 
   const { data: completedMatches = [], isLoading: matchesLoading } = useQuery({
     queryKey: ["completedMatches", "leagueStandings"],
-    queryFn: async () => {
-      const all = await dbFetchMatches({ horizonDays: null });
-      return all.filter((m) => m.status === "completed");
-    },
+    queryFn: () =>
+      dbFetchMatches({ horizonDays: null, status: "completed" }),
     staleTime: 60_000,
   });
 

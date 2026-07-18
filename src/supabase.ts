@@ -5,7 +5,6 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { UserProfile, Prediction, League, SportType, Match, ActiveCompetition } from "./types";
-import { calculatePoints } from "./utils";
 import { ALL_COMPETITIONS } from "./data";
 import { GLOBAL_LEAGUE_ID } from "./lib/leaguesConfig";
 import {
@@ -256,12 +255,14 @@ export async function dbFetchLeagueSubmittedPredictions(
 }
 
 /**
- * Sum of provisional_points per user for currently live matches.
- * Powers the amber "+X (Live)" badges on the leaderboard.
+ * Per-user, per-match provisional points for currently live fixtures.
+ * Cached as a matrix so realtime can patch a single cell without refetching.
  */
-export async function dbFetchLiveProvisionalByUser(
+export type LiveProvisionalMatrix = Record<string, Record<string, number>>;
+
+export async function dbFetchLiveProvisionalMatrix(
   liveMatchIds: string[],
-): Promise<Record<string, number>> {
+): Promise<LiveProvisionalMatrix> {
   if (!supabase || liveMatchIds.length === 0) return {};
 
   const { data, error } = await supabase
@@ -271,13 +272,38 @@ export async function dbFetchLiveProvisionalByUser(
     .gt("provisional_points", 0);
   if (error) throw error;
 
-  const totals: Record<string, number> = {};
+  const matrix: LiveProvisionalMatrix = {};
   (data || []).forEach((row: any) => {
-    const uid = row.user_id;
-    if (!uid) return;
-    totals[uid] = (totals[uid] || 0) + (Number(row.provisional_points) || 0);
+    const uid = row.user_id as string | undefined;
+    const matchId = row.match_id as string | undefined;
+    if (!uid || !matchId) return;
+    const pts = Number(row.provisional_points) || 0;
+    if (pts <= 0) return;
+    (matrix[uid] ??= {})[matchId] = pts;
   });
+  return matrix;
+}
+
+/** Sum matrix rows into per-user totals for leaderboard badges. */
+export function sumLiveProvisionalMatrix(
+  matrix: LiveProvisionalMatrix,
+): Record<string, number> {
+  const totals: Record<string, number> = {};
+  for (const [uid, byMatch] of Object.entries(matrix)) {
+    const sum = Object.values(byMatch).reduce((a, b) => a + b, 0);
+    if (sum > 0) totals[uid] = sum;
+  }
   return totals;
+}
+
+/**
+ * Sum of provisional_points per user for currently live matches.
+ * Powers the amber "+X (Live)" badges on the leaderboard.
+ */
+export async function dbFetchLiveProvisionalByUser(
+  liveMatchIds: string[],
+): Promise<Record<string, number>> {
+  return sumLiveProvisionalMatrix(await dbFetchLiveProvisionalMatrix(liveMatchIds));
 }
 
 export async function dbSavePrediction(userId: string, matchId: string, sport: SportType, compId: string, homeScore: number, awayScore: number, submitted: boolean): Promise<void> {
@@ -382,6 +408,8 @@ export type FetchMatchesOptions = {
    * Admin tooling should pass `false` to see hidden / opted-out fixtures.
    */
   visibleOnly?: boolean;
+  /** Optional PostgREST status filter (`completed`, `live`, …). */
+  status?: string | string[];
 };
 
 export async function dbFetchMatches(
@@ -391,22 +419,63 @@ export async function dbFetchMatches(
   const horizonDays =
     options.horizonDays === undefined ? MATCH_HORIZON_DAYS : options.horizonDays;
   const visibleOnly = options.visibleOnly !== false;
+  const statusFilter = options.status;
 
-  const { data, error } = await supabase
-    .from("matches")
-    .select("*")
-    .order("kickoff_time", { ascending: true });
-  if (error) throw error;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const applyFilters = (query: any) => {
+    let q = query;
+    if (visibleOnly) q = q.eq("is_visible", true);
+    if (statusFilter) {
+      q = Array.isArray(statusFilter)
+        ? q.in("status", statusFilter)
+        : q.eq("status", statusFilter);
+    }
+    return q.order("kickoff_time", { ascending: true });
+  };
 
-  let mapped = data ? data.map(mapMatchRow) : [];
-  // Client-side so feeds still work before the is_visible migration is applied
-  // (mapMatchRow treats missing column as visible).
-  if (visibleOnly) {
-    mapped = mapped.filter((match) => match.isVisible !== false);
+  // Unbounded / status-scoped fetch (admin, standings) — still filtered in PostgREST.
+  if (horizonDays == null) {
+    const { data, error } = await applyFilters(
+      supabase.from("matches").select("*"),
+    );
+    if (error) throw error;
+    return (data || []).map(mapMatchRow);
   }
-  if (horizonDays == null) return mapped;
 
-  return mapped.filter((match) => isWithinMatchHorizon(match, horizonDays));
+  const now = new Date();
+  const start = new Date(now.getTime() - 3 * 60 * 60 * 1000).toISOString();
+  const end = new Date(
+    now.getTime() + horizonDays * 24 * 60 * 60 * 1000,
+  ).toISOString();
+
+  // Two targeted queries (kickoff window + live) instead of SELECT * + JS filter.
+  const [windowRes, liveRes] = await Promise.all([
+    applyFilters(
+      supabase
+        .from("matches")
+        .select("*")
+        .gte("kickoff_time", start)
+        .lte("kickoff_time", end),
+    ),
+    // Skip redundant live fetch when caller already constrained status away from live.
+    statusFilter &&
+      !(Array.isArray(statusFilter) ? statusFilter.includes("live") : statusFilter === "live")
+      ? Promise.resolve({ data: [] as unknown[], error: null })
+      : applyFilters(supabase.from("matches").select("*").eq("status", "live")),
+  ]);
+
+  if (windowRes.error) throw windowRes.error;
+  if (liveRes.error) throw liveRes.error;
+
+  const byId = new Map<string, Match>();
+  for (const row of [...(windowRes.data || []), ...(liveRes.data || [])]) {
+    const mapped = mapMatchRow(row);
+    byId.set(mapped.id, mapped);
+  }
+
+  return Array.from(byId.values()).sort((a, b) =>
+    a.matchDate.localeCompare(b.matchDate),
+  );
 }
 
 /**
@@ -480,6 +549,13 @@ export async function dbSetMatchVisibility(
 // DB OPERATIONS: LEAGUE MANAGEMENT
 // ==========================================
 
+/**
+ * Explicit league columns for client reads — never include `password`.
+ * Join secrets are verified only inside `join_league_secure` RPC.
+ */
+const LEAGUE_PUBLIC_COLUMNS =
+  "id, name, competition_id, creator_id, creator_name, is_private, is_public, max_players, max_participants, season, is_archived, created_at, updated_at";
+
 /** Map a raw leagues row. Never reads the deprecated JSONB `members` column. */
 function mapLeagueRow(d: any, members: string[] = []): League {
   const isPrivate =
@@ -498,7 +574,8 @@ function mapLeagueRow(d: any, members: string[] = []): League {
   return {
     id: d.id,
     name: d.name,
-    password: d.password || "",
+    // Password is never selected from Postgres for client payloads.
+    password: "",
     competitionId: d.competition_id ?? null,
     creatorId: d.creator_id,
     creatorName: d.creator_name,
@@ -530,7 +607,7 @@ export async function dbFetchLeagues(
   if (!supabase) throw new Error("Database not connected.");
   let query = supabase
     .from("leagues")
-    .select("*")
+    .select(LEAGUE_PUBLIC_COLUMNS)
     .order("created_at", { ascending: false });
 
   // Player-facing default: only active leagues.
@@ -561,7 +638,7 @@ export async function dbFetchLeagueById(leagueId: string): Promise<League | null
   if (!supabase) throw new Error("Database not connected.");
   const { data, error } = await supabase
     .from("leagues")
-    .select("*")
+    .select(LEAGUE_PUBLIC_COLUMNS)
     .eq("id", leagueId)
     .eq("is_archived", false)
     .maybeSingle();
@@ -599,7 +676,7 @@ export async function dbCreateLeague(league: League): Promise<void> {
 
   const { error } = await supabase.from("leagues").upsert(payload);
   if (error) throw error;
-  await dbJoinLeague(league.id, league.creatorId);
+  await dbJoinLeague(league.id, league.creatorId, league.password || "");
 }
 
 export async function dbUpdateLeagueSettings(
@@ -722,48 +799,49 @@ export async function dbAdminUpdateLeague(
 }
 
 /**
- * Look up a league by id + password (join flow).
- * Private leagues are filtered from browse lists, so join must hit the DB directly.
+ * @deprecated Password is never returned to the client. Prefer `dbJoinLeague`
+ * which verifies via `join_league_secure`. Kept as a thin existence check.
  */
 export async function dbFetchLeagueByIdAndPassword(
   leagueId: string,
-  password: string,
+  _password: string,
 ): Promise<League | null> {
-  if (!supabase) throw new Error("Database not connected.");
-
-  const { data, error } = await supabase
-    .from("leagues")
-    .select("*")
-    .eq("id", leagueId)
-    .eq("password", password)
-    .eq("is_archived", false)
-    .maybeSingle();
-
-  if (error) throw error;
-  if (!data) return null;
-
-  const membership = await dbFetchLeaguesMembership([leagueId]);
-  return mapLeagueRow(data, membership[leagueId] || []);
+  return dbFetchLeagueById(leagueId);
 }
 
-export async function dbJoinLeague(leagueId: string, userId: string): Promise<void> {
+/**
+ * Join a league via `join_league_secure` RPC (server-side password check + insert).
+ * Direct client INSERT into `league_members` is blocked by RLS.
+ */
+export async function dbJoinLeague(
+  leagueId: string,
+  userId: string,
+  password: string = "",
+): Promise<void> {
   if (!supabase) throw new Error("Database not connected.");
 
-  const payload = {
-    league_id: leagueId,
-    user_id: userId,
-    joined_at: new Date().toISOString(),
-  };
+  const { error } = await supabase.rpc("join_league_secure", {
+    _league_id: leagueId,
+    _user_id: userId,
+    _password: password,
+  });
 
-  const { error } = await supabase
-    .from("league_members")
-    .insert(payload)
-    .select("league_id, user_id, joined_at")
-    .maybeSingle();
+  if (!error) return;
 
-  // Already a member — treat as success (unique on league_id + user_id).
-  if (error?.code === "23505") return;
-  if (error) throw error;
+  const message = error.message || "Failed to join league.";
+  if (/incorrect password/i.test(message)) {
+    throw new Error("Incorrect password");
+  }
+  if (/league not found/i.test(message)) {
+    throw new Error("League not found");
+  }
+  if (/league is full/i.test(message)) {
+    throw new Error("League is full");
+  }
+  if (/duplicate|unique|already/i.test(message) || error.code === "23505") {
+    return;
+  }
+  throw new Error(message);
 }
 
 export async function dbLeaveLeague(leagueId: string, userId: string): Promise<void> {
@@ -790,7 +868,7 @@ export async function dbFetchUserLeagues(userId: string): Promise<League[]> {
   // Step 2: fetch active league records only (archived are hidden from players).
   const { data: leagueRows, error: leagueError } = await supabase
     .from("leagues")
-    .select("*")
+    .select(LEAGUE_PUBLIC_COLUMNS)
     .in("id", leagueIds)
     .eq("is_archived", false);
   if (leagueError) throw leagueError;
@@ -1132,141 +1210,9 @@ export function dropsAllowedForCompetition(competitionId?: string | null): numbe
   return COMPETITION_DROPS_ALLOWED[competitionId] ?? 0;
 }
 
-// Applies the dynamic drops mechanic to one competition's settled scores.
-// Drops the worst results, up to the competition's allowance, but never more
-// than would leave the player with fewer kept games than the allowance.
-function applyCompetitionDrops(
-  scores: number[],
-  dropsAllowed: number,
-): { best: number; ghost: number; dropsUsed: number } {
-  const ghost = scores.reduce((sum, s) => sum + s, 0);
-  const dropsUsed = Math.min(dropsAllowed, Math.max(0, scores.length - dropsAllowed));
-  const droppedTotal = [...scores]
-    .sort((a, b) => a - b)
-    .slice(0, dropsUsed)
-    .reduce((sum, s) => sum + s, 0);
-  return { best: ghost - droppedTotal, ghost, dropsUsed };
-}
-
-// Aggregates one sport's per-competition settled scores into sport totals,
-// applying each competition's own drop allowance.
-function aggregateSportDrops(scoresByComp: Record<string, number[]>): {
-  best: number;
-  ghost: number;
-  dropsUsed: number;
-  dropsAllowed: number;
-} {
-  let best = 0;
-  let ghost = 0;
-  let dropsUsed = 0;
-  let dropsAllowed = 0;
-
-  for (const [competitionId, scores] of Object.entries(scoresByComp)) {
-    const allowance = dropsAllowedForCompetition(competitionId);
-    const comp = applyCompetitionDrops(scores, allowance);
-    best += comp.best;
-    ghost += comp.ghost;
-    dropsUsed += comp.dropsUsed;
-    dropsAllowed += allowance;
-  }
-
-  return { best, ghost, dropsUsed, dropsAllowed };
-}
-
 function formatAccuracy(points: number, predictions: number): string {
   if (predictions <= 0) return "0%";
   return `${Math.round((points / (predictions * 5)) * 100)}%`;
-}
-
-async function computeLeaderboardClientSide(
-  currentUserId?: string,
-  matches: Match[] = [],
-): Promise<LeaderboardRecord[]> {
-  const playersList = await dbFetchPlayers();
-
-  return Promise.all(
-    playersList.map(async (profile) => {
-      let predictionsFootball = 0;
-      let predictionsRugby = 0;
-      // Settled scores grouped per competition so drops can be applied per comp.
-      const footballScoresByComp: Record<string, number[]> = {};
-      const rugbyScoresByComp: Record<string, number[]> = {};
-
-      const userPredictions = await dbFetchPredictions(profile.id);
-      const submittedMatchIds = Object.keys(userPredictions).filter(
-        (matchId) => userPredictions[matchId].submitted,
-      );
-
-      submittedMatchIds.forEach((matchId) => {
-        const pred = userPredictions[matchId];
-        const matchedMatch = matches.find((match) => match.id === matchId);
-
-        if (!matchedMatch) return;
-
-        if (matchedMatch.sport === SportType.FOOTBALL) {
-          predictionsFootball++;
-        } else if (matchedMatch.sport === SportType.RUGBY) {
-          predictionsRugby++;
-        }
-
-        if (
-          matchedMatch.status === "completed" &&
-          matchedMatch.homeScore !== undefined &&
-          matchedMatch.awayScore !== undefined
-        ) {
-          const pts = calculatePoints(
-            matchedMatch.sport,
-            pred.home,
-            pred.away,
-            matchedMatch.homeScore,
-            matchedMatch.awayScore,
-          );
-
-          const compId = matchedMatch.competitionId || "unknown";
-          if (matchedMatch.sport === SportType.FOOTBALL) {
-            (footballScoresByComp[compId] ??= []).push(pts);
-          } else if (matchedMatch.sport === SportType.RUGBY) {
-            (rugbyScoresByComp[compId] ??= []).push(pts);
-          }
-        }
-      });
-
-      const football = aggregateSportDrops(footballScoresByComp);
-      const rugby = aggregateSportDrops(rugbyScoresByComp);
-
-      const pointsFootball = football.best;
-      const pointsRugby = rugby.best;
-      const totalPoints = pointsFootball + pointsRugby;
-      const totalPredictions = predictionsFootball + predictionsRugby;
-
-      return {
-        playerId: profile.id,
-        nickname: profile.nickname,
-        nationality: profile.nationality || "United Kingdom",
-        points: totalPoints,
-        pointsFootball,
-        pointsRugby,
-        predictionsMade: totalPredictions,
-        predictionsFootball,
-        predictionsRugby,
-        accuracy: formatAccuracy(totalPoints, totalPredictions),
-        accuracyFootball: formatAccuracy(pointsFootball, predictionsFootball),
-        accuracyRugby: formatAccuracy(pointsRugby, predictionsRugby),
-        isCurrentUser: profile.id === currentUserId,
-        isProfilePublic: profile.isProfilePublic ?? true,
-        ghostPoints: football.ghost + rugby.ghost,
-        ghostPointsFootball: football.ghost,
-        ghostPointsRugby: rugby.ghost,
-        dropsUsed: football.dropsUsed + rugby.dropsUsed,
-        dropsUsedFootball: football.dropsUsed,
-        dropsUsedRugby: rugby.dropsUsed,
-        dropsAllowed: football.dropsAllowed + rugby.dropsAllowed,
-        dropsAllowedFootball: football.dropsAllowed,
-        dropsAllowedRugby: rugby.dropsAllowed,
-        predictions: userPredictions,
-      };
-    }),
-  );
 }
 
 function mapRpcLeaderboardRow(
@@ -1320,21 +1266,22 @@ function mapRpcLeaderboardRow(
 
 export async function dbFetchGlobalLeaderboard(
   currentUserId?: string,
-  matches: Match[] = [],
+  _matches: Match[] = [],
 ): Promise<LeaderboardRecord[]> {
-  if (!supabase) return [];
+  if (!supabase) throw new Error("Database not connected.");
 
   const { data, error } = await supabase.rpc("get_global_leaderboard", {
     p_current_user_id: currentUserId ?? null,
   });
 
-  if (!error && Array.isArray(data)) {
-    return data.map((row) => mapRpcLeaderboardRow(row as Record<string, unknown>, currentUserId));
-  }
-
   if (error) {
-    console.warn("Leaderboard RPC unavailable, using client fallback:", error.message);
+    throw new Error(`Leaderboard RPC failed: ${error.message}`);
+  }
+  if (!Array.isArray(data)) {
+    throw new Error("Leaderboard RPC returned an invalid payload.");
   }
 
-  return computeLeaderboardClientSide(currentUserId, matches);
+  return data.map((row) =>
+    mapRpcLeaderboardRow(row as Record<string, unknown>, currentUserId),
+  );
 }

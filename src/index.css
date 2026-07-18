@@ -169,29 +169,9 @@
   pointer-events: none !important;
 }
 
-@keyframes sparkleTwinkle {
-  0%,
-  100% {
-    opacity: 0.2;
-    transform: scale(0.6) rotate(0deg);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.1) rotate(180deg);
-  }
-}
-
 @keyframes shimmer {
   0% { transform: translateX(-150%); }
   100% { transform: translateX(150%); }
-}
-
-.sparkling-light-particle {
-  position: absolute;
-  pointer-events: none;
-  z-index: -10;
-  animation: sparkleTwinkle 4s ease-in-out infinite;
-  color: rgba(255, 255, 255, 0.6);
 }
 
 html,

@@ -5,7 +5,8 @@ import type { League } from "../../types";
 export interface LeagueSettingsPayload {
   isPrivate: boolean;
   maxPlayers: number;
-  password: string;
+  /** Omit or leave blank to keep the existing join password server-side. */
+  password?: string;
 }
 
 interface LeagueSettingsModalProps {
@@ -47,19 +48,18 @@ export default function LeagueSettingsModal({
       setError(`Max players cannot be below the current member count (${minPlayers}).`);
       return;
     }
-    if (isPrivate && !password.trim()) {
-      setError("Private leagues need a join password.");
-      return;
-    }
-
     setSaving(true);
     setError(null);
     try {
-      await onSave({
+      // Blank password = keep existing secret (password is never returned to the client).
+      const payload: LeagueSettingsPayload = {
         isPrivate,
         maxPlayers: bounded,
-        password: password.trim(),
-      });
+      };
+      if (password.trim()) {
+        payload.password = password.trim();
+      }
+      await onSave(payload);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save league settings.");
@@ -173,7 +173,7 @@ export default function LeagueSettingsModal({
               type="text"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Set or change join password"
+              placeholder="Leave blank to keep current password"
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-sm text-white font-mono focus:outline-none focus:border-emerald-500/50 placeholder:text-slate-600"
             />
           </div>

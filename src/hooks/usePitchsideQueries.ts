@@ -8,7 +8,8 @@ import {
   dbFetchUserLeagues,
   dbFetchLeagueMembers,
   dbFetchLeaguesMembership,
-  dbFetchLiveProvisionalByUser,
+  dbFetchLiveProvisionalMatrix,
+  sumLiveProvisionalMatrix,
   dbFetchGlobalLeaderboard,
   MATCH_HORIZON_DAYS,
   type LeaderboardRecord,
@@ -114,9 +115,10 @@ export function useLiveProvisionalQuery(matches: Match[] = []) {
 
   return useQuery({
     queryKey: queryKeys.liveProvisional(liveMatchIds),
-    queryFn: () => dbFetchLiveProvisionalByUser(liveMatchIds),
+    queryFn: () => dbFetchLiveProvisionalMatrix(liveMatchIds),
     enabled: liveMatchIds.length > 0,
-    refetchInterval: liveMatchIds.length > 0 ? 30_000 : false,
+    // Realtime patches the matrix in-cache — no polling fan-out.
+    select: (matrix) => sumLiveProvisionalMatrix(matrix),
   });
 }
 

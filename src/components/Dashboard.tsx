@@ -6,7 +6,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuthStatus } from '../hooks/useAuthStatus';
-import { useSupabaseRealtime } from '../hooks/useSupabaseRealtime';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { useOverlayHistory, transferOverlay } from '../hooks/useOverlayHistory';
 import {
@@ -38,7 +37,6 @@ import {
   dbArchiveLeague,
   dbFetchLeagueMembers,
   dbFetchLeagueById,
-  dbFetchLeagueByIdAndPassword,
   dbFetchSeenFeatures,
   dbMarkFeatureSeen,
   isSupabaseConfigured,
@@ -125,7 +123,8 @@ export default function Dashboard({
   const [tourForceSettings, setTourForceSettings] = useState(false);
   const authStatus = useAuthStatus();
   const queryClient = useQueryClient();
-  useSupabaseRealtime(user?.id);
+  /** Debounce timers for draft prediction upserts (one per match). */
+  const draftSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const isSandbox =
     !user || !user.id || user.id.startsWith("usr_") || user.id === "user-admin";
@@ -402,6 +401,50 @@ export default function Dashboard({
     localStorage.setItem(`predictions_${user.id}`, JSON.stringify(remotePredictions));
   }, [remotePredictions, user?.id]);
 
+  useEffect(() => {
+    return () => {
+      Object.values(draftSaveTimers.current).forEach((timer) => clearTimeout(timer));
+      draftSaveTimers.current = {};
+    };
+  }, []);
+
+  const queueDraftPredictionSave = useCallback(
+    (
+      matchId: string,
+      home: number,
+      away: number,
+      sport: SportType,
+      competitionId: string,
+      snapshot: Record<string, PredictionEntry>,
+    ) => {
+      queryClient.setQueryData<Record<string, PredictionEntry>>(
+        queryKeys.predictions(user.id),
+        snapshot,
+      );
+
+      const existing = draftSaveTimers.current[matchId];
+      if (existing) clearTimeout(existing);
+
+      draftSaveTimers.current[matchId] = setTimeout(async () => {
+        delete draftSaveTimers.current[matchId];
+        try {
+          await dbSavePrediction(
+            user.id,
+            matchId,
+            sport,
+            competitionId,
+            home,
+            away,
+            false,
+          );
+        } catch (e) {
+          console.warn("Silent score write exception:", e);
+        }
+      }, 450);
+    },
+    [queryClient, user.id],
+  );
+
   const userPoints = useMemo(() => {
     const current = leaderboardList.find((entry) => entry.playerId === user?.id);
     return current?.points ?? 0;
@@ -570,13 +613,18 @@ export default function Dashboard({
     }, 3000);
   };
 
-  const handleScoreChange = async (
+  const handleScoreChange = (
     matchId: string,
     side: "home" | "away",
     val: string,
   ) => {
     const score = parseInt(val, 10);
     if (isNaN(score)) return;
+
+    const currentHome =
+      side === "home" ? score : (predictions[matchId]?.home ?? 0);
+    const currentAway =
+      side === "away" ? score : (predictions[matchId]?.away ?? 0);
 
     const nextPredictions = {
       ...predictions,
@@ -592,29 +640,18 @@ export default function Dashboard({
       JSON.stringify(nextPredictions),
     );
 
-    try {
-      const matchObj = allMatches.find((m) => m.id === matchId);
-      const currentHome =
-        side === "home" ? score : (predictions[matchId]?.home ?? 0);
-      const currentAway =
-        side === "away" ? score : (predictions[matchId]?.away ?? 0);
-
-      await dbSavePrediction(
-        user.id,
-        matchId,
-        matchObj?.sport || SportType.FOOTBALL,
-        matchObj?.competitionId || "f-epl",
-        currentHome,
-        currentAway,
-        false,
-      );
-      queryClient.invalidateQueries({ queryKey: queryKeys.predictions(user.id) });
-    } catch (e) {
-      console.warn("Silent score write exception:", e);
-    }
+    const matchObj = allMatches.find((m) => m.id === matchId);
+    queueDraftPredictionSave(
+      matchId,
+      currentHome,
+      currentAway,
+      matchObj?.sport || SportType.FOOTBALL,
+      matchObj?.competitionId || "f-epl",
+      nextPredictions,
+    );
   };
 
-  const handleRugbyPredictionChange = async (
+  const handleRugbyPredictionChange = (
     matchId: string,
     winner: "home" | "away" | "draw" | null,
     marginStr: string,
@@ -650,45 +687,25 @@ export default function Dashboard({
       JSON.stringify(nextPredictions),
     );
 
-    try {
-      const matchObj = allMatches.find((m) => m.id === matchId);
-      await dbSavePrediction(
-        user.id,
-        matchId,
-        matchObj?.sport || SportType.RUGBY,
-        matchObj?.competitionId || "r-nations",
-        calculatedHome,
-        calculatedAway,
-        false,
-      );
-      queryClient.invalidateQueries({ queryKey: queryKeys.predictions(user.id) });
-    } catch (e) {
-      console.warn("Silent rugby score write exception:", e);
-    }
+    const matchObj = allMatches.find((m) => m.id === matchId);
+    queueDraftPredictionSave(
+      matchId,
+      calculatedHome,
+      calculatedAway,
+      matchObj?.sport || SportType.RUGBY,
+      matchObj?.competitionId || "r-nations",
+      nextPredictions,
+    );
   };
 
   const submitPrediction = async (matchId: string) => {
     const pred = predictions[matchId];
-    if (!pred) return;
+    if (!pred || pred.submitted) return;
 
-    const nextPredictions = {
-      ...predictions,
-      [matchId]: {
-        ...pred,
-        submitted: true,
-        lockedAt: new Date().toISOString(),
-      },
-    };
-
-    setPredictions(nextPredictions);
-    localStorage.setItem(
-      `predictions_${user.id}`,
-      JSON.stringify(nextPredictions),
-    );
-    triggerToast("ðŸŽ¯ Prediction submitted successfully!");
+    const previousPredictions = predictions;
+    const matchObj = allMatches.find((m) => m.id === matchId);
 
     try {
-      const matchObj = allMatches.find((m) => m.id === matchId);
       await dbSavePrediction(
         user.id,
         matchId,
@@ -698,7 +715,25 @@ export default function Dashboard({
         pred.away,
         true,
       );
-      queryClient.invalidateQueries({ queryKey: queryKeys.predictions(user.id) });
+
+      const nextPredictions = {
+        ...predictions,
+        [matchId]: {
+          ...pred,
+          submitted: true,
+          lockedAt: new Date().toISOString(),
+        },
+      };
+
+      setPredictions(nextPredictions);
+      localStorage.setItem(
+        `predictions_${user.id}`,
+        JSON.stringify(nextPredictions),
+      );
+      queryClient.setQueryData(
+        queryKeys.predictions(user.id),
+        nextPredictions,
+      );
       queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard });
       queryClient.invalidateQueries({
         queryKey: ["leagueStandingsPredictions"],
@@ -706,9 +741,19 @@ export default function Dashboard({
       queryClient.invalidateQueries({
         queryKey: ["completedMatches", "leagueStandings"],
       });
+      triggerToast("Prediction submitted successfully!");
     } catch (e) {
       console.error("Error locking prediction:", e);
-      triggerToast("âš ï¸ Database error saving prediction.");
+      setPredictions(previousPredictions);
+      localStorage.setItem(
+        `predictions_${user.id}`,
+        JSON.stringify(previousPredictions),
+      );
+      queryClient.setQueryData(
+        queryKeys.predictions(user.id),
+        previousPredictions,
+      );
+      triggerToast("Network error: Prediction not saved. Please try again.");
     }
   };
 
@@ -731,7 +776,7 @@ export default function Dashboard({
 
   const handleHubLeagueSettings = async (
     leagueId: string,
-    settings: { isPrivate: boolean; maxPlayers: number; password: string },
+    settings: { isPrivate: boolean; maxPlayers: number; password?: string },
   ) => {
     await dbUpdateLeagueSettings(leagueId, settings);
     queryClient.invalidateQueries({ queryKey: queryKeys.leagues });
@@ -806,48 +851,17 @@ export default function Dashboard({
     }
 
     try {
-      // Private leagues are excluded from the browse list — never look them
-      // up only in `leagues`. Verify id + password against Postgres first.
-      let target = await dbFetchLeagueByIdAndPassword(codeInput, passwordEntered);
+      // Resolve league metadata without ever reading the password column.
+      let target =
+        (await dbFetchLeagueById(codeInput)) ||
+        leagues.find((l) => l.id.toUpperCase() === codeInput) ||
+        userLeagues.find((l) => l.id.toUpperCase() === codeInput) ||
+        leagues.find(
+          (l) => l.name.toLowerCase() === joinCodeInput.trim().toLowerCase(),
+        ) ||
+        null;
 
-      // Fallback: public / already-visible leagues matched by id or name,
-      // then password-checked locally (covers name-based joins).
       if (!target) {
-        const cached =
-          leagues.find((l) => l.id.toUpperCase() === codeInput) ||
-          userLeagues.find((l) => l.id.toUpperCase() === codeInput) ||
-          leagues.find(
-            (l) =>
-              l.name.toLowerCase() === joinCodeInput.trim().toLowerCase(),
-          ) ||
-          null;
-
-        if (cached) {
-          if ((cached.password || "").trim() !== passwordEntered) {
-            // Re-fetch by id in case browse list omitted the password field.
-            const byId = await dbFetchLeagueById(cached.id);
-            if (!byId || (byId.password || "").trim() !== passwordEntered) {
-              triggerToast("❌ Incorrect entry password.");
-              return;
-            }
-            target = byId;
-          } else {
-            target = cached;
-          }
-        }
-      }
-
-      // Last resort: league exists but password mismatched on the AND query.
-      if (!target) {
-        const exists = await dbFetchLeagueById(codeInput);
-        if (exists) {
-          console.warn("[handleJoinLeague] league found, password mismatch", {
-            id: exists.id,
-          });
-          triggerToast("❌ Incorrect entry password.");
-          return;
-        }
-        console.warn("[handleJoinLeague] league not found for code", codeInput);
         triggerToast("⚠️ Private league not found.");
         return;
       }
@@ -859,18 +873,8 @@ export default function Dashboard({
         return;
       }
 
-      const currentMembers = await dbFetchLeagueMembers(target.id);
-      const memberCap = target.maxPlayers ?? target.maxParticipants;
-      if (
-        !isGlobalLeague(target.id) &&
-        memberCap != null &&
-        currentMembers.length >= memberCap
-      ) {
-        triggerToast(`⚠️ League is full (Max ${memberCap} players).`);
-        return;
-      }
-
-      await dbJoinLeague(target.id, user.id);
+      // Password verified + membership insert happen inside join_league_secure.
+      await dbJoinLeague(target.id, user.id, passwordEntered);
       invalidateLeagueQueries(target.id);
 
       setJoinCodeInput("");
@@ -881,6 +885,19 @@ export default function Dashboard({
       triggerToast(`🎉 Joined "${target.name}"!`);
     } catch (err) {
       console.error("[handleJoinLeague] failed", err);
+      const message = err instanceof Error ? err.message : String(err);
+      if (/incorrect password/i.test(message)) {
+        triggerToast("❌ Incorrect entry password.");
+        return;
+      }
+      if (/league is full/i.test(message)) {
+        triggerToast("⚠️ League is full.");
+        return;
+      }
+      if (/league not found/i.test(message)) {
+        triggerToast("⚠️ Private league not found.");
+        return;
+      }
       triggerToast("⚠️ Database integration failed.");
     }
   };
@@ -1199,21 +1216,18 @@ export default function Dashboard({
             onJoinLeague={async (league, password) => {
               const trimmed = password.trim();
               try {
-                const verified = await dbFetchLeagueByIdAndPassword(
-                  league.id,
-                  trimmed,
-                );
-                if (!verified) {
-                  triggerToast("Incorrect password.");
-                  return;
-                }
-                await dbJoinLeague(verified.id, user.id);
-                invalidateLeagueQueries(verified.id);
+                await dbJoinLeague(league.id, user.id, trimmed);
+                invalidateLeagueQueries(league.id);
                 setIsJoiningActiveLeague(false);
                 setActiveLeagueJoinPassword("");
                 triggerToast("Successfully joined the league!");
               } catch (err) {
                 console.error("[LeagueHub onJoinLeague] failed", err);
+                const message = err instanceof Error ? err.message : String(err);
+                if (/incorrect password/i.test(message)) {
+                  triggerToast("Incorrect password.");
+                  return;
+                }
                 triggerToast("Failed to join league.");
               }
             }}

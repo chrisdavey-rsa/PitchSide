@@ -30,6 +30,7 @@ export default function JoinLeague({
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [joinPassword, setJoinPassword] = useState("");
 
   useEffect(() => {
     if (!leagueId) {
@@ -94,12 +95,17 @@ export default function JoinLeague({
       return;
     }
 
+    if (!joinPassword.trim()) {
+      setError("Enter the league join password to continue.");
+      return;
+    }
+
     setJoining(true);
     setError(null);
     setStatus(null);
 
     try {
-      await dbJoinLeague(league.id, currentUser.id);
+      await dbJoinLeague(league.id, currentUser.id, joinPassword.trim());
       clearPendingInvite();
       setStatus(`You're in — welcome to ${league.name}!`);
       window.setTimeout(() => {
@@ -108,13 +114,17 @@ export default function JoinLeague({
       }, 700);
     } catch (err: unknown) {
       console.error("[JoinLeague] join failed", err);
-      const code =
-        err && typeof err === "object" && "code" in err
-          ? String((err as { code?: string }).code)
-          : "";
       const message = err instanceof Error ? err.message : String(err);
-      // Idempotent: already a member (unique constraint) → treat as success.
-      if (code === "23505" || /duplicate|unique|already/i.test(message)) {
+      if (/incorrect password/i.test(message)) {
+        setError("Incorrect password. Please try again.");
+        return;
+      }
+      if (/league is full/i.test(message)) {
+        setError("This league is full.");
+        return;
+      }
+      // Idempotent: already a member → treat as success.
+      if (/duplicate|unique|already/i.test(message)) {
         clearPendingInvite();
         onJoined(league.id);
         navigate("/");
@@ -231,7 +241,7 @@ export default function JoinLeague({
                     Create account
                   </button>
                 </div>
-              ) : (
+              ) : alreadyMember ? (
                 <button
                   type="button"
                   onClick={handleJoin}
@@ -243,8 +253,41 @@ export default function JoinLeague({
                   ) : (
                     <Users className="w-4 h-4" />
                   )}
-                  {alreadyMember ? "Open League" : "Join League"}
+                  Open League
                 </button>
+              ) : (
+                <div className="space-y-3">
+                  <div>
+                    <label
+                      htmlFor="invite-join-password"
+                      className="block text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-1.5"
+                    >
+                      Join password
+                    </label>
+                    <input
+                      id="invite-join-password"
+                      type="password"
+                      autoComplete="off"
+                      value={joinPassword}
+                      onChange={(e) => setJoinPassword(e.target.value)}
+                      placeholder="Enter the league password"
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-emerald-500/50"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleJoin}
+                    disabled={joining}
+                    className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold font-display text-sm py-3.5 rounded-xl cursor-pointer transition-colors"
+                  >
+                    {joining ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Users className="w-4 h-4" />
+                    )}
+                    Join League
+                  </button>
+                </div>
               )}
             </div>
           ) : null}

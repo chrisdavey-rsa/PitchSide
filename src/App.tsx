@@ -23,6 +23,7 @@ import InstallPWA from './components/InstallPWA';
 import JoinLeague from './pages/JoinLeague';
 import { RadialOrigin } from './radial';
 import { useBodyScrollLock } from './hooks/useBodyScrollLock';
+import { useSupabaseRealtime } from './hooks/useSupabaseRealtime';
 import { useOverlayHistory, retainOverlayHistoryDuringTransition, transferOverlay } from './hooks/useOverlayHistory';
 import { readPendingInvite } from './lib/pendingInvite';
 
@@ -79,6 +80,37 @@ function AppShell() {
   // Account portal owns its own overlay-history entry (and nested scroll lock)
 
   const [registeredUsers, setRegisteredUsers] = useState<UserProfile[]>([]);
+
+  const loadRegisteredUsers = useCallback(async () => {
+    try {
+      const players = await dbFetchPlayers();
+      const standardSeedNicks = [
+        'scrummaster',
+        'striker99',
+        'goalgetter',
+        'lineoutking',
+        'sidelineslicker',
+        'flankerfan',
+      ];
+      const filtered = players.filter(
+        (p) => !standardSeedNicks.includes(p.nickname.toLowerCase()),
+      );
+      const seen = new Set<string>();
+      const deduplicated = filtered.filter((u) => {
+        if (!u?.id || seen.has(u.id)) return false;
+        seen.add(u.id);
+        return true;
+      });
+      setRegisteredUsers(deduplicated);
+    } catch (err) {
+      console.warn('Could not load players from Supabase driver:', err);
+    }
+  }, []);
+
+  // One realtime channel per logged-in user (replaces App profiles + Dashboard channels).
+  useSupabaseRealtime(currentUser?.id, {
+    onProfilesChange: loadRegisteredUsers,
+  });
 
   const skipSplashForAuthRedirect = useCallback(() => {
     setIsSplash(false);
@@ -211,52 +243,11 @@ function AppShell() {
       if (verifyFallbackTimer) clearTimeout(verifyFallbackTimer);
     };
   }, [skipSplashForAuthRedirect]);
-  // Fetch registered players from Supabase relational DB
+  // Initial players hydrate — subsequent updates come via the single realtime channel.
   useEffect(() => {
     if (!currentUser) return;
-
-    let active = true;
-    const loadPlayers = async () => {
-      try {
-        const players = await dbFetchPlayers();
-        if (active) {
-          // Filter out mock names to avoid display pollution, then seed remaining
-          const standardSeedNicks = ['scrummaster', 'striker99', 'goalgetter', 'lineoutking', 'sidelineslicker', 'flankerfan'];
-          const filtered = players.filter(p => !standardSeedNicks.includes(p.nickname.toLowerCase()));
-          
-          const seen = new Set();
-          const deduplicated = filtered.filter((u) => {
-            if (!u || !u.id || seen.has(u.id)) return false;
-            seen.add(u.id);
-            return true;
-          });
-
-          setRegisteredUsers(deduplicated);
-        }
-      } catch (err) {
-        console.warn('Could not load players from Supabase driver:', err);
-      }
-    };
-
-    loadPlayers();
-    
-    let subscription: ReturnType<typeof supabase.channel> | null = null;
-    if (supabase) {
-      subscription = supabase
-        .channel('public:profiles')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
-          loadPlayers();
-        })
-        .subscribe();
-    }
-
-    return () => {
-      active = false;
-      if (subscription && supabase) {
-        supabase.removeChannel(subscription);
-      }
-    };
-  }, [currentUser]);
+    void loadRegisteredUsers();
+  }, [currentUser, loadRegisteredUsers]);
 
   const handleAuthSuccess = (user: UserProfile) => {
     setCurrentUser(user);
@@ -386,13 +377,6 @@ function AppShell() {
           <div className="absolute -top-24 -right-24 w-[420px] h-[420px] rounded-full bg-[radial-gradient(circle,rgba(59,130,246,0.12)_0%,transparent_70%)]" />
           <div className="absolute -bottom-24 -left-24 w-[420px] h-[420px] rounded-full bg-[radial-gradient(circle,rgba(239,68,68,0.1)_0%,transparent_70%)]" />
           <div className="magical-diagonal-ribbon" />
-          <div className="absolute inset-0 pointer-events-none">
-            <div className="sparkling-light-particle top-[15%] left-[25%] text-sm" style={{ animationDelay: '0s' }}>✨</div>
-            <div className="sparkling-light-particle top-[40%] left-[45%] text-sm text-emerald-400" style={{ animationDelay: '1.5s' }}>✦</div>
-            <div className="sparkling-light-particle top-[65%] left-[65%] text-sm text-blue-400" style={{ animationDelay: '0.8s' }}>✨</div>
-            <div className="sparkling-light-particle top-[25%] left-[75%] text-sm" style={{ animationDelay: '2.2s' }}>✦</div>
-            <div className="sparkling-light-particle top-[80%] left-[35%] text-sm text-purple-400" style={{ animationDelay: '3.1s' }}>✨</div>
-          </div>
         </div>
       )}
       {!isSplash && <InstallPWA />}

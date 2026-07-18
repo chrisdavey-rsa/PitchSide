@@ -24,6 +24,8 @@ interface MobileAccountHubProps {
   /** Omit in embedded tab mode — no close control. */
   onClose?: () => void;
   onLogout?: () => void;
+  /** When true (mobile bottom-nav tab), use document scroll instead of a nested scrollport. */
+  embedded?: boolean;
 }
 
 export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
@@ -36,6 +38,7 @@ export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
   onOpenRules,
   onClose,
   onLogout,
+  embedded = false,
 }) => {
   const [leaguesOpen, setLeaguesOpen] = useState(true);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
@@ -47,7 +50,13 @@ export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
   const activeLeagueCount = userLeagues.length;
 
   return (
-    <div className="flex flex-col h-full md:hidden pb-2">
+    <div
+      className={
+        embedded
+          ? 'flex flex-col w-full md:hidden pb-2 touch-pan-y'
+          : 'flex flex-col h-full md:hidden pb-2'
+      }
+    >
       <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-800/70 shrink-0">
         <div className="min-w-0">
           <h4 className="text-base font-extrabold font-display text-white tracking-wide uppercase">
@@ -70,10 +79,16 @@ export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-5 space-y-5">
+      <div
+        className={
+          embedded
+            ? 'w-full px-5 py-5 space-y-5 touch-pan-y'
+            : 'flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 py-5 space-y-5'
+        }
+      >
         {/* Personal header */}
         <div className="relative overflow-hidden rounded-2xl border border-slate-800/80 bg-linear-to-br from-slate-900 via-slate-950 to-emerald-950/30 p-5">
-          <div className="absolute -right-8 -top-8 w-28 h-28 rounded-full bg-emerald-500/10 blur-2xl pointer-events-none" />
+          <div className="pointer-events-none absolute -right-8 -top-8 w-28 h-28 rounded-full bg-[radial-gradient(circle,rgba(16,185,129,0.18)_0%,transparent_70%)]" />
           <div className="relative flex items-center gap-4">
             <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0 shadow-[0_0_24px_rgba(16,185,129,0.15)]">
               <span className="text-lg font-bold font-display text-emerald-400 tracking-wide">

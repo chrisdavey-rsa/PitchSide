@@ -1,6 +1,11 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { supabase, mapMatchRow, type PredictionEntry } from '../supabase';
+import {
+  supabase,
+  mapMatchRow,
+  type PredictionEntry,
+  type LiveProvisionalMatrix,
+} from '../supabase';
 import { queryKeys } from '../lib/queryKeys';
 import type { Match } from '../types';
 
@@ -21,20 +26,77 @@ const TABLE_QUERY_MAP: Record<RealtimeTable, readonly QueryKeyLike[]> = {
   league_members: [queryKeys.leagues],
 };
 
+function patchLiveProvisionalCell(
+  queryClient: ReturnType<typeof useQueryClient>,
+  userId: string,
+  matchId: string,
+  points: number,
+) {
+  queryClient.setQueriesData<LiveProvisionalMatrix>(
+    { queryKey: ['liveProvisional'] },
+    (prev) => {
+      const next: LiveProvisionalMatrix = prev ? { ...prev } : {};
+      const userRow = { ...(next[userId] || {}) };
+      if (points > 0) {
+        userRow[matchId] = points;
+      } else {
+        delete userRow[matchId];
+      }
+      if (Object.keys(userRow).length === 0) {
+        delete next[userId];
+      } else {
+        next[userId] = userRow;
+      }
+      return next;
+    },
+  );
+}
+
+function removeMatchFromLiveProvisional(
+  queryClient: ReturnType<typeof useQueryClient>,
+  matchId: string,
+) {
+  queryClient.setQueriesData<LiveProvisionalMatrix>(
+    { queryKey: ['liveProvisional'] },
+    (prev) => {
+      if (!prev) return prev;
+      let changed = false;
+      const next: LiveProvisionalMatrix = {};
+      for (const [uid, byMatch] of Object.entries(prev)) {
+        if (!(matchId in byMatch)) {
+          next[uid] = byMatch;
+          continue;
+        }
+        changed = true;
+        const rest = { ...byMatch };
+        delete rest[matchId];
+        if (Object.keys(rest).length > 0) next[uid] = rest;
+      }
+      return changed ? next : prev;
+    },
+  );
+}
+
+export type UseSupabaseRealtimeOptions = {
+  /** Fired when profiles change — used by App to refresh registeredUsers without a 2nd channel. */
+  onProfilesChange?: () => void;
+};
+
 /**
- * Dashboard realtime sync.
- *
- * For live "As It Stands" updates we PATCH the React Query cache directly on
- * matches/predictions UPDATE events so provisional scores and points appear
- * without a full refetch. Other tables still invalidate their query keys.
+ * Single realtime channel per logged-in session (`pitchside-dashboard-sync`).
+ * Live provisional totals are patched in-cache; no mass invalidate / poll.
  */
-export function useSupabaseRealtime(userId?: string) {
+export function useSupabaseRealtime(
+  userId?: string,
+  options?: UseSupabaseRealtimeOptions,
+) {
   const queryClient = useQueryClient();
+  const onProfilesChange = options?.onProfilesChange;
 
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase || !userId) return;
 
-    const channel = supabase.channel('pitchside-dashboard-sync');
+    const channel = supabase.channel(`pitchside-sync:${userId}`);
 
     const invalidate = (table: RealtimeTable) => {
       const keys = TABLE_QUERY_MAP[table];
@@ -42,23 +104,19 @@ export function useSupabaseRealtime(userId?: string) {
         queryClient.invalidateQueries({ queryKey: key });
       });
 
-      if (table === 'predictions' && userId) {
+      if (table === 'predictions') {
         queryClient.invalidateQueries({ queryKey: queryKeys.predictions(userId) });
       }
       if (table === 'league_members') {
-        if (userId) {
-          queryClient.invalidateQueries({ queryKey: queryKeys.userLeagues(userId) });
-        }
+        queryClient.invalidateQueries({ queryKey: queryKeys.userLeagues(userId) });
         queryClient.invalidateQueries({ queryKey: ['leagueMembers'] });
         queryClient.invalidateQueries({ queryKey: ['leaguesMembership'] });
       }
-      if (table === 'matches' || table === 'predictions') {
-        // Refresh aggregated live provisional totals for the leaderboard badges.
-        queryClient.invalidateQueries({ queryKey: ['liveProvisional'] });
+      if (table === 'profiles') {
+        onProfilesChange?.();
       }
     };
 
-    // ---- MATCHES: seamless merge of live scoring columns --------------------
     channel.on(
       'postgres_changes',
       { event: 'UPDATE', schema: 'public', table: 'matches' },
@@ -74,7 +132,6 @@ export function useSupabaseRealtime(userId?: string) {
           if (!prev) return prev;
           const idx = prev.findIndex((m) => m.id === mapped.id);
           if (idx === -1) {
-            // New row we haven't seen — fall back to a full refetch.
             invalidate('matches');
             return prev;
           }
@@ -83,15 +140,15 @@ export function useSupabaseRealtime(userId?: string) {
           return next;
         });
 
-        // Leaderboard RPC may need a soft refresh when a match completes.
         if (mapped.status === 'completed') {
           queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard });
+          removeMatchFromLiveProvisional(queryClient, mapped.id);
+        } else if (mapped.status !== 'live') {
+          removeMatchFromLiveProvisional(queryClient, mapped.id);
         }
-        queryClient.invalidateQueries({ queryKey: ['liveProvisional'] });
       },
     );
 
-    // ---- PREDICTIONS: merge provisional_points into the user's cache --------
     channel.on(
       'postgres_changes',
       { event: 'UPDATE', schema: 'public', table: 'predictions' },
@@ -102,7 +159,7 @@ export function useSupabaseRealtime(userId?: string) {
           return;
         }
 
-        if (userId && row.user_id === userId) {
+        if (row.user_id === userId) {
           queryClient.setQueryData<Record<string, PredictionEntry>>(
             queryKeys.predictions(userId),
             (prev) => {
@@ -128,12 +185,17 @@ export function useSupabaseRealtime(userId?: string) {
           );
         }
 
-        // Keep the amber leaderboard badges in sync for every player.
-        queryClient.invalidateQueries({ queryKey: ['liveProvisional'] });
+        if (row.user_id) {
+          patchLiveProvisionalCell(
+            queryClient,
+            String(row.user_id),
+            String(row.match_id),
+            Number(row.provisional_points) || 0,
+          );
+        }
       },
     );
 
-    // ---- Remaining tables: invalidate as before -----------------------------
     (['profiles', 'leagues', 'league_members'] as RealtimeTable[]).forEach((table) => {
       channel.on(
         'postgres_changes',
@@ -142,7 +204,6 @@ export function useSupabaseRealtime(userId?: string) {
       );
     });
 
-    // Also listen for INSERT/DELETE on matches & predictions (full invalidate).
     (['matches', 'predictions'] as const).forEach((table) => {
       channel.on(
         'postgres_changes',
@@ -161,5 +222,5 @@ export function useSupabaseRealtime(userId?: string) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [queryClient, userId]);
+  }, [queryClient, userId, onProfilesChange]);
 }

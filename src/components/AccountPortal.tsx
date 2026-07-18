@@ -83,13 +83,15 @@ export default function AccountPortal({
     <div
       className={
         embedded
-          ? 'relative w-full bg-slate-950 border border-slate-800 rounded-2xl shadow-xl flex flex-col md:flex-row overflow-hidden min-h-[70vh]'
+          ? // In-flow mobile tab: let the page/document scroll — no overflow trap.
+            'relative z-10 w-full bg-slate-950 border border-slate-800 rounded-2xl shadow-xl flex flex-col md:flex-row overflow-visible touch-pan-y'
           : 'relative w-full max-w-5xl h-[100dvh] sm:h-[min(85vh,820px)] bg-slate-950 border-0 sm:border border-slate-800 sm:rounded-2xl shadow-2xl flex flex-col md:flex-row overflow-hidden pb-[calc(4.5rem+env(safe-area-inset-bottom,0px))] md:pb-0'
       }
       onClick={embedded ? undefined : (e) => e.stopPropagation()}
       onTouchEnd={embedded ? undefined : (e) => e.stopPropagation()}
     >
       <MobileAccountHub
+        embedded={embedded}
         user={user}
         userLeagues={userLeagues}
         selectedSeason={selectedSeason}
@@ -217,7 +219,7 @@ export default function AccountPortal({
   );
 
   if (embedded) {
-    return <div className="w-full font-sans">{panel}</div>;
+    return <div className="relative z-10 w-full font-sans touch-pan-y">{panel}</div>;
   }
 
   return (
