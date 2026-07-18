@@ -374,7 +374,27 @@ function AppShell() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-slate-950 overflow-x-hidden">
+    <div className="relative min-h-screen w-full bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-slate-950 overflow-x-clip">
+      {/* Decorative backdrop lives outside motion.main so transforms never trap
+          fixed layers, and pointer-events:none lets every touch reach the page. */}
+      {!isSplash && (
+        <div
+          aria-hidden="true"
+          className="app-ambient-backdrop fixed inset-0 overflow-hidden pointer-events-none z-0"
+        >
+          {/* Soft orbs without CSS filter — filter + large layers can steal touch on WebKit */}
+          <div className="absolute -top-24 -right-24 w-[420px] h-[420px] rounded-full bg-[radial-gradient(circle,rgba(59,130,246,0.12)_0%,transparent_70%)]" />
+          <div className="absolute -bottom-24 -left-24 w-[420px] h-[420px] rounded-full bg-[radial-gradient(circle,rgba(239,68,68,0.1)_0%,transparent_70%)]" />
+          <div className="magical-diagonal-ribbon" />
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="sparkling-light-particle top-[15%] left-[25%] text-sm" style={{ animationDelay: '0s' }}>✨</div>
+            <div className="sparkling-light-particle top-[40%] left-[45%] text-sm text-emerald-400" style={{ animationDelay: '1.5s' }}>✦</div>
+            <div className="sparkling-light-particle top-[65%] left-[65%] text-sm text-blue-400" style={{ animationDelay: '0.8s' }}>✨</div>
+            <div className="sparkling-light-particle top-[25%] left-[75%] text-sm" style={{ animationDelay: '2.2s' }}>✦</div>
+            <div className="sparkling-light-particle top-[80%] left-[35%] text-sm text-purple-400" style={{ animationDelay: '3.1s' }}>✨</div>
+          </div>
+        </div>
+      )}
       {!isSplash && <InstallPWA />}
       <AnimatePresence mode="wait">
         {isSplash ? (
@@ -413,28 +433,16 @@ function AppShell() {
             </div>
           </motion.div>
         ) : (
-          /* Main Application Frame Router */
+          /* Main Application Frame Router —
+             w-full + no overflow-x-hidden (that forces overflow-y:auto nested scroll).
+             Content grows with the document so the viewport scrolls natively. */
           <motion.main
             key="main"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.4 }}
-            className="flex-1 flex flex-col min-h-0 p-4 sm:p-6 lg:p-8 relative overflow-x-hidden"
+            className="relative z-10 flex-1 flex flex-col w-full max-w-none p-4 sm:p-6 lg:p-8"
           >
-            {/* Background elements — fixed to viewport so they never inflate scroll height */}
-            <div className="fixed inset-0 overflow-hidden pointer-events-none -z-10">
-              <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-blue-500/5 rounded-full blur-3xl" />
-              <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-red-500/5 rounded-full blur-3xl" />
-              <div className="magical-diagonal-ribbon" />
-              <div className="absolute inset-0">
-                <div className="sparkling-light-particle top-[15%] left-[25%] text-sm" style={{ animationDelay: '0s' }}>✨</div>
-                <div className="sparkling-light-particle top-[40%] left-[45%] text-sm text-emerald-400" style={{ animationDelay: '1.5s' }}>✦</div>
-                <div className="sparkling-light-particle top-[65%] left-[65%] text-sm text-blue-400" style={{ animationDelay: '0.8s' }}>✨</div>
-                <div className="sparkling-light-particle top-[25%] left-[75%] text-sm" style={{ animationDelay: '2.2s' }}>✦</div>
-                <div className="sparkling-light-particle top-[80%] left-[35%] text-sm text-purple-400" style={{ animationDelay: '3.1s' }}>✨</div>
-              </div>
-            </div>
-
             <Routes>
               <Route
                 path="/join/:leagueId"

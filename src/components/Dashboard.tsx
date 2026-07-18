@@ -1145,7 +1145,7 @@ export default function Dashboard({
   }, [privateLeagues.length]);
 
   return (
-    <div className="w-full max-w-6xl xl:max-w-7xl mx-auto flex flex-col gap-6 animate-fade-in pb-[calc(5.75rem+env(safe-area-inset-bottom,0px))] md:pb-0 min-h-0">
+    <div className="relative z-10 w-full max-w-6xl xl:max-w-7xl mx-auto flex flex-col gap-6 animate-fade-in pb-[calc(5.75rem+env(safe-area-inset-bottom,0px))] md:pb-0 touch-pan-y">
       <TopNavigation
         user={user}
         onLogout={onLogout}

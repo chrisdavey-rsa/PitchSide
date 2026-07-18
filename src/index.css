@@ -134,32 +134,39 @@
   }
 }
 
+/* Viewport-sized decorative layer. No CSS filter — Safari/WebKit can still
+   hit-test filtered layers even with pointer-events:none, which blocked
+   center-screen touch scrolling while left/right gutters still worked. */
 .magical-diagonal-ribbon {
   position: absolute;
   top: -30%;
   left: -20%;
-  width: 100vw;
-  height: 100vh;
-  max-height: 100vh;
-  pointer-events: none;
-  z-index: -20;
+  width: 140vw;
+  height: 140vh;
+  max-height: none;
+  pointer-events: none !important;
+  z-index: 0;
   transform: rotate(-30deg);
   background: linear-gradient(
     135deg,
-    transparent 35%,
-    rgba(255, 255, 255, 0.05) 43%,
-    rgba(59, 130, 246, 0.12) 47%,
-    rgba(255, 255, 255, 0.22) 50%,
-    rgba(168, 85, 247, 0.12) 53%,
-    rgba(16, 185, 129, 0.06) 57%,
-    transparent 65%
+    transparent 32%,
+    rgba(255, 255, 255, 0.03) 42%,
+    rgba(59, 130, 246, 0.1) 47%,
+    rgba(255, 255, 255, 0.14) 50%,
+    rgba(168, 85, 247, 0.1) 53%,
+    rgba(16, 185, 129, 0.05) 58%,
+    transparent 68%
   );
   background-size: 300% 300%;
   animation:
     colorCycle 12s ease-in-out infinite,
     diagonalFlow 25s ease-in-out infinite;
-  opacity: 0.7;
-  filter: blur(12px);
+  opacity: 0.65;
+}
+
+.app-ambient-backdrop,
+.app-ambient-backdrop * {
+  pointer-events: none !important;
 }
 
 @keyframes sparkleTwinkle {
@@ -193,8 +200,20 @@ body {
   color: #f8fafc;
   margin: 0;
   padding: 0;
-  min-height: 100vh;
+  min-height: 100%;
+  min-height: 100dvh;
   box-sizing: border-box;
-  overflow-x: hidden;
+  /* clip avoids the CSS quirk where overflow-x:hidden forces overflow-y:auto */
+  overflow-x: clip;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+#root {
+  position: relative;
+  z-index: 0;
+  width: 100%;
+  min-height: 100%;
+  min-height: 100dvh;
 }
 

@@ -1,7 +1,9 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import { X, Trophy, Zap, Target, Lock } from "lucide-react";
 import { getPowerUp } from "../../data/powerUps";
+import { useBodyScrollLock } from "../../hooks/useBodyScrollLock";
 
 interface PowerUpModalProps {
   /** Id of the power-up to display (see src/data/powerUps.ts). */
@@ -18,10 +20,13 @@ interface DetailRow {
 /**
  * Reusable, game-styled pop-up explaining a single power-up chip. Rendered from
  * both the Match Predictor wallet and the Rules page so the explanation is
- * always identical. Renders nothing when `powerUpId` is null.
+ * always identical. Portaled to document.body so `fixed` is viewport-relative
+ * (RulesInfo uses overflow/blur which would otherwise trap the overlay).
  */
 export default function PowerUpModal({ powerUpId, onClose }: PowerUpModalProps) {
   const powerUp = powerUpId ? getPowerUp(powerUpId) : undefined;
+  useBodyScrollLock(!!powerUp);
+
   if (!powerUp) return null;
 
   const Icon = powerUp.icon;
@@ -45,22 +50,26 @@ export default function PowerUpModal({ powerUpId, onClose }: PowerUpModalProps) 
     },
   ];
 
-  return (
+  return createPortal(
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="power-up-modal-title"
     >
       <motion.div
         initial={{ opacity: 0, scale: 0.92, y: 16 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.92, y: 16 }}
         transition={{ type: "spring", stiffness: 260, damping: 22 }}
-        className={`relative w-full max-w-md overflow-hidden rounded-2xl border ${theme.border} bg-slate-900/95 shadow-2xl`}
+        className={`relative w-full max-w-md max-h-[min(90dvh,40rem)] overflow-y-auto overflow-x-hidden rounded-2xl border ${theme.border} bg-slate-900/95 shadow-2xl`}
+        onClick={(e) => e.stopPropagation()}
       >
         {/* Top accent bar */}
         <div className="h-1 w-full bg-linear-to-r from-blue-500 via-green-500 to-red-500" />
@@ -85,7 +94,10 @@ export default function PowerUpModal({ powerUpId, onClose }: PowerUpModalProps) 
               <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
                 Power-Up Chip
               </span>
-              <h2 className={`text-xl font-extrabold font-display tracking-tight ${theme.accentText}`}>
+              <h2
+                id="power-up-modal-title"
+                className={`text-xl font-extrabold font-display tracking-tight ${theme.accentText}`}
+              >
                 {powerUp.name}
               </h2>
             </div>
@@ -121,6 +133,7 @@ export default function PowerUpModal({ powerUpId, onClose }: PowerUpModalProps) 
           </div>
         </div>
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    document.body,
   );
 }
