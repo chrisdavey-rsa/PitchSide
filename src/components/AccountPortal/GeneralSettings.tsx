@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { ShieldCheck, Globe, Calendar, ChevronRight } from 'lucide-react';
+import { ShieldCheck, Globe, Calendar, ChevronRight, ChevronDown, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { UserProfile } from '../../types';
+import { SportType, UserProfile } from '../../types';
 import { supabase } from '../../supabase';
 import { NATIONS_LIST } from './data';
+import CountryFlag from '../CountryFlag';
+import { filterTeams } from '../../data/supportedTeams';
 
 interface GeneralSettingsProps {
   user: UserProfile;
@@ -17,10 +19,18 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ user, onUpdate
   const [nationalitySearch, setNationalitySearch] = useState('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isProfilePublic, setIsProfilePublic] = useState<boolean>(user.isProfilePublic ?? true);
+  const [supportedTeam, setSupportedTeam] = useState(user.supportedTeam || '');
+  const [teamSearch, setTeamSearch] = useState('');
+  const [isTeamDropdownOpen, setIsTeamDropdownOpen] = useState(false);
+
+  const teamSport =
+    user.preferredSport === SportType.RUGBY ? 'Rugby' : 'Football';
 
   const handleSaveChanges = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatusMsg({ text: '', mode: 'none' });
+
+    const trimmedTeam = supportedTeam.trim();
 
     try {
       const isLocalProfile = !supabase || !user || !user.id || user.id === 'user-admin' || user.id.startsWith('usr_local_');
@@ -28,23 +38,34 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ user, onUpdate
       if (supabase && !isLocalProfile) {
         const { error: dbErr } = await supabase
           .from('profiles')
-          .update({ 
+          .update({
             nationality: selectedNationality,
-            is_profile_public: isProfilePublic 
+            is_profile_public: isProfilePublic,
+            supported_team: trimmedTeam,
           })
           .eq('id', user.id);
 
         if (dbErr) throw dbErr;
       }
 
-      onUpdateUser({ ...user, nationality: selectedNationality, isProfilePublic });
+      onUpdateUser({
+        ...user,
+        nationality: selectedNationality,
+        isProfilePublic,
+        supportedTeam: trimmedTeam,
+      });
       setStatusMsg({
         text: 'Success! Your settings have been saved to your account permanently.',
         mode: 'success'
       });
     } catch (err: any) {
       console.warn('Settings save error:', err);
-      onUpdateUser({ ...user, nationality: selectedNationality, isProfilePublic });
+      onUpdateUser({
+        ...user,
+        nationality: selectedNationality,
+        isProfilePublic,
+        supportedTeam: trimmedTeam,
+      });
       setStatusMsg({
         text: 'Settings updated locally for your current session state.',
         mode: 'success'
@@ -136,13 +157,10 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ user, onUpdate
               return (
                 <div className="absolute left-3.5 top-3.5 select-none pointer-events-none flex items-center justify-center text-sm font-sans">
                   {selectedNationalityObj ? (
-                    <img 
-                      src={`https://flagcdn.com/16x12/${selectedNationalityObj.code.toLowerCase()}.png`} 
-                      width="16" 
-                      height="11" 
-                      alt="flag" 
-                      className="rounded-xs object-cover select-none"
-                      referrerPolicy="no-referrer"
+                    <CountryFlag
+                      code={selectedNationalityObj.code.toLowerCase()}
+                      alt={selectedNationalityObj.name}
+                      size={16}
                     />
                   ) : (
                     <Globe className="w-4 h-4 text-slate-500" />
@@ -219,18 +237,152 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ user, onUpdate
                         }`}
                       >
                         <span className="shrink-0 select-none flex items-center justify-center">
-                          <img 
-                            src={`https://flagcdn.com/16x12/${nation.code.toLowerCase()}.png`} 
-                            width="16" 
-                            height="12" 
-                            alt={nation.name} 
-                            className="rounded-xs object-cover select-none"
-                            referrerPolicy="no-referrer"
+                          <CountryFlag
+                            code={nation.code.toLowerCase()}
+                            alt={nation.name}
+                            size={16}
                           />
                         </span>
                         <span className="flex-1 truncate font-mono text-[11px]">{nation.name}</span>
                       </button>
                     ));
+                  })()}
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Supported team → profiles.supported_team */}
+        <div className="relative">
+          <label className="block text-[10px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5 font-mono">
+            Supported {teamSport} Team
+          </label>
+          <div className="relative">
+            <User className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-500 pointer-events-none" />
+            <input
+              id="acc-supported-team-input"
+              type="text"
+              placeholder="Search countries or clubs..."
+              value={isTeamDropdownOpen ? teamSearch : supportedTeam}
+              onChange={(e) => {
+                setTeamSearch(e.target.value);
+                setSupportedTeam(e.target.value);
+                setIsTeamDropdownOpen(true);
+              }}
+              onFocus={() => {
+                setTeamSearch('');
+                setIsTeamDropdownOpen(true);
+              }}
+              className="w-full bg-slate-950 border border-slate-850 focus:border-emerald-500 rounded-xl py-3 pl-10 pr-8 text-xs text-white placeholder:text-slate-650 outline-hidden transition-colors font-semibold"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setIsTeamDropdownOpen(!isTeamDropdownOpen);
+                setTeamSearch('');
+              }}
+              className="absolute right-3 top-3.5 text-slate-550 hover:text-slate-350 transition-colors cursor-pointer"
+            >
+              <ChevronDown
+                className={`w-4 h-4 text-slate-400 transform transition-transform ${isTeamDropdownOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+          </div>
+
+          <AnimatePresence>
+            {isTeamDropdownOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-45"
+                  onClick={() => {
+                    setIsTeamDropdownOpen(false);
+                    setTeamSearch('');
+                  }}
+                />
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  className="absolute left-0 right-0 mt-2 max-h-52 overflow-y-auto bg-slate-950 border border-slate-800 rounded-xl shadow-2xl z-50 custom-scrollbar"
+                >
+                  {(() => {
+                    const { countries, clubs } = filterTeams(teamSport, teamSearch);
+                    if (countries.length === 0 && clubs.length === 0) {
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSupportedTeam(teamSearch);
+                            setIsTeamDropdownOpen(false);
+                            setTeamSearch('');
+                          }}
+                          className="w-full text-left px-4 py-3 text-xs text-slate-400 hover:bg-slate-900/50 cursor-pointer"
+                        >
+                          Use custom team:{' '}
+                          <span className="font-bold text-white">"{teamSearch}"</span>
+                        </button>
+                      );
+                    }
+                    return (
+                      <>
+                        {countries.length > 0 && (
+                          <>
+                            <div className="sticky top-0 z-10 px-3 py-1.5 text-[9px] font-mono font-bold uppercase tracking-widest text-slate-500 bg-slate-950 border-b border-slate-900">
+                              Countries
+                            </div>
+                            {countries.map((team) => (
+                              <button
+                                key={`c-${team.name}`}
+                                type="button"
+                                onClick={() => {
+                                  setSupportedTeam(team.name);
+                                  setTeamSearch('');
+                                  setIsTeamDropdownOpen(false);
+                                }}
+                                className={`w-full text-left px-4 py-2.5 text-xs flex items-center gap-2.5 transition-colors hover:bg-slate-900/50 cursor-pointer ${
+                                  supportedTeam === team.name
+                                    ? 'bg-slate-900/60 text-emerald-400 font-bold'
+                                    : 'text-slate-300'
+                                }`}
+                              >
+                                <CountryFlag
+                                  code={team.countryCode}
+                                  alt={team.name}
+                                  size={18}
+                                />
+                                <span className="truncate font-sans">{team.name}</span>
+                              </button>
+                            ))}
+                          </>
+                        )}
+                        {clubs.length > 0 && (
+                          <>
+                            <div className="sticky top-0 z-10 px-3 py-1.5 text-[9px] font-mono font-bold uppercase tracking-widest text-slate-500 bg-slate-950 border-b border-slate-900">
+                              Clubs
+                            </div>
+                            {clubs.map((team) => (
+                              <button
+                                key={`club-${team.name}`}
+                                type="button"
+                                onClick={() => {
+                                  setSupportedTeam(team.name);
+                                  setTeamSearch('');
+                                  setIsTeamDropdownOpen(false);
+                                }}
+                                className={`w-full text-left px-4 py-2.5 text-xs transition-colors hover:bg-slate-900/50 cursor-pointer ${
+                                  supportedTeam === team.name
+                                    ? 'bg-slate-900/60 text-emerald-400 font-bold'
+                                    : 'text-slate-300'
+                                }`}
+                              >
+                                <span className="truncate font-sans">{team.name}</span>
+                              </button>
+                            ))}
+                          </>
+                        )}
+                      </>
+                    );
                   })()}
                 </motion.div>
               </>

@@ -1,10 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Trophy, ChevronRight, Target, Loader2 } from "lucide-react";
+import { Trophy, ChevronRight, Target, Loader2, ChevronDown } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Match, SportType, UserProfile } from "../../types";
 import { dbFetchMatches } from "../../supabase";
-import { useLeagueStandingsPredictionsQuery } from "../../hooks/usePitchsideQueries";
+import {
+  useLeaderboardQuery,
+  useLeagueMembersQuery,
+  useLeagueStandingsPredictionsQuery,
+} from "../../hooks/usePitchsideQueries";
 import { getCountryFlag } from "./shared";
 import {
   StandingsHorizon,
@@ -12,7 +16,10 @@ import {
   countSubmittedForSport,
   seasonHorizonLabel,
   type LeaguePredictionRow,
+  type LeagueStandingRow,
 } from "../../lib/leagueStandings";
+import { selectVisibleRankedMembers } from "../../lib/leagueMemberVisibility";
+import { isGlobalLeague } from "../../lib/leaguesConfig";
 import type { PredictionEntry } from "../../supabase";
 
 interface LeagueHubStandingsProps {
@@ -46,19 +53,37 @@ export default function LeagueHubStandings({
     defaultSportTab(user.preferredSport),
   );
   const [horizon, setHorizon] = useState<StandingsHorizon>("season");
+  /** Private leagues: extra others beyond the initial top-9 (+10 per click). */
+  const [extraOthers, setExtraOthers] = useState(0);
+  const isGlobal = isGlobalLeague(leagueId);
 
   useEffect(() => {
     setSportTab(defaultSportTab(user.preferredSport));
   }, [user.preferredSport]);
 
+  useEffect(() => {
+    setExtraOthers(0);
+  }, [leagueId, sportTab, horizon]);
+
+  // Private leagues: one batched predictions query. Global: reuse leaderboard RPC (no N+1 / full roster).
   const { data: predictionRows = [], isLoading: predsLoading } =
-    useLeagueStandingsPredictionsQuery(leagueId, activeLeagueMembers);
+    useLeagueStandingsPredictionsQuery(
+      isGlobal ? null : leagueId,
+      isGlobal ? [] : activeLeagueMembers,
+    );
+
+  const { data: leaderboardList = [], isLoading: leaderboardLoading } =
+    useLeaderboardQuery(user.id, horizonMatches);
+
+  const { data: memberProfiles = [], isLoading: membersLoading } =
+    useLeagueMembersQuery(leagueId);
 
   const { data: completedMatches = [], isLoading: matchesLoading } = useQuery({
     queryKey: ["completedMatches", "leagueStandings"],
     queryFn: () =>
       dbFetchMatches({ horizonDays: null, status: "completed" }),
     staleTime: 60_000,
+    enabled: !isGlobal,
   });
 
   const matchesForEngine = useMemo(() => {
@@ -70,21 +95,40 @@ export default function LeagueHubStandings({
     return Array.from(byId.values());
   }, [completedMatches, horizonMatches]);
 
+  const memberIds = useMemo(() => {
+    if (memberProfiles.length > 0) {
+      return memberProfiles.map((m) => m.id);
+    }
+    return activeLeagueMembers;
+  }, [memberProfiles, activeLeagueMembers]);
+
   const nicknameById = useMemo(() => {
     const map: Record<string, string> = {};
     registeredUsers.forEach((u) => {
       map[u.id] = u.nickname;
     });
+    memberProfiles.forEach((u) => {
+      map[u.id] = u.nickname;
+    });
+    leaderboardList.forEach((u) => {
+      if (u.nickname && !map[u.playerId]) map[u.playerId] = u.nickname;
+    });
     return map;
-  }, [registeredUsers]);
+  }, [registeredUsers, memberProfiles, leaderboardList]);
 
   const nationalityById = useMemo(() => {
     const map: Record<string, string> = {};
     registeredUsers.forEach((u) => {
       if (u.nationality) map[u.id] = u.nationality;
     });
+    memberProfiles.forEach((u) => {
+      if (u.nationality) map[u.id] = u.nationality;
+    });
+    leaderboardList.forEach((u) => {
+      if (u.nationality && !map[u.playerId]) map[u.playerId] = u.nationality;
+    });
     return map;
-  }, [registeredUsers]);
+  }, [registeredUsers, memberProfiles, leaderboardList]);
 
   /** Merge local locked picks so unlock updates immediately after submit. */
   const mergedPredictionRows = useMemo((): LeaguePredictionRow[] => {
@@ -117,12 +161,53 @@ export default function LeagueHubStandings({
     user.id,
     sportTab,
   );
-  const unlocked = viewerPickCount > 0;
+  // Global board is always visible; private boards unlock after first pick.
+  const unlocked = isGlobal || viewerPickCount > 0;
 
-  const standings = useMemo(() => {
+  const standings = useMemo((): LeagueStandingRow[] => {
     if (!unlocked) return [];
+
+    if (isGlobal) {
+      // Global members list: every league member (including 0 predictions),
+      // alphabetical by nickname — not filtered/ranked by pick count.
+      const isFootball = sportTab === SportType.FOOTBALL;
+      const lbById = new Map(leaderboardList.map((r) => [r.playerId, r]));
+
+      return [...memberIds]
+        .map((playerId) => {
+          const lb = lbById.get(playerId);
+          const made = isFootball
+            ? (lb?.predictionsFootball ?? 0)
+            : (lb?.predictionsRugby ?? 0);
+          const points = isFootball
+            ? (lb?.pointsFootball ?? 0)
+            : (lb?.pointsRugby ?? 0);
+          const accuracy =
+            made > 0
+              ? isFootball
+                ? (lb?.accuracyFootball ?? "0%")
+                : (lb?.accuracyRugby ?? "0%")
+              : "0%";
+          return {
+            playerId,
+            nickname: nicknameById[playerId] || lb?.nickname || "Player",
+            nationality: nationalityById[playerId] || lb?.nationality,
+            points,
+            predictionsMade: made,
+            accuracy,
+            correctOutcomes: 0,
+            perfectHits: 0,
+          };
+        })
+        .sort((a, b) =>
+          a.nickname.localeCompare(b.nickname, undefined, {
+            sensitivity: "base",
+          }),
+        );
+    }
+
     return buildLeagueSportStandings({
-      memberIds: activeLeagueMembers,
+      memberIds,
       nicknameById,
       nationalityById,
       predictions: mergedPredictionRows,
@@ -132,17 +217,31 @@ export default function LeagueHubStandings({
     });
   }, [
     unlocked,
-    activeLeagueMembers,
+    isGlobal,
+    leaderboardList,
+    sportTab,
+    memberIds,
     nicknameById,
     nationalityById,
     mergedPredictionRows,
     matchesForEngine,
-    sportTab,
     horizon,
   ]);
 
+  const { visible: visibleStandings, rankById, canShowMore, additionalCount } =
+    useMemo(
+      () =>
+        selectVisibleRankedMembers(standings, user.id, {
+          isGlobal,
+          extraOthers,
+        }),
+      [standings, user.id, isGlobal, extraOthers],
+    );
+
   const sportLabel = sportTab === SportType.FOOTBALL ? "Football" : "Rugby";
-  const loading = predsLoading || matchesLoading;
+  const loading = isGlobal
+    ? membersLoading || leaderboardLoading
+    : predsLoading || matchesLoading;
 
   const horizonOptions: { id: StandingsHorizon; label: string }[] = [
     { id: "season", label: seasonHorizonLabel() },
@@ -156,7 +255,7 @@ export default function LeagueHubStandings({
         <div className="flex items-center gap-2">
           <Trophy className="w-4 h-4 text-slate-400" />
           <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono">
-            Standings
+            {isGlobal ? "Members" : "Standings"}
           </h3>
         </div>
       </div>
@@ -198,7 +297,7 @@ export default function LeagueHubStandings({
         })}
       </div>
 
-      {unlocked && (
+      {unlocked && !isGlobal && (
         <div
           role="tablist"
           aria-label="Time horizon"
@@ -247,15 +346,17 @@ export default function LeagueHubStandings({
       ) : standings.length === 0 ? (
         <div className="rounded-xl border border-slate-800/70 bg-slate-950/30 px-4 py-8 text-center">
           <p className="text-xs text-slate-500 font-mono leading-relaxed">
-            No settled {sportLabel.toLowerCase()} results in this window yet.
-            Check back after matchdays finish.
+            {isGlobal
+              ? "No members in the Global League yet."
+              : `No settled ${sportLabel.toLowerCase()} results in this window yet. Check back after matchdays finish.`}
           </p>
         </div>
       ) : (
         <div className="space-y-1.5">
-          {standings.map((member, idx) => {
+          {visibleStandings.map((member) => {
             const isMe = member.playerId === user.id;
             const userFlag = getCountryFlag(member.nationality);
+            const rank = rankById.get(member.playerId) ?? 0;
 
             return (
               <div key={member.playerId} className="group flex flex-col gap-1">
@@ -273,17 +374,19 @@ export default function LeagueHubStandings({
                       : "bg-slate-950/45 border-slate-850/60 hover:bg-slate-950/70 hover:border-slate-800"
                   }`}
                 >
-                  <div className="flex items-center gap-2 truncate">
+                  <div className="flex items-center gap-2 truncate min-w-0">
                     <span
-                      className={`font-mono text-[10px] font-black min-w-5 h-5 flex items-center justify-center rounded-full ${
-                        idx === 0
-                          ? "bg-yellow-500/20 text-yellow-300"
-                          : idx === 1
-                            ? "bg-slate-400/20 text-slate-300"
-                            : "text-slate-500"
+                      className={`font-mono text-[10px] font-black min-w-5 h-5 flex items-center justify-center rounded-full shrink-0 ${
+                        isGlobal
+                          ? "text-slate-500"
+                          : rank === 1
+                            ? "bg-yellow-500/20 text-yellow-300"
+                            : rank === 2
+                              ? "bg-slate-400/20 text-slate-300"
+                              : "text-slate-500"
                       }`}
                     >
-                      #{idx + 1}
+                      #{rank}
                     </span>
                     <span
                       className={`font-semibold text-xs truncate max-w-[110px] ${isMe ? "text-emerald-300" : "text-slate-200"}`}
@@ -370,6 +473,24 @@ export default function LeagueHubStandings({
               </div>
             );
           })}
+
+          {!isGlobal && canShowMore && (
+            <button
+              type="button"
+              onClick={() => setExtraOthers((n) => n + 10)}
+              className="w-full mt-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-slate-800 bg-slate-950/50 hover:bg-slate-900 text-[11px] font-mono font-bold uppercase tracking-wider text-slate-300 cursor-pointer transition-colors"
+            >
+              <ChevronDown className="w-3.5 h-3.5" />
+              Show More
+            </button>
+          )}
+
+          {isGlobal && additionalCount > 0 && (
+            <p className="pt-2 text-center text-[11px] font-mono text-slate-500 leading-relaxed">
+              There are {additionalCount.toLocaleString()} additional players in
+              this league.
+            </p>
+          )}
         </div>
       )}
     </div>

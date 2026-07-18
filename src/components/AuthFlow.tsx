@@ -24,95 +24,9 @@ import {
 import { UserProfile, SportType } from '../types';
 import PitchSideLogo from './PitchSideLogo';
 import { dbCreatePlayer, dbFetchPlayers, isSupabaseConfigured, supabase } from '../supabase';
-
-const NATIONS_LIST = [
-  { code: 'GB', name: 'United Kingdom', flag: '🇬🇧' },
-  { code: 'IE', name: 'Ireland', flag: '🇮🇪' },
-  { code: 'FR', name: 'France', flag: '🇫🇷' },
-  { code: 'NZ', name: 'New Zealand', flag: '🇳🇿' },
-  { code: 'AU', name: 'Australia', flag: '🇦🇺' },
-  { code: 'ZA', name: 'South Africa', flag: '🇿🇦' },
-  { code: 'US', name: 'United States', flag: '🇺🇸' },
-  { code: 'CA', name: 'Canada', flag: '🇨🇦' },
-  { code: 'IT', name: 'Italy', flag: '🇮🇹' },
-  { code: 'JP', name: 'Japan', flag: '🇯🇵' },
-  { code: 'AR', name: 'Argentina', flag: '🇦🇷' },
-  { code: 'ES', name: 'Spain', flag: '🇪🇸' },
-  { code: 'DE', name: 'Germany', flag: '🇩🇪' },
-  { code: 'BR', name: 'Brazil', flag: '🇧🇷' },
-  { code: 'NL', name: 'Netherlands', flag: '🇳🇱' },
-  { code: 'PT', name: 'Portugal', flag: '🇵🇹' },
-  { code: 'IN', name: 'India', flag: '🇮🇳' },
-  { code: 'CH', name: 'Switzerland', flag: '🇨🇭' },
-  { code: 'BE', name: 'Belgium', flag: '🇧🇪' },
-  { code: 'SE', name: 'Sweden', flag: '🇸🇪' },
-  { code: 'NO', name: 'Norway', flag: '🇳🇴' },
-  { code: 'FI', name: 'Finland', flag: '🇫🇮' },
-  { code: 'DK', name: 'Denmark', flag: '🇩🇰' },
-];
-
-const MAJOR_TEAMS_LIST = [
-  // Premier League & Major Football Clubs
-  { name: 'Arsenal', sport: 'Football', icon: '⚽' },
-  { name: 'Aston Villa', sport: 'Football', icon: '⚽' },
-  { name: 'Bournemouth', sport: 'Football', icon: '⚽' },
-  { name: 'Brentford', sport: 'Football', icon: '⚽' },
-  { name: 'Brighton & Hove Albion', sport: 'Football', icon: '⚽' },
-  { name: 'Chelsea', sport: 'Football', icon: '⚽' },
-  { name: 'Crystal Palace', sport: 'Football', icon: '⚽' },
-  { name: 'Everton', sport: 'Football', icon: '⚽' },
-  { name: 'Fulham', sport: 'Football', icon: '⚽' },
-  { name: 'Ipswich Town', sport: 'Football', icon: '⚽' },
-  { name: 'Leicester City', sport: 'Football', icon: '⚽' },
-  { name: 'Liverpool', sport: 'Football', icon: '⚽' },
-  { name: 'Manchester City', sport: 'Football', icon: '⚽' },
-  { name: 'Manchester United', sport: 'Football', icon: '⚽' },
-  { name: 'Newcastle United', sport: 'Football', icon: '⚽' },
-  { name: 'Nottingham Forest', sport: 'Football', icon: '⚽' },
-  { name: 'Southampton', sport: 'Football', icon: '⚽' },
-  { name: 'Tottenham Hotspur', sport: 'Football', icon: '⚽' },
-  { name: 'West Ham United', sport: 'Football', icon: '⚽' },
-  { name: 'Wolverhampton Wanderers', sport: 'Football', icon: '⚽' },
-  { name: 'Real Madrid', sport: 'Football', icon: '⚽' },
-  { name: 'Barcelona', sport: 'Football', icon: '⚽' },
-  { name: 'Bayern Munich', sport: 'Football', icon: '⚽' },
-  { name: 'Paris Saint-Germain', sport: 'Football', icon: '⚽' },
-  { name: 'Inter Milan', sport: 'Football', icon: '⚽' },
-  { name: 'AC Milan', sport: 'Football', icon: '⚽' },
-  { name: 'Juventus', sport: 'Football', icon: '⚽' },
-  { name: 'Celtic', sport: 'Football', icon: '⚽' },
-  { name: 'Rangers', sport: 'Football', icon: '⚽' },
-
-  // Major Rugby Unions / Teams
-  { name: 'All Blacks', sport: 'Rugby', icon: '🏉' },
-  { name: 'Springboks', sport: 'Rugby', icon: '🏉' },
-  { name: 'Wallabies', sport: 'Rugby', icon: '🏉' },
-  { name: 'England', sport: 'Rugby', icon: '🏉' },
-  { name: 'Ireland', sport: 'Rugby', icon: '🏉' },
-  { name: 'Wales', sport: 'Rugby', icon: '🏉' },
-  { name: 'Scotland', sport: 'Rugby', icon: '🏉' },
-  { name: 'France', sport: 'Rugby', icon: '🏉' },
-  { name: 'Italy', sport: 'Rugby', icon: '🏉' },
-  { name: 'Japan', sport: 'Rugby', icon: '🏉' },
-  { name: 'Los Pumas', sport: 'Rugby', icon: '🏉' },
-  { name: 'Fiji', sport: 'Rugby', icon: '🏉' },
-  { name: 'Samoa', sport: 'Rugby', icon: '🏉' },
-
-  // European Rugby Clubs
-  { name: 'Leinster', sport: 'Rugby', icon: '🏉' },
-  { name: 'Munster', sport: 'Rugby', icon: '🏉' },
-  { name: 'Saracens', sport: 'Rugby', icon: '🏉' },
-  { name: 'Leicester Tigers', sport: 'Rugby', icon: '🏉' },
-  { name: 'Toulouse', sport: 'Rugby', icon: '🏉' },
-  { name: 'La Rochelle', sport: 'Rugby', icon: '🏉' },
-  { name: 'Northampton Saints', sport: 'Rugby', icon: '🏉' },
-  { name: 'Harlequins', sport: 'Rugby', icon: '🏉' },
-  { name: 'Bath', sport: 'Rugby', icon: '🏉' },
-  { name: 'Stormers', sport: 'Rugby', icon: '🏉' },
-  { name: 'Bulls', sport: 'Rugby', icon: '🏉' },
-  { name: 'Crusaders', sport: 'Rugby', icon: '🏉' },
-  { name: 'Blues', sport: 'Rugby', icon: '🏉' },
-];
+import { NATIONS_LIST } from './AccountPortal/data';
+import CountryFlag from './CountryFlag';
+import { filterTeams, SUPPORTED_TEAMS } from '../data/supportedTeams';
 
 interface AuthFlowProps {
   onAuthSuccess: (user: UserProfile) => void;
@@ -160,7 +74,7 @@ export default function AuthFlow({ onAuthSuccess, onOpenRules, registeredUsers, 
   const handleSportChange = (sport: SportType) => {
     setPreferredSport(sport);
     const sportLabel = sport === SportType.RUGBY ? 'Rugby' : 'Football';
-    const currentTeam = MAJOR_TEAMS_LIST.find(
+    const currentTeam = SUPPORTED_TEAMS.find(
       (t) => t.name.toLowerCase() === supportedTeam.toLowerCase()
     );
     if (currentTeam && currentTeam.sport !== sportLabel) {
@@ -583,12 +497,13 @@ export default function AuthFlow({ onAuthSuccess, onOpenRules, registeredUsers, 
                         className="absolute left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-slate-950 border border-slate-800 rounded-lg shadow-2xl z-50 divide-y divide-slate-900/40 custom-scrollbar"
                       >
                         {(() => {
-                          const searched = teamSearch.trim().toLowerCase();
-                          const sportLabel = preferredSport === SportType.RUGBY ? 'Rugby' : 'Football';
-                          const filtered = MAJOR_TEAMS_LIST.filter((t) =>
-                            t.sport === sportLabel && t.name.toLowerCase().includes(searched)
+                          const sportLabel =
+                            preferredSport === SportType.RUGBY ? 'Rugby' : 'Football';
+                          const { countries, clubs } = filterTeams(
+                            sportLabel,
+                            teamSearch,
                           );
-                          if (filtered.length === 0) {
+                          if (countries.length === 0 && clubs.length === 0) {
                             return (
                               <button
                                 type="button"
@@ -599,13 +514,18 @@ export default function AuthFlow({ onAuthSuccess, onOpenRules, registeredUsers, 
                                 }}
                                 className="w-full text-left px-3.5 py-2 text-xs text-slate-400 hover:bg-slate-900/60 transition-colors cursor-pointer"
                               >
-                                Use custom team: <span className="font-bold text-white">"{teamSearch}"</span>
+                                Use custom team:{' '}
+                                <span className="font-bold text-white">"{teamSearch}"</span>
                               </button>
                             );
                           }
-                          return filtered.map((team) => (
+
+                          const renderTeamBtn = (
+                            team: (typeof countries)[number],
+                            withFlag: boolean,
+                          ) => (
                             <button
-                              key={team.name}
+                              key={`${team.category}-${team.name}`}
                               type="button"
                               onClick={() => {
                                 setSupportedTeam(team.name);
@@ -613,16 +533,46 @@ export default function AuthFlow({ onAuthSuccess, onOpenRules, registeredUsers, 
                                 setIsTeamDropdownOpen(false);
                               }}
                               className={`w-full text-left px-3.5 py-2 text-xs flex items-center justify-between transition-colors hover:bg-slate-900/60 cursor-pointer ${
-                                supportedTeam === team.name ? 'bg-slate-900 text-green-400 font-bold' : 'text-slate-300'
+                                supportedTeam === team.name
+                                  ? 'bg-slate-900 text-green-400 font-bold'
+                                  : 'text-slate-300'
                               }`}
                             >
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm">{team.icon}</span>
-                                <span className="font-sans text-xs">{team.name}</span>
+                              <div className="flex items-center gap-2 min-w-0">
+                                {withFlag ? (
+                                  <CountryFlag
+                                    code={team.countryCode}
+                                    alt={team.name}
+                                    size={18}
+                                  />
+                                ) : null}
+                                <span className="font-sans text-xs truncate">
+                                  {team.name}
+                                </span>
                               </div>
-                              <span className="text-[9px] font-mono text-slate-500 uppercase">{team.sport}</span>
                             </button>
-                          ));
+                          );
+
+                          return (
+                            <>
+                              {countries.length > 0 && (
+                                <>
+                                  <div className="sticky top-0 z-10 px-3 py-1.5 text-[9px] font-mono font-bold uppercase tracking-widest text-slate-500 bg-slate-950 border-b border-slate-900">
+                                    Countries
+                                  </div>
+                                  {countries.map((t) => renderTeamBtn(t, true))}
+                                </>
+                              )}
+                              {clubs.length > 0 && (
+                                <>
+                                  <div className="sticky top-0 z-10 px-3 py-1.5 text-[9px] font-mono font-bold uppercase tracking-widest text-slate-500 bg-slate-950 border-b border-slate-900">
+                                    Clubs
+                                  </div>
+                                  {clubs.map((t) => renderTeamBtn(t, false))}
+                                </>
+                              )}
+                            </>
+                          );
                         })()}
                       </motion.div>
                     </>

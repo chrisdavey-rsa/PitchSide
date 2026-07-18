@@ -1,49 +1,15 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { Check, Zap } from 'lucide-react';
+import CountryFlag from '../CountryFlag';
+import { getCountryCode } from '../AccountPortal/data';
 
 export const getCountryFlag = (countryName?: string): React.ReactNode => {
-  const getCountryCode = (name?: string): string => {
-    if (!name) return 'gb';
-    const c = name.toLowerCase().trim();
-    if (c === 'uk' || c === 'united kingdom' || c === 'gb' || c === 'england') return 'gb';
-    if (c === 'za' || c === 'south africa') return 'za';
-    if (c === 'nz' || c === 'new zealand') return 'nz';
-    if (c === 'au' || c === 'australia') return 'au';
-    if (c === 'ie' || c === 'ireland') return 'ie';
-    if (c === 'fr' || c === 'france') return 'fr';
-    if (c === 'it' || c === 'italy') return 'it';
-    if (c === 'jp' || c === 'japan') return 'jp';
-    if (c === 'ar' || c === 'argentina' || c === 'los pumas') return 'ar';
-    if (c === 'es' || c === 'spain') return 'es';
-    if (c === 'de' || c === 'germany') return 'de';
-    if (c === 'br' || c === 'brazil') return 'br';
-    if (c === 'us' || c === 'united states' || c === 'usa') return 'us';
-    if (c === 'ca' || c === 'canada') return 'ca';
-    if (c === 'nl' || c === 'netherlands') return 'nl';
-    if (c === 'pt' || c === 'portugal') return 'pt';
-    if (c === 'in' || c === 'india') return 'in';
-    if (c === 'ch' || c === 'switzerland') return 'ch';
-    if (c === 'be' || c === 'belgium') return 'be';
-    if (c === 'se' || c === 'sweden') return 'se';
-    if (c === 'no' || c === 'norway') return 'no';
-    if (c === 'fi' || c === 'finland') return 'fi';
-    if (c === 'dk' || c === 'denmark') return 'dk';
-    if (c === 'fiji' || c === 'fj') return 'fj';
-    if (c === 'samoa' || c === 'ws') return 'ws';
-    if (c === 'wales') return 'gb-wls';
-    if (c === 'scotland') return 'gb-sct';
-    return 'gb';
-  };
-
   return (
-    <img
-      src={`https://flagcdn.com/16x12/${getCountryCode(countryName)}.png`}
-      width="16"
-      height="12"
-      alt={countryName || 'GB'}
-      className="rounded-xs object-cover select-none inline-block align-middle"
-      referrerPolicy="no-referrer"
+    <CountryFlag
+      code={getCountryCode(countryName)}
+      alt={countryName || 'Flag'}
+      size={16}
     />
   );
 };
