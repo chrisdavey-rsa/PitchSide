@@ -26,7 +26,8 @@ import PitchSideLogo from './PitchSideLogo';
 import { dbCreatePlayer, dbFetchPlayers, isSupabaseConfigured, supabase } from '../supabase';
 import { NATIONS_LIST } from './AccountPortal/data';
 import CountryFlag from './CountryFlag';
-import { filterTeams, SUPPORTED_TEAMS } from '../data/supportedTeams';
+import { filterTeams } from '../data/supportedTeams';
+import { useTeamsCatalogQuery } from '../hooks/usePitchsideQueries';
 
 interface AuthFlowProps {
   onAuthSuccess: (user: UserProfile) => void;
@@ -69,12 +70,13 @@ export default function AuthFlow({ onAuthSuccess, onOpenRules, registeredUsers, 
   const [isTeamDropdownOpen, setIsTeamDropdownOpen] = useState(false);
   const [preferredSport, setPreferredSport] = useState<SportType>(SportType.FOOTBALL);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const { data: teamCatalog = [] } = useTeamsCatalogQuery();
 
   // Switching preferred sport clears any team that no longer matches the sport
   const handleSportChange = (sport: SportType) => {
     setPreferredSport(sport);
     const sportLabel = sport === SportType.RUGBY ? 'Rugby' : 'Football';
-    const currentTeam = SUPPORTED_TEAMS.find(
+    const currentTeam = teamCatalog.find(
       (t) => t.name.toLowerCase() === supportedTeam.toLowerCase()
     );
     if (currentTeam && currentTeam.sport !== sportLabel) {
@@ -500,6 +502,7 @@ export default function AuthFlow({ onAuthSuccess, onOpenRules, registeredUsers, 
                           const sportLabel =
                             preferredSport === SportType.RUGBY ? 'Rugby' : 'Football';
                           const { countries, clubs } = filterTeams(
+                            teamCatalog,
                             sportLabel,
                             teamSearch,
                           );

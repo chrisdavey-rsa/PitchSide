@@ -21,6 +21,8 @@ import {
 import { selectVisibleRankedMembers } from "../../lib/leagueMemberVisibility";
 import { isGlobalLeague } from "../../lib/leaguesConfig";
 import type { PredictionEntry } from "../../supabase";
+import LeaderboardPlayerLabel from "./LeaderboardPlayerLabel";
+import { SportIcon } from "../../sports/emerging";
 
 interface LeagueHubStandingsProps {
   leagueId: string;
@@ -130,6 +132,34 @@ export default function LeagueHubStandings({
     return map;
   }, [registeredUsers, memberProfiles, leaderboardList]);
 
+  const firstNameById = useMemo(() => {
+    const map: Record<string, string> = {};
+    registeredUsers.forEach((u) => {
+      if (u.firstName) map[u.id] = u.firstName;
+    });
+    memberProfiles.forEach((u) => {
+      if (u.firstName) map[u.id] = u.firstName;
+    });
+    leaderboardList.forEach((u) => {
+      if (u.firstName && !map[u.playerId]) map[u.playerId] = u.firstName;
+    });
+    return map;
+  }, [registeredUsers, memberProfiles, leaderboardList]);
+
+  const surnameById = useMemo(() => {
+    const map: Record<string, string> = {};
+    registeredUsers.forEach((u) => {
+      if (u.surname) map[u.id] = u.surname;
+    });
+    memberProfiles.forEach((u) => {
+      if (u.surname) map[u.id] = u.surname;
+    });
+    leaderboardList.forEach((u) => {
+      if (u.surname && !map[u.playerId]) map[u.playerId] = u.surname;
+    });
+    return map;
+  }, [registeredUsers, memberProfiles, leaderboardList]);
+
   /** Merge local locked picks so unlock updates immediately after submit. */
   const mergedPredictionRows = useMemo((): LeaguePredictionRow[] => {
     const rows: LeaguePredictionRow[] = predictionRows.map((r) => ({ ...r }));
@@ -191,6 +221,8 @@ export default function LeagueHubStandings({
           return {
             playerId,
             nickname: nicknameById[playerId] || lb?.nickname || "Player",
+            firstName: firstNameById[playerId] || lb?.firstName || "",
+            surname: surnameById[playerId] || lb?.surname || "",
             nationality: nationalityById[playerId] || lb?.nationality,
             points,
             predictionsMade: made,
@@ -209,6 +241,8 @@ export default function LeagueHubStandings({
     return buildLeagueSportStandings({
       memberIds,
       nicknameById,
+      firstNameById,
+      surnameById,
       nationalityById,
       predictions: mergedPredictionRows,
       matches: matchesForEngine,
@@ -222,6 +256,8 @@ export default function LeagueHubStandings({
     sportTab,
     memberIds,
     nicknameById,
+    firstNameById,
+    surnameById,
     nationalityById,
     mergedPredictionRows,
     matchesForEngine,
@@ -283,7 +319,7 @@ export default function LeagueHubStandings({
                 setSportTab(tab.id);
                 setExpandedStandingsUser(null);
               }}
-              className={`py-2.5 rounded-lg text-xs font-mono font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+              className={`flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-mono font-bold uppercase tracking-wider transition-colors cursor-pointer ${
                 active
                   ? tab.id === SportType.FOOTBALL
                     ? "bg-blue-600 text-white shadow-md"
@@ -291,6 +327,7 @@ export default function LeagueHubStandings({
                   : "text-slate-500 hover:text-slate-300 hover:bg-slate-900"
               }`}
             >
+              <SportIcon sport={tab.id} colored className="h-4 w-4" />
               {tab.label}
             </button>
           );
@@ -374,7 +411,7 @@ export default function LeagueHubStandings({
                       : "bg-slate-950/45 border-slate-850/60 hover:bg-slate-950/70 hover:border-slate-800"
                   }`}
                 >
-                  <div className="flex items-center gap-2 truncate min-w-0">
+                  <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
                     <span
                       className={`font-mono text-[10px] font-black min-w-5 h-5 flex items-center justify-center rounded-full shrink-0 ${
                         isGlobal
@@ -389,21 +426,26 @@ export default function LeagueHubStandings({
                       #{rank}
                     </span>
                     <span
-                      className={`font-semibold text-xs truncate max-w-[110px] ${isMe ? "text-emerald-300" : "text-slate-200"}`}
-                    >
-                      {member.nickname}
-                    </span>
-                    <span
-                      className="text-sm shrink-0"
+                      className="text-sm shrink-0 leading-none"
                       title={member.nationality || "United Kingdom"}
+                      aria-hidden
                     >
                       {userFlag}
                     </span>
-                    {isMe && (
-                      <span className="text-[8px] font-mono bg-emerald-500/20 text-emerald-450 font-bold px-1.5 py-0.2 rounded shrink-0">
-                        YOU
-                      </span>
-                    )}
+                    <div className="flex items-start gap-1.5 min-w-0 flex-1">
+                      <LeaderboardPlayerLabel
+                        nickname={member.nickname}
+                        firstName={member.firstName}
+                        surname={member.surname}
+                        nicknameClassName={`text-xs ${isMe ? "text-emerald-300" : "text-slate-200"}`}
+                        className="min-w-0 flex-1"
+                      />
+                      {isMe && (
+                        <span className="text-[8px] font-mono bg-emerald-500/20 text-emerald-450 font-bold px-1.5 py-0.2 rounded shrink-0 self-start mt-0.5">
+                          YOU
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex flex-col items-end gap-1 shrink-0 pr-1">

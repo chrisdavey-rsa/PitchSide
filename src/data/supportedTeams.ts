@@ -1,22 +1,25 @@
 /**
- * Supported-team catalog for signup / profile editors.
- * Writes to profiles.supported_team (client field: supportedTeam).
+ * Supported-team helpers for signup / profile editors.
+ * Primary source: public.teams (API-Sports cache). Static list is fallback only.
+ * Writes still go to profiles.supported_team (client field: supportedTeam).
  */
 
 export type TeamSport = "Football" | "Rugby";
 export type TeamCategory = "country" | "club";
 
 export interface SupportedTeamOption {
+  id?: string;
   name: string;
   sport: TeamSport;
   category: TeamCategory;
-  /** Lowercase ISO / flagcdn code — only for category === "country". */
+  /** Lowercase ISO / flagcdn code — typically for category === "country". */
   countryCode?: string;
+  apiSportsId?: number | null;
 }
 
-/** National sides (Countries) + clubs, split for the team picker UI. */
+/** Static fallback if `public.teams` is empty / unreachable. */
 export const SUPPORTED_TEAMS: SupportedTeamOption[] = [
-  // —— Football countries (World Cup relevant) ——
+  // —— Football countries ——
   { name: "England", sport: "Football", category: "country", countryCode: "gb-eng" },
   { name: "Scotland", sport: "Football", category: "country", countryCode: "gb-sct" },
   { name: "Wales", sport: "Football", category: "country", countryCode: "gb-wls" },
@@ -41,31 +44,15 @@ export const SUPPORTED_TEAMS: SupportedTeamOption[] = [
   // —— Football clubs ——
   { name: "Arsenal", sport: "Football", category: "club" },
   { name: "Aston Villa", sport: "Football", category: "club" },
-  { name: "Bournemouth", sport: "Football", category: "club" },
-  { name: "Brentford", sport: "Football", category: "club" },
-  { name: "Brighton & Hove Albion", sport: "Football", category: "club" },
   { name: "Chelsea", sport: "Football", category: "club" },
-  { name: "Crystal Palace", sport: "Football", category: "club" },
-  { name: "Everton", sport: "Football", category: "club" },
-  { name: "Fulham", sport: "Football", category: "club" },
-  { name: "Ipswich Town", sport: "Football", category: "club" },
-  { name: "Leicester City", sport: "Football", category: "club" },
   { name: "Liverpool", sport: "Football", category: "club" },
   { name: "Manchester City", sport: "Football", category: "club" },
   { name: "Manchester United", sport: "Football", category: "club" },
-  { name: "Newcastle United", sport: "Football", category: "club" },
-  { name: "Nottingham Forest", sport: "Football", category: "club" },
-  { name: "Southampton", sport: "Football", category: "club" },
   { name: "Tottenham Hotspur", sport: "Football", category: "club" },
-  { name: "West Ham United", sport: "Football", category: "club" },
-  { name: "Wolverhampton Wanderers", sport: "Football", category: "club" },
   { name: "Real Madrid", sport: "Football", category: "club" },
   { name: "Barcelona", sport: "Football", category: "club" },
   { name: "Bayern Munich", sport: "Football", category: "club" },
   { name: "Paris Saint-Germain", sport: "Football", category: "club" },
-  { name: "Inter Milan", sport: "Football", category: "club" },
-  { name: "AC Milan", sport: "Football", category: "club" },
-  { name: "Juventus", sport: "Football", category: "club" },
   { name: "Celtic", sport: "Football", category: "club" },
   { name: "Rangers", sport: "Football", category: "club" },
 
@@ -82,7 +69,6 @@ export const SUPPORTED_TEAMS: SupportedTeamOption[] = [
   { name: "Japan", sport: "Rugby", category: "country", countryCode: "jp" },
   { name: "Los Pumas", sport: "Rugby", category: "country", countryCode: "ar" },
   { name: "Fiji", sport: "Rugby", category: "country", countryCode: "fj" },
-  { name: "Samoa", sport: "Rugby", category: "country", countryCode: "ws" },
 
   // —— Rugby clubs ——
   { name: "Leinster", sport: "Rugby", category: "club" },
@@ -91,29 +77,39 @@ export const SUPPORTED_TEAMS: SupportedTeamOption[] = [
   { name: "Leicester Tigers", sport: "Rugby", category: "club" },
   { name: "Toulouse", sport: "Rugby", category: "club" },
   { name: "La Rochelle", sport: "Rugby", category: "club" },
-  { name: "Northampton Saints", sport: "Rugby", category: "club" },
-  { name: "Harlequins", sport: "Rugby", category: "club" },
-  { name: "Bath", sport: "Rugby", category: "club" },
   { name: "Stormers", sport: "Rugby", category: "club" },
-  { name: "Bulls", sport: "Rugby", category: "club" },
   { name: "Crusaders", sport: "Rugby", category: "club" },
-  { name: "Blues", sport: "Rugby", category: "club" },
 ];
 
-export function teamsForSport(sport: TeamSport): SupportedTeamOption[] {
-  return SUPPORTED_TEAMS.filter((t) => t.sport === sport);
+export function sportLabelToDb(sport: TeamSport): "football" | "rugby" {
+  return sport === "Rugby" ? "rugby" : "football";
+}
+
+export function teamsForSport(
+  catalog: SupportedTeamOption[],
+  sport: TeamSport,
+): SupportedTeamOption[] {
+  return catalog.filter((t) => t.sport === sport);
 }
 
 export function filterTeams(
+  catalog: SupportedTeamOption[],
   sport: TeamSport,
   search: string,
 ): { countries: SupportedTeamOption[]; clubs: SupportedTeamOption[] } {
   const q = search.trim().toLowerCase();
-  const list = teamsForSport(sport).filter(
+  const list = teamsForSport(catalog, sport).filter(
     (t) => !q || t.name.toLowerCase().includes(q),
   );
   return {
     countries: list.filter((t) => t.category === "country"),
     clubs: list.filter((t) => t.category === "club"),
   };
+}
+
+/** Prefer DB catalog; fall back to static list when empty. */
+export function resolveTeamCatalog(
+  dbTeams: SupportedTeamOption[] | undefined,
+): SupportedTeamOption[] {
+  return dbTeams && dbTeams.length > 0 ? dbTeams : SUPPORTED_TEAMS;
 }

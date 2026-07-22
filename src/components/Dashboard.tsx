@@ -60,7 +60,7 @@ import { getCompetitions } from "../competitions";
 import { getLatestSeason } from "../seasons";
 import { isGlobalLeague } from "../lib/leaguesConfig";
 import { calculatePoints, computeWeeklyStreak } from "../utils";
-import TopNavigation from './Dashboard/TopNavigation';
+import TopNavigation, { type DesktopMainView } from './Dashboard/TopNavigation';
 import WelcomeHeader from './Dashboard/WelcomeHeader';
 import type { LeaderboardScope } from './Dashboard/leaderboardTypes';
 import LeagueHub from './Dashboard/LeagueHub';
@@ -76,6 +76,11 @@ import CommunityShieldEvent, {
 import AccountPortal from './AccountPortal';
 import RulesInfo from './RulesInfo';
 import { RadialOrigin } from '../radial';
+import {
+  isSportAccessible,
+  useUserRole,
+  type SportKey,
+} from '../sports/emerging';
 
 const MOBILE_MQ = "(max-width: 767px)";
 
@@ -128,7 +133,26 @@ export default function Dashboard({
 
   const isSandbox =
     !user || !user.id || user.id.startsWith("usr_") || user.id === "user-admin";
+  const userRole = useUserRole(user?.id, user?.isAdmin);
+  /** Unified workspace switcher (football | rugby | golf | formula1). */
+  const [activeSport, setActiveSport] = useState<SportKey>(
+    () => (user?.preferredSport as SportKey | undefined) ?? "football",
+  );
+  /** Core match-filter sport — kept when browsing Golf/F1 so Football/Rugby hooks stay stable. */
   const [selectedSport, setSelectedSport] = useState<SportType | null>(user?.preferredSport ?? null);
+  const [desktopMainView, setDesktopMainView] =
+    useState<DesktopMainView>("predictions");
+  const predictionsAnchorDesktopRef = useRef<HTMLDivElement>(null);
+  const predictionsAnchorMobileRef = useRef<HTMLDivElement>(null);
+
+  // Players cannot linger on Golf/F1 if role resolves to non-admin.
+  useEffect(() => {
+    if (!isSportAccessible(activeSport, userRole)) {
+      const fallback = selectedSport ?? SportType.FOOTBALL;
+      setActiveSport(fallback);
+    }
+  }, [activeSport, userRole, selectedSport]);
+
   // Default the consolidated leaderboard to the user's preferred sport so the
   // first thing they see is relevant to them.
   const [globalLeaderboardSport, setGlobalLeaderboardSport] = useState<SportType>(
@@ -244,7 +268,9 @@ export default function Dashboard({
   useEffect(() => {
     if (!showOnboarding) return;
     if (!selectedSport) {
-      setSelectedSport(user.preferredSport ?? SportType.FOOTBALL);
+      const core = user.preferredSport ?? SportType.FOOTBALL;
+      setSelectedSport(core);
+      setActiveSport(core);
     }
     if (isMobileLayout) {
       setMobileNavTab("predictions");
@@ -337,7 +363,9 @@ export default function Dashboard({
     setActiveLeagueId(null);
     setMobileNavTab(tab);
     if (tab === "predictions" && !selectedSport) {
-      setSelectedSport(user.preferredSport ?? SportType.FOOTBALL);
+      const core = user.preferredSport ?? SportType.FOOTBALL;
+      setSelectedSport(core);
+      setActiveSport(core);
     }
   };
 
@@ -379,7 +407,20 @@ export default function Dashboard({
     }
   }, [user?.id, communityShieldScheduled]);
 
-  const { data: leaderboardList = [] } = useLeaderboardQuery(user?.id, allMatches);
+  const { data: rawLeaderboardList = [] } = useLeaderboardQuery(user?.id, allMatches);
+  /** Fill first/surname from profiles when RPC hasn't been migrated yet. */
+  const leaderboardList = useMemo(() => {
+    const byId = new Map(registeredUsers.map((u) => [u.id, u]));
+    return rawLeaderboardList.map((row) => {
+      const profile = byId.get(row.playerId);
+      if (!profile) return row;
+      return {
+        ...row,
+        firstName: row.firstName || profile.firstName || "",
+        surname: row.surname || profile.surname || "",
+      };
+    });
+  }, [rawLeaderboardList, registeredUsers]);
   const { data: liveProvisionalByUser = {} } = useLiveProvisionalQuery(allMatches);
 
   const [predictions, setPredictions] = useState<
@@ -538,14 +579,29 @@ export default function Dashboard({
 
   const handleSelectSport = useCallback((sport: SportType) => {
     setActiveLeagueId(null);
+    setActiveSport(sport);
     setSelectedSport(sport);
     setGlobalLeaderboardSport(sport);
     const comps = activeCompetitionsToCatalog(activeCompetitions, sport);
     setSelectedCompId(comps[0]?.id ?? null);
-    requestAnimationFrame(() => {
-      document.getElementById("tour-match-predictor")?.scrollIntoView({ block: "start" });
-    });
   }, [activeCompetitions]);
+
+  /** Workspace switcher: core sports keep match filters; Golf/F1 swap the predictions pane only. */
+  const handleSelectActiveSport = useCallback(
+    (sport: SportKey) => {
+      if (!isSportAccessible(sport, userRole)) return;
+      setActiveLeagueId(null);
+      setMobileNavTab("predictions");
+      setDesktopMainView("predictions");
+      setActiveSport(sport);
+      if (sport === "football" || sport === "rugby") {
+        handleSelectSport(
+          sport === "football" ? SportType.FOOTBALL : SportType.RUGBY,
+        );
+      }
+    },
+    [handleSelectSport, userRole],
+  );
 
   // Desktop leagues modal + confirm dialogs only (mobile tabs are not overlays)
   useBodyScrollLock(showLeagues || !!leagueToLeave);
@@ -1170,18 +1226,19 @@ export default function Dashboard({
         onOpenAdmin={onOpenAdmin}
         onOpenAccount={onOpenAccount}
         onOpenLeagues={openLeaguesModal}
-        onSelectSport={(sport) => {
-          handleSelectSport(sport);
-          setActiveLeagueId(null);
-          setMobileNavTab("predictions");
-        }}
-        selectedSport={selectedSport}
+        onSelectSport={handleSelectActiveSport}
+        selectedSport={activeSport}
+        desktopMainView={desktopMainView}
+        onSelectDesktopView={setDesktopMainView}
         isUserInAnyLeague={isUserInAnyLeague}
         forceSettingsOpen={tourForceSettings}
         onResetState={() => {
           setActiveLeagueId(null);
           setMobileNavTab("predictions");
-          setSelectedSport(user.preferredSport ?? SportType.FOOTBALL);
+          setDesktopMainView("predictions");
+          const core = user.preferredSport ?? SportType.FOOTBALL;
+          setSelectedSport(core);
+          setActiveSport(core);
           setSelectedCompId(null);
         }}
       />
@@ -1236,8 +1293,8 @@ export default function Dashboard({
           />
       ) : (
         <>
-          {/* Desktop: unified Leagues + Predictions + Leaderboards on one screen */}
-          <div className="hidden md:flex md:flex-col gap-6">
+          {/* Desktop: Predictions workspace (2/3 + 1/3) or full Leaderboards */}
+          <div className="hidden md:block w-full space-y-6">
             <WelcomeHeader
               user={user}
               userPoints={userPoints}
@@ -1246,28 +1303,7 @@ export default function Dashboard({
               weeklyStreak={weeklyStreak}
               isUserInAnyLeague={isUserInAnyLeague}
             />
-            <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)] gap-6 items-start">
-              <PredictionsPage
-                user={user}
-                isUserInAnyLeague={isUserInAnyLeague}
-                selectedSport={selectedSport}
-                setSelectedSport={setSelectedSport}
-                selectedCompId={selectedCompId}
-                setSelectedCompId={setSelectedCompId}
-                allMatches={allMatches}
-                sortedActiveMatches={sortedActiveMatches}
-                activeMatches={activeMatches}
-                filteredCompetitions={filteredCompetitions}
-                selectedCompetition={selectedCompetition}
-                predictions={predictions}
-                isEmailVerified={authStatus.isVerified}
-                seenFeatures={user.seenFeatures}
-                onFeatureSeen={markFeatureSeen}
-                onScoreChange={handleScoreChange}
-                onRugbyPredictionChange={handleRugbyPredictionChange}
-                onSubmitPrediction={submitPrediction}
-                onOpenLeagues={() => openLeaguesModal()}
-              />
+            {desktopMainView === "leaderboards" ? (
               <LeaderboardsPage
                 user={user}
                 leaderboardList={
@@ -1287,18 +1323,121 @@ export default function Dashboard({
                 leagueName={targetPrivateLeague?.name}
                 leagueSeasonRows={leagueLeaderboard}
                 globalSeasonRows={displayLeaderboard}
+                showEmergingSportTabs
               />
-            </div>
+            ) : activeSport === "formula1" ? (
+              <div
+                ref={predictionsAnchorDesktopRef}
+                id="predictions-workspace-anchor"
+                className="scroll-mt-4 w-full"
+              >
+                <PredictionsPage
+                  user={user}
+                  isUserInAnyLeague={isUserInAnyLeague}
+                  activeSport={activeSport}
+                  setActiveSport={handleSelectActiveSport}
+                  selectedSport={selectedSport}
+                  setSelectedSport={(sport) => {
+                    if (sport) handleSelectSport(sport);
+                    else setSelectedSport(null);
+                  }}
+                  selectedCompId={selectedCompId}
+                  setSelectedCompId={setSelectedCompId}
+                  allMatches={allMatches}
+                  sortedActiveMatches={sortedActiveMatches}
+                  activeMatches={activeMatches}
+                  filteredCompetitions={filteredCompetitions}
+                  selectedCompetition={selectedCompetition}
+                  predictions={predictions}
+                  isEmailVerified={authStatus.isVerified}
+                  seenFeatures={user.seenFeatures}
+                  onFeatureSeen={markFeatureSeen}
+                  onScoreChange={handleScoreChange}
+                  onRugbyPredictionChange={handleRugbyPredictionChange}
+                  onSubmitPrediction={submitPrediction}
+                  onOpenLeagues={() => openLeaguesModal()}
+                />
+              </div>
+            ) : (
+              <div className="w-full grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+                <div
+                  ref={predictionsAnchorDesktopRef}
+                  id="predictions-workspace-anchor"
+                  className="scroll-mt-4 w-full lg:col-span-2"
+                >
+                  <PredictionsPage
+                    user={user}
+                    isUserInAnyLeague={isUserInAnyLeague}
+                    activeSport={activeSport}
+                    setActiveSport={handleSelectActiveSport}
+                    selectedSport={selectedSport}
+                    setSelectedSport={(sport) => {
+                      if (sport) handleSelectSport(sport);
+                      else setSelectedSport(null);
+                    }}
+                    selectedCompId={selectedCompId}
+                    setSelectedCompId={setSelectedCompId}
+                    allMatches={allMatches}
+                    sortedActiveMatches={sortedActiveMatches}
+                    activeMatches={activeMatches}
+                    filteredCompetitions={filteredCompetitions}
+                    selectedCompetition={selectedCompetition}
+                    predictions={predictions}
+                    isEmailVerified={authStatus.isVerified}
+                    seenFeatures={user.seenFeatures}
+                    onFeatureSeen={markFeatureSeen}
+                    onScoreChange={handleScoreChange}
+                    onRugbyPredictionChange={handleRugbyPredictionChange}
+                    onSubmitPrediction={submitPrediction}
+                    onOpenLeagues={() => openLeaguesModal()}
+                  />
+                </div>
+                <div className="lg:col-span-1 w-full">
+                  <LeaderboardsPage
+                    user={user}
+                    leaderboardList={
+                      leaderboardScope === "league" && targetPrivateLeague
+                        ? leaderboardList.filter((r) =>
+                            (
+                              leaguesMembership[targetPrivateLeague.id] || []
+                            ).includes(r.playerId),
+                          )
+                        : leaderboardList
+                    }
+                    allMatches={allMatches}
+                    provisionalByUser={liveProvisionalByUser}
+                    scope={leaderboardScope}
+                    setScope={setLeaderboardScope}
+                    hasPrivateLeague={privateLeagues.length > 0}
+                    leagueName={targetPrivateLeague?.name}
+                    leagueSeasonRows={leagueLeaderboard}
+                    globalSeasonRows={displayLeaderboard}
+                    activeSport={activeSport}
+                    syncSportFromParent
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Mobile: true tab router — one viewport, no overlays */}
           <div className="md:hidden space-y-4">
             {mobileNavTab === "predictions" && (
+              <div
+                ref={predictionsAnchorMobileRef}
+                id="predictions-workspace-anchor-mobile"
+                className="scroll-mt-4"
+              >
               <PredictionsPage
                 user={user}
                 isUserInAnyLeague={isUserInAnyLeague}
+                activeSport={activeSport}
+                setActiveSport={handleSelectActiveSport}
                 selectedSport={selectedSport}
-                setSelectedSport={setSelectedSport}
+                setSelectedSport={(sport) => {
+                  if (sport) handleSelectSport(sport);
+                  else setSelectedSport(null);
+                }}
                 selectedCompId={selectedCompId}
                 setSelectedCompId={setSelectedCompId}
                 allMatches={allMatches}
@@ -1315,6 +1454,7 @@ export default function Dashboard({
                 onSubmitPrediction={submitPrediction}
                 onOpenLeagues={() => handleMobileNavTab("leagues")}
               />
+              </div>
             )}
 
             {mobileNavTab === "leaderboards" && (
@@ -1337,6 +1477,7 @@ export default function Dashboard({
                 leagueName={targetPrivateLeague?.name}
                 leagueSeasonRows={leagueLeaderboard}
                 globalSeasonRows={displayLeaderboard}
+                showEmergingSportTabs
               />
             )}
 

@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   dbFetchMatches,
   dbFetchActiveCompetitions,
@@ -11,16 +12,36 @@ import {
   dbFetchLiveProvisionalMatrix,
   sumLiveProvisionalMatrix,
   dbFetchGlobalLeaderboard,
+  dbFetchTeams,
   MATCH_HORIZON_DAYS,
   type LeaderboardRecord,
 } from '../supabase';
 import { queryKeys } from '../lib/queryKeys';
+import { acquireMatchesRealtime } from '../lib/matchesRealtime';
 import { Match, SportType, Competition, ActiveCompetition } from '../types';
+import { resolveTeamCatalog, SUPPORTED_TEAMS } from '../data/supportedTeams';
+
+/**
+ * Silent Realtime → React Query bridge for live scores.
+ * Refcounted: many components can call useMatchesQuery; one channel is shared.
+ */
+function useMatchesRealtimeSync() {
+  const queryClient = useQueryClient();
+
+  useEffect(() => acquireMatchesRealtime(queryClient), [queryClient]);
+}
 
 export function useMatchesQuery() {
+  useMatchesRealtimeSync();
+
   return useQuery({
     queryKey: queryKeys.matches,
     queryFn: () => dbFetchMatches({ horizonDays: MATCH_HORIZON_DAYS }),
+    // Live fields arrive via Realtime patches — avoid focus/reconnect refetches
+    // that would look like loading flashes during a match.
+    staleTime: 5 * 60_000,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
   });
 }
 
@@ -104,6 +125,17 @@ export function useLeaderboardQuery(currentUserId?: string, matches: Match[] = [
   return useQuery({
     queryKey: queryKeys.leaderboard,
     queryFn: () => dbFetchGlobalLeaderboard(currentUserId, matches),
+  });
+}
+
+/** Cached teams catalog for profile / signup selectors (falls back to static list). */
+export function useTeamsCatalogQuery() {
+  return useQuery({
+    queryKey: queryKeys.teams,
+    queryFn: dbFetchTeams,
+    staleTime: 60 * 60 * 1000,
+    placeholderData: SUPPORTED_TEAMS,
+    select: (rows) => resolveTeamCatalog(rows),
   });
 }
 

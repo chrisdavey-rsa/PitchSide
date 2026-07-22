@@ -1,19 +1,20 @@
 // ============================================================================
 // sync-schedule — API-Sports schedule ingestion (Phase 1)
 // ----------------------------------------------------------------------------
-// Fetches fixtures from API-Sports for a given sport + date and upserts them
-// into public.matches, keyed on a stable `<sport>-<apiId>` id.
+// ONE date-only call per sport: GET /fixtures?date=X or /games?date=X
+// (no league, no season). Free plan returns current-season fixtures inside the
+// ~yesterday..tomorrow window. Filter to LEAGUE_CATALOG client-side.
 //
 // Invoke (POST):
 //   { "sport": "football" | "rugby", "date": "YYYY-MM-DD" (optional) }
-//
-// Required secrets (Deno.env):
-//   API_SPORTS_KEY               — your API-Sports key
-//   SUPABASE_URL                 — project URL (auto-injected on deploy)
-//   SUPABASE_SERVICE_ROLE_KEY    — service role key (auto-injected on deploy)
 // ============================================================================
 
 import { createClient } from "@supabase/supabase-js";
+import {
+  ApiSportsClient,
+  DAILY_BUDGET_CAP,
+  type Sport,
+} from "../_shared/apiSportsClient.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -22,25 +23,39 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-// API-Sports endpoints per sport. Host + base URL differ between sports.
-const API_CONFIG: Record<
-  "football" | "rugby",
-  { url: string }
-> = {
-  football: { url: "https://v3.football.api-sports.io/fixtures" },
-  rugby: { url: "v1.rugby.api-sports.io/games" },
-};
-
-// Status codes that mean the match is finished (points can be settled).
 const FINISHED_STATUSES = new Set([
-  "FT", // Full time
-  "AET", // After extra time
-  "PEN", // Penalties
-  "AWD", // Awarded
-  "WO", // Walkover
+  "FT",
+  "AET",
+  "PEN",
+  "AWD",
+  "WO",
 ]);
 
-type Sport = "football" | "rugby";
+/** ONLY these league IDs are ingested (must match seed-full). */
+const LEAGUE_CATALOG: Record<Sport, ReadonlySet<number>> = {
+  football: new Set([39, 40, 179, 45, 2, 3, 1, 48, 52]),
+  rugby: new Set([13, 16, 22, 14, 15, 26, 19, 10]),
+};
+
+const SLUG_BY_SPORT_AND_API: Record<string, string> = {
+  "football:39": "f-epl",
+  "football:40": "f-championship",
+  "football:179": "f-spfl",
+  "football:45": "f-facup",
+  "football:48": "f-eflcup",
+  "football:2": "f-ucl",
+  "football:3": "f-uel",
+  "football:1": "f-worldcup",
+  "football:52": "f-shield",
+  "rugby:13": "r-top14",
+  "rugby:16": "r-prem",
+  "rugby:26": "r-urc",
+  "rugby:22": "r-sixnations",
+  "rugby:14": "r-championship",
+  "rugby:15": "r-nations",
+  "rugby:19": "r-heineken",
+  "rugby:10": "r-worldcup",
+};
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -50,16 +65,17 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function todayUtc(): string {
-  return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  return new Date().toISOString().slice(0, 10);
 }
 
-/**
- * Normalizes a single API-Sports fixture into a public.matches row.
- * Handles both the football shape (nested under `fixture`) and the rugby shape
- * (fields at the top level), falling back gracefully between them.
- */
+function competitionId(sport: Sport, leagueId: unknown): string | null {
+  if (leagueId == null) return null;
+  const n = Number(leagueId);
+  if (!Number.isFinite(n)) return String(leagueId);
+  return SLUG_BY_SPORT_AND_API[`${sport}:${n}`] || `${sport}-${n}`;
+}
+
 function normalizeFixture(sport: Sport, item: any) {
-  // Football nests fixture metadata under `fixture`; rugby is flat.
   const fixture = item.fixture ?? item;
   const league = item.league ?? {};
   const teams = item.teams ?? {};
@@ -73,7 +89,7 @@ function normalizeFixture(sport: Sport, item: any) {
 
   return {
     id: `${sport}-${apiId}`,
-    competition_id: league.id != null ? String(league.id) : null,
+    competition_id: competitionId(sport, league.id),
     competition_name: league.name ?? item.league?.name ?? null,
     sport,
     home_team: teams.home?.name ?? null,
@@ -94,7 +110,6 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: "Method not allowed. Use POST." }, 405);
   }
 
-  // ---- Validate secrets ----------------------------------------------------
   const apiKey = Deno.env.get("API_SPORTS_KEY");
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -109,7 +124,6 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  // ---- Parse & validate payload -------------------------------------------
   let payload: { sport?: string; date?: string };
   try {
     payload = await req.json();
@@ -125,55 +139,87 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  const date = payload.date && /^\d{4}-\d{2}-\d{2}$/.test(payload.date)
-    ? payload.date
-    : todayUtc();
+  const date =
+    payload.date && /^\d{4}-\d{2}-\d{2}$/.test(payload.date)
+      ? payload.date
+      : todayUtc();
 
-  // ---- Fetch from API-Sports ----------------------------------------------
-  const endpoint = `${API_CONFIG[sport].url}?date=${date}`;
+  const supabase = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false },
+  });
 
-  let apiJson: any;
-  try {
-    const apiRes = await fetch(endpoint, {
-      headers: { "x-apisports-key": apiKey },
-    });
-    apiJson = await apiRes.json();
-    if (!apiRes.ok) {
+  const client = new ApiSportsClient({
+    supabase,
+    apiKey,
+    caller: "sync-schedule",
+    budgetCap: DAILY_BUDGET_CAP,
+  });
+
+  const path = sport === "football" ? "/fixtures" : "/games";
+  const label = `schedule ${sport} date=${date} (date-only)`;
+  // Bare date= — no league/season. Current-season data; filter to catalog.
+  const result = await client.get(sport, path, { date }, label);
+
+  if (!result.ok) {
+    if (result.reason === "budget_exhausted") {
+      client.logRunSummary({ sport, date, skipped: true });
       return jsonResponse(
-        { error: "API-Sports request failed.", status: apiRes.status, detail: apiJson },
+        {
+          error: "budget_exhausted",
+          message: result.message,
+          callsMadeToday: result.callsMadeToday,
+          budget: DAILY_BUDGET_CAP,
+        },
+        429,
+      );
+    }
+    if (result.reason === "plan_blocked") {
+      client.logRunSummary({ sport, date, planBlocked: true });
+      return jsonResponse(
+        { error: "API-Sports plan blocked.", detail: result.message },
         502,
       );
     }
-  } catch (err) {
+    if (result.reason === "validation_error") {
+      return jsonResponse(
+        { error: "API-Sports validation error.", detail: result.message },
+        400,
+      );
+    }
     return jsonResponse(
-      { error: "Failed to reach API-Sports.", detail: String(err) },
+      { error: "API-Sports request failed.", detail: result.message },
       502,
     );
   }
 
-  // API-Sports returns validation problems in an `errors` field (often an
-  // object or array). Surface them rather than silently upserting nothing.
-  const apiErrors = apiJson?.errors;
-  const hasApiErrors = apiErrors &&
-    ((Array.isArray(apiErrors) && apiErrors.length > 0) ||
-      (typeof apiErrors === "object" && Object.keys(apiErrors).length > 0));
-  if (hasApiErrors) {
-    return jsonResponse({ error: "API-Sports returned errors.", detail: apiErrors }, 502);
-  }
-
-  const fixtures: any[] = Array.isArray(apiJson?.response) ? apiJson.response : [];
-  const rows = fixtures
+  const fixtures: any[] = Array.isArray(result.json?.response)
+    ? result.json.response
+    : [];
+  const catalog = LEAGUE_CATALOG[sport];
+  const catalogFixtures = fixtures.filter((item) => {
+    const leagueId = Number(item?.league?.id ?? item?.league_id);
+    return Number.isFinite(leagueId) && catalog.has(leagueId);
+  });
+  const rows = catalogFixtures
     .map((item) => normalizeFixture(sport, item))
     .filter((row) => row.id && row.home_team && row.away_team);
 
   if (rows.length === 0) {
-    return jsonResponse({ sport, date, fetched: fixtures.length, upserted: 0 });
+    client.logRunSummary({
+      sport,
+      date,
+      fetched: fixtures.length,
+      catalog: catalogFixtures.length,
+      upserted: 0,
+    });
+    return jsonResponse({
+      sport,
+      date,
+      fetched: fixtures.length,
+      catalog: catalogFixtures.length,
+      upserted: 0,
+    });
   }
-
-  // ---- Upsert into public.matches (service role bypasses RLS) --------------
-  const supabase = createClient(supabaseUrl, serviceRoleKey, {
-    auth: { persistSession: false },
-  });
 
   const { error } = await supabase
     .from("matches")
@@ -186,10 +232,26 @@ Deno.serve(async (req: Request) => {
     );
   }
 
+  const usage = await client.getUsageToday(sport).catch(() => null);
+  client.logRunSummary({
+    sport,
+    date,
+    fetched: fixtures.length,
+    catalog: catalogFixtures.length,
+    upserted: rows.length,
+    callsMadeToday: usage?.calls_made ?? null,
+    remainingBudget:
+      usage != null ? Math.max(0, DAILY_BUDGET_CAP - usage.calls_made) : null,
+  });
+
   return jsonResponse({
     sport,
     date,
     fetched: fixtures.length,
+    catalog: catalogFixtures.length,
     upserted: rows.length,
+    callsThisRun: client.stats.callsThisRun,
+    callsMadeToday: usage?.calls_made ?? null,
+    budget: DAILY_BUDGET_CAP,
   });
 });

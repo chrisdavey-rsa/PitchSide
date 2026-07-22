@@ -16,6 +16,8 @@ import {
 } from "../../leagues";
 import { getAvailableSeasons } from "../../seasons";
 import { isGlobalLeague } from "../../lib/leaguesConfig";
+import { getCountryFlag } from "./shared";
+import LeaderboardPlayerLabel from "./LeaderboardPlayerLabel";
 
 type LeagueMemberDisplay = LeaderboardRecord & {
   displayPoints: number;
@@ -266,15 +268,26 @@ export default function LeagueManagementPanel({
                           key={member.playerId}
                           className={`flex items-center justify-between px-2 py-1 text-xs rounded-sm ${isMe ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20" : "bg-slate-950/25 border border-slate-900/40"}`}
                         >
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0 flex-1 mr-2">
                             <span
-                              className={`font-bold font-mono text-[10px] w-4 ${i === 0 ? "text-yellow-400" : i === 1 ? "text-slate-400" : "text-slate-600"}`}
+                              className={`font-bold font-mono text-[10px] w-4 shrink-0 ${i === 0 ? "text-yellow-400" : i === 1 ? "text-slate-400" : "text-slate-600"}`}
                             >
                               {i + 1}
                             </span>
-                            <span className="font-semibold truncate max-w-[110px]">
-                              {member.nickname}
+                            <span
+                              className="text-sm shrink-0 leading-none"
+                              title={member.nationality || "United Kingdom"}
+                              aria-hidden
+                            >
+                              {getCountryFlag(member.nationality)}
                             </span>
+                            <LeaderboardPlayerLabel
+                              nickname={member.nickname}
+                              firstName={member.firstName}
+                              surname={member.surname}
+                              nicknameClassName="text-xs"
+                              className="min-w-0 max-w-[96px]"
+                            />
                           </div>
                           <span className="font-bold font-mono text-white">
                             {member.displayPoints} pts

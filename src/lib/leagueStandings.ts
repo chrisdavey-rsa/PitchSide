@@ -22,6 +22,8 @@ export type LeaguePredictionRow = {
 export type LeagueStandingRow = {
   playerId: string;
   nickname: string;
+  firstName?: string;
+  surname?: string;
   nationality?: string;
   points: number;
   predictionsMade: number;
@@ -102,6 +104,8 @@ export function countSubmittedForSport(
 export function buildLeagueSportStandings(options: {
   memberIds: string[];
   nicknameById: Record<string, string>;
+  firstNameById?: Record<string, string>;
+  surnameById?: Record<string, string>;
   nationalityById?: Record<string, string>;
   predictions: LeaguePredictionRow[];
   matches: Match[];
@@ -112,6 +116,8 @@ export function buildLeagueSportStandings(options: {
   const {
     memberIds,
     nicknameById,
+    firstNameById = {},
+    surnameById = {},
     nationalityById = {},
     predictions,
     matches,
@@ -173,6 +179,8 @@ export function buildLeagueSportStandings(options: {
     rows.push({
       playerId,
       nickname: nicknameById[playerId] || "Player",
+      firstName: firstNameById[playerId] || "",
+      surname: surnameById[playerId] || "",
       nationality: nationalityById[playerId],
       points: stats.points,
       predictionsMade: stats.made,

@@ -1,8 +1,9 @@
 // ============================================================================
 // sync-settlement — API-Sports final score ingestion + automated grading (Phase 3)
 // ----------------------------------------------------------------------------
-// Fetches fixtures for a given date, settles completed matches with final
-// scores, then grades all linked predictions server-side (with multiplier).
+// Fetches fixtures via ONE date-only call (GET /fixtures?date=X or /games?date=X —
+// no league/season), filters to LEAGUE_CATALOG, settles completed matches, then
+// grades linked predictions server-side (with multiplier).
 //
 // Invoke (POST):
 //   { "sport": "football" | "rugby", "date": "YYYY-MM-DD" (optional) }
@@ -14,17 +15,17 @@
 // ============================================================================
 
 import { createClient } from "@supabase/supabase-js";
+import {
+  ApiSportsClient,
+  DAILY_BUDGET_CAP,
+  type Sport as SharedSport,
+} from "../_shared/apiSportsClient.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
-const API_CONFIG: Record<"football" | "rugby", { url: string }> = {
-  football: { url: "https://v3.football.api-sports.io/fixtures" },
-  rugby: { url: "https://v1.rugby.api-sports.io/games" },
 };
 
 const FOOTBALL_FINISHED = new Set(["FT", "AET", "PEN", "AWD", "WO"]);
@@ -38,6 +39,12 @@ const RUGBY_FINISHED = new Set([
 ]);
 
 type Sport = "football" | "rugby";
+
+/** ONLY these league IDs are settled (must match seed-full / sync-schedule). */
+const LEAGUE_CATALOG: Record<Sport, ReadonlySet<number>> = {
+  football: new Set([39, 40, 179, 45, 2, 3, 1, 48, 52]),
+  rugby: new Set([13, 16, 22, 14, 15, 26, 19, 10]),
+};
 
 interface FinalScores {
   home: number;
@@ -259,50 +266,101 @@ Deno.serve(async (req: Request) => {
     ? payload.date
     : todayUtc();
 
-  const endpoint = `${API_CONFIG[sport].url}?date=${date}`;
+  const supabase = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false },
+  });
 
-  let apiJson: any;
-  try {
-    const apiRes = await fetch(endpoint, {
-      headers: { "x-apisports-key": apiKey },
+  // Skip API call when nothing in DB could need grading.
+  const nowIso = new Date().toISOString();
+  const { count: liveCount } = await supabase
+    .from("matches")
+    .select("id", { count: "exact", head: true })
+    .eq("sport", sport)
+    .eq("status", "live");
+  const { count: overdueCount } = await supabase
+    .from("matches")
+    .select("id", { count: "exact", head: true })
+    .eq("sport", sport)
+    .neq("status", "completed")
+    .lt("kickoff_time", nowIso);
+
+  if ((liveCount ?? 0) === 0 && (overdueCount ?? 0) === 0) {
+    console.log(
+      `[sync-settlement] Skipping ${sport} — no pending matches in DB`,
+    );
+    return jsonResponse({
+      sport,
+      date,
+      skipped: "nothing_pending",
+      fetched: 0,
+      completed: 0,
+      matches_settled: 0,
+      predictions_graded: 0,
+      budget: DAILY_BUDGET_CAP,
     });
-    apiJson = await apiRes.json();
-    if (!apiRes.ok) {
+  }
+
+  const client = new ApiSportsClient({
+    supabase,
+    apiKey,
+    caller: "sync-settlement",
+    budgetCap: DAILY_BUDGET_CAP,
+  });
+
+  const path = sport === "football" ? "/fixtures" : "/games";
+  const label = `settlement ${sport} date=${date} (date-only)`;
+  // Bare date= — no league/season. Current-season finals inside free date window.
+  const result = await client.get(sport as SharedSport, path, { date }, label);
+
+  if (!result.ok) {
+    if (result.reason === "budget_exhausted") {
+      client.logRunSummary({ sport, date, skipped: "budget_exhausted" });
       return jsonResponse(
         {
-          error: "API-Sports request failed.",
-          status: apiRes.status,
-          detail: apiJson,
+          error: "budget_exhausted",
+          callsMadeToday: result.callsMadeToday,
+          budget: DAILY_BUDGET_CAP,
         },
-        502,
+        429,
       );
     }
-  } catch (err) {
+    if (result.reason === "validation_error") {
+      return jsonResponse(
+        { error: "API-Sports validation error.", detail: result.message },
+        400,
+      );
+    }
     return jsonResponse(
-      { error: "Failed to reach API-Sports.", detail: String(err) },
+      {
+        error:
+          result.reason === "plan_blocked"
+            ? "API-Sports plan blocked."
+            : "API-Sports request failed.",
+        detail: result.message,
+      },
       502,
     );
   }
 
-  const apiErrors = apiJson?.errors;
-  const hasApiErrors = apiErrors &&
-    ((Array.isArray(apiErrors) && apiErrors.length > 0) ||
-      (typeof apiErrors === "object" && Object.keys(apiErrors).length > 0));
-  if (hasApiErrors) {
-    return jsonResponse(
-      { error: "API-Sports returned errors.", detail: apiErrors },
-      502,
-    );
-  }
-
-  const fixtures: any[] = Array.isArray(apiJson?.response)
-    ? apiJson.response
+  const fixtures: any[] = Array.isArray(result.json?.response)
+    ? result.json.response
     : [];
-  const completed = fixtures
+  const catalog = LEAGUE_CATALOG[sport];
+  const catalogFixtures = fixtures.filter((item) => {
+    const leagueId = Number(item?.league?.id ?? item?.league_id);
+    return Number.isFinite(leagueId) && catalog.has(leagueId);
+  });
+  const completed = catalogFixtures
     .map((item) => normalizeCompletedMatch(sport, item))
     .filter((row): row is SettledMatch => row !== null);
 
   if (completed.length === 0) {
+    client.logRunSummary({
+      sport,
+      date,
+      fetched: fixtures.length,
+      completed: 0,
+    });
     return jsonResponse({
       sport,
       date,
@@ -310,12 +368,10 @@ Deno.serve(async (req: Request) => {
       completed: 0,
       matches_settled: 0,
       predictions_graded: 0,
+      callsThisRun: client.stats.callsThisRun,
+      budget: DAILY_BUDGET_CAP,
     });
   }
-
-  const supabase = createClient(supabaseUrl, serviceRoleKey, {
-    auth: { persistSession: false },
-  });
 
   let matchesSettled = 0;
   let predictionsGraded = 0;
@@ -397,6 +453,18 @@ Deno.serve(async (req: Request) => {
     );
   }
 
+  const usage = await client.getUsageToday(sport as SharedSport).catch(() => null);
+  client.logRunSummary({
+    sport,
+    date,
+    fetched: fixtures.length,
+    matchesSettled,
+    predictionsGraded,
+    callsMadeToday: usage?.calls_made ?? null,
+    remainingBudget:
+      usage != null ? Math.max(0, DAILY_BUDGET_CAP - usage.calls_made) : null,
+  });
+
   return jsonResponse({
     sport,
     date,
@@ -404,6 +472,9 @@ Deno.serve(async (req: Request) => {
     completed: completed.length,
     matches_settled: matchesSettled,
     predictions_graded: predictionsGraded,
+    callsThisRun: client.stats.callsThisRun,
+    callsMadeToday: usage?.calls_made ?? null,
+    budget: DAILY_BUDGET_CAP,
     ...(errors.length > 0 ? { warnings: errors } : {}),
   });
 });

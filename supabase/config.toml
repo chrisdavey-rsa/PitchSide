@@ -371,6 +371,15 @@ authorization_url_path = "/oauth/consent"
 # Allow dynamic client registration
 allow_dynamic_registration = false
 
+# TEMPORARY: allow unauthenticated calls to test-api while verifying secrets.
+# Revert to verify_jwt = true (or delete this block) after testing.
+[functions.test-api]
+verify_jwt = true
+
+# Cron / internal invokers call without a user JWT.
+[functions.sync-live-settle]
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

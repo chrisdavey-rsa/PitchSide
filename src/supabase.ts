@@ -12,6 +12,7 @@ import {
   type SeenFeatureKey,
   type SeenFeatures,
 } from "./lib/seenFeatures";
+import type { SupportedTeamOption, TeamSport } from "./data/supportedTeams";
 
 // Retrieve environment variables and clean them of common copy-paste errors
 const metaEnv = (import.meta as any).env || {};
@@ -28,7 +29,13 @@ const supabaseAnonKey = (metaEnv.VITE_SUPABASE_ANON_KEY || "").trim();
 export const isSupabaseConfigured = () => !!(supabaseUrl && supabaseAnonKey);
 
 export const supabase = isSupabaseConfigured()
-  ? createClient(supabaseUrl, supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      realtime: {
+        // Cap client event intake — live score ticks are small; this protects
+        // free-tier Realtime quotas if a tab is left open across many fixtures.
+        params: { eventsPerSecond: 10 },
+      },
+    })
   : null;
 
 if (!isSupabaseConfigured()) {
@@ -900,6 +907,31 @@ export async function dbFetchUserLeagues(userId: string): Promise<League[]> {
  * user's most populated private league for the dashboard "My League" tab and
  * to scope the leaderboard to that league's members.
  */
+/** Cached API-Sports teams for the profile / signup team picker. */
+export async function dbFetchTeams(): Promise<SupportedTeamOption[]> {
+  if (!supabase) return [];
+
+  const { data, error } = await supabase
+    .from("teams")
+    .select("id, name, type, country_code, api_sports_id, sport")
+    .order("name", { ascending: true });
+
+  if (error) throw error;
+
+  return (data || []).map((row: any): SupportedTeamOption => {
+    const sportDb = String(row.sport || "").toLowerCase();
+    const sport: TeamSport = sportDb === "rugby" ? "Rugby" : "Football";
+    return {
+      id: row.id,
+      name: row.name || "",
+      sport,
+      category: row.type === "club" ? "club" : "country",
+      countryCode: row.country_code || undefined,
+      apiSportsId: row.api_sports_id ?? null,
+    };
+  });
+}
+
 export async function dbFetchLeaguesMembership(
   leagueIds: string[],
 ): Promise<Record<string, string[]>> {
@@ -1182,6 +1214,8 @@ export async function dbSaveUnsubscribedEmail(email: string, details: any): Prom
 export interface LeaderboardRecord {
   playerId: string;
   nickname: string;
+  firstName: string;
+  surname: string;
   nationality: string;
   points: number;
   pointsFootball: number;
@@ -1254,6 +1288,8 @@ function mapRpcLeaderboardRow(
   return {
     playerId: String(row.player_id),
     nickname: String(row.nickname ?? "Contestant"),
+    firstName: String(row.first_name ?? ""),
+    surname: String(row.surname ?? ""),
     nationality: String(row.nationality ?? "United Kingdom"),
     points: totalPoints,
     pointsFootball,

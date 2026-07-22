@@ -6,14 +6,22 @@ import {
   Lock,
   LogOut,
   Users,
-  Target,
+  Trophy,
   ChevronDown,
   Menu,
 } from "lucide-react";
-import { UserProfile, SportType } from "../../types";
+import {
+  EmergingSportNav,
+  useUserRole,
+  type SportKey,
+} from "../../sports/emerging";
+import { UserProfile } from "../../types";
 import PitchSideLogo from "../PitchSideLogo";
+import PitchSideMark from "../PitchSideMark";
 import { RadialOrigin, radialOriginFromEvent } from "../../radial";
 import LogoutConfirmModal from "../LogoutConfirmModal";
+
+export type DesktopMainView = "predictions" | "leaderboards";
 
 interface TopNavigationProps {
   user: UserProfile;
@@ -23,8 +31,11 @@ interface TopNavigationProps {
   onOpenAccount: (origin?: RadialOrigin) => void;
   onOpenLeagues: (origin?: RadialOrigin) => void;
   onResetState: () => void;
-  onSelectSport?: (sport: SportType) => void;
-  selectedSport?: SportType | null;
+  /** Unified workspace sport (football | rugby | golf | formula1). */
+  onSelectSport?: (sport: SportKey) => void;
+  selectedSport?: SportKey | null;
+  desktopMainView?: DesktopMainView;
+  onSelectDesktopView?: (view: DesktopMainView) => void;
   isUserInAnyLeague?: boolean;
   /** Force-open the Settings menu (used by the desktop onboarding tour). */
   forceSettingsOpen?: boolean;
@@ -40,29 +51,36 @@ export default function TopNavigation({
   onResetState,
   onSelectSport,
   selectedSport = null,
+  desktopMainView = "predictions",
+  onSelectDesktopView,
   isUserInAnyLeague = true,
   forceSettingsOpen = false,
 }: TopNavigationProps) {
   const highlightLeagues = !isUserInAnyLeague;
-  const [sportsOpen, setSportsOpen] = useState(false);
+  const [predictionsOpen, setPredictionsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
-  const sportsRef = useRef<HTMLDivElement>(null);
+  const predictionsRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
+  const userRole = useUserRole(user.id, user.isAdmin);
 
   useEffect(() => {
     if (forceSettingsOpen) {
       setSettingsOpen(true);
-      setSportsOpen(false);
+      setPredictionsOpen(false);
     }
   }, [forceSettingsOpen]);
 
   useEffect(() => {
-    if (!sportsOpen && !settingsOpen) return;
+    if (!predictionsOpen && !settingsOpen) return;
     const onPointerDown = (e: MouseEvent | TouchEvent) => {
       const target = e.target as Node;
-      if (sportsOpen && sportsRef.current && !sportsRef.current.contains(target)) {
-        setSportsOpen(false);
+      if (
+        predictionsOpen &&
+        predictionsRef.current &&
+        !predictionsRef.current.contains(target)
+      ) {
+        setPredictionsOpen(false);
       }
       if (
         settingsOpen &&
@@ -74,7 +92,7 @@ export default function TopNavigation({
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setSportsOpen(false);
+        setPredictionsOpen(false);
         setSettingsOpen(false);
       }
     };
@@ -86,7 +104,13 @@ export default function TopNavigation({
       document.removeEventListener("touchstart", onPointerDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [sportsOpen, settingsOpen]);
+  }, [predictionsOpen, settingsOpen]);
+
+  const handleEmergingSportSelect = (sport: SportKey) => {
+    onSelectDesktopView?.("predictions");
+    onSelectSport?.(sport);
+    setPredictionsOpen(false);
+  };
 
   return (
     <div className="relative z-30 bg-slate-900/80 backdrop-blur-md rounded-2xl border border-slate-800/80 p-4 sm:px-6 shadow-xl">
@@ -102,109 +126,78 @@ export default function TopNavigation({
           )}
         </div>
 
-        {/* Desktop utilities only — mobile uses bottom nav for Account/Rules/Leagues */}
         <div id="tour-nav-buttons" className="hidden md:flex items-center gap-2 sm:gap-3">
-          <div ref={sportsRef} className={`relative ${sportsOpen ? "z-50" : ""}`}>
+          <div
+            ref={predictionsRef}
+            className={`relative ${predictionsOpen ? "z-50" : ""}`}
+          >
             <motion.button
-              layoutId="nav-sports-btn"
+              layoutId="nav-predictions-btn"
               id="tour-sports-switcher"
               type="button"
               onClick={() => {
-                setSportsOpen((o) => !o);
+                onSelectDesktopView?.("predictions");
+                setPredictionsOpen((o) => !o);
                 setSettingsOpen(false);
               }}
-              aria-expanded={sportsOpen}
+              aria-expanded={predictionsOpen}
               aria-haspopup="menu"
-              className={`text-xs text-slate-300 hover:text-white bg-slate-800/60 px-3 py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-1.5 font-medium ${
-                sportsOpen ? "text-white ring-1 ring-slate-600" : ""
+              className={`text-xs hover:text-white bg-slate-800/60 px-3 py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-1.5 font-medium ${
+                desktopMainView === "predictions" || predictionsOpen
+                  ? "text-white ring-1 ring-slate-600"
+                  : "text-slate-300"
               }`}
             >
-              <Target className="w-4 h-4 text-sky-400" />
-              <span>Sports</span>
+              <PitchSideMark size={18} className="rounded-md shrink-0" />
+              <span>Predictions</span>
               <ChevronDown
-                className={`w-3.5 h-3.5 text-slate-500 transition-transform ${sportsOpen ? "rotate-180" : ""}`}
+                className={`w-3.5 h-3.5 text-slate-500 transition-transform ${
+                  predictionsOpen ? "rotate-180" : ""
+                }`}
               />
             </motion.button>
 
             <AnimatePresence>
-              {sportsOpen && (
+              {predictionsOpen && (
                 <motion.div
                   role="menu"
                   initial={{ opacity: 0, y: -6, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -6, scale: 0.98 }}
                   transition={{ duration: 0.15, ease: "easeOut" }}
-                  className="absolute right-0 top-full mt-2 z-[60] w-56 rounded-xl border border-slate-700/80 bg-slate-950/95 backdrop-blur-xl shadow-2xl shadow-black/40 p-1.5 overflow-hidden"
+                  className="absolute right-0 top-full mt-2 z-[60] w-72 rounded-xl border border-slate-700/80 bg-slate-950/95 backdrop-blur-xl shadow-2xl shadow-black/40 p-1.5 overflow-hidden"
                 >
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      onSelectSport?.(SportType.FOOTBALL);
-                      setSportsOpen(false);
-                    }}
-                    className={`w-full text-left px-3 py-2.5 rounded-lg flex items-center gap-3 transition-colors cursor-pointer ${
-                      selectedSport === SportType.FOOTBALL
-                        ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/25"
-                        : "text-slate-300 hover:bg-slate-800/80 hover:text-white border border-transparent"
-                    }`}
-                  >
-                    <span className="text-base leading-none" aria-hidden>
-                      ⚽
-                    </span>
-                    <div className="min-w-0">
-                      <span className="block text-xs font-semibold">Football</span>
-                      <span className="block text-[10px] text-slate-500 font-mono">
-                        Active
-                      </span>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      onSelectSport?.(SportType.RUGBY);
-                      setSportsOpen(false);
-                    }}
-                    className={`w-full text-left px-3 py-2.5 rounded-lg flex items-center gap-3 transition-colors cursor-pointer mt-0.5 ${
-                      selectedSport === SportType.RUGBY
-                        ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/25"
-                        : "text-slate-300 hover:bg-slate-800/80 hover:text-white border border-transparent"
-                    }`}
-                  >
-                    <span className="text-base leading-none" aria-hidden>
-                      🏉
-                    </span>
-                    <div className="min-w-0">
-                      <span className="block text-xs font-semibold">Rugby</span>
-                      <span className="block text-[10px] text-slate-500 font-mono">
-                        Active
-                      </span>
-                    </div>
-                  </button>
-
-                  <div
-                    role="presentation"
-                    aria-disabled="true"
-                    className="mt-1.5 mx-0.5 rounded-lg border border-slate-800/90 bg-slate-900/40 px-3 py-2.5 flex items-center gap-3 opacity-45 select-none pointer-events-none grayscale"
-                  >
-                    <span className="text-base leading-none" aria-hidden>
-                      ⛳
-                    </span>
-                    <div className="min-w-0">
-                      <span className="block text-xs font-semibold text-slate-400">
-                        Golf
-                      </span>
-                      <span className="block text-[10px] text-slate-500 font-mono italic">
-                        Coming soon...
-                      </span>
-                    </div>
-                  </div>
+                  <EmergingSportNav
+                    userId={user.id}
+                    userRole={userRole}
+                    selectedSport={selectedSport}
+                    onSelectSport={handleEmergingSportSelect}
+                    showCoreSports
+                    className="border-0 bg-transparent p-0 rounded-none"
+                  />
                 </motion.div>
               )}
             </AnimatePresence>
           </div>
+
+          <motion.button
+            layoutId="nav-leaderboards-btn"
+            id="tour-leaderboards"
+            type="button"
+            onClick={() => {
+              setPredictionsOpen(false);
+              setSettingsOpen(false);
+              onSelectDesktopView?.("leaderboards");
+            }}
+            className={`text-xs hover:text-white bg-slate-800/60 px-3 py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-1.5 font-medium ${
+              desktopMainView === "leaderboards"
+                ? "text-white ring-1 ring-slate-600"
+                : "text-slate-300"
+            }`}
+          >
+            <Trophy className="w-4 h-4 text-amber-400" />
+            <span>Leaderboards</span>
+          </motion.button>
 
           <motion.button
             layoutId="nav-leagues-btn"
@@ -236,7 +229,6 @@ export default function TopNavigation({
             </button>
           )}
 
-          {/* Settings hamburger — Account + Rules */}
           <div
             id="tour-settings-menu"
             ref={settingsRef}
@@ -251,7 +243,7 @@ export default function TopNavigation({
               onClick={() => {
                 if (forceSettingsOpen) return;
                 setSettingsOpen((o) => !o);
-                setSportsOpen(false);
+                setPredictionsOpen(false);
               }}
               className={`text-slate-300 hover:text-white bg-slate-800/60 p-2 rounded-lg cursor-pointer transition-colors ${
                 settingsOpen ? "text-white ring-1 ring-slate-600" : ""

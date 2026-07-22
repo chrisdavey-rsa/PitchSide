@@ -14,4 +14,5 @@ export const queryKeys = {
   liveProvisional: (liveMatchIds: string[]) =>
     ['liveProvisional', [...liveMatchIds].sort().join(',')] as const,
   players: ['players'] as const,
+  teams: ['teams'] as const,
 };

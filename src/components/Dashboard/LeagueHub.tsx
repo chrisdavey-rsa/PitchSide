@@ -12,6 +12,7 @@ import LeagueSettingsModal, {
 } from "../League/LeagueSettingsModal";
 import { isGlobalLeague } from "../../lib/leaguesConfig";
 import LeagueHubStandings from "./LeagueHubStandings";
+import LeaderboardPlayerLabel from "./LeaderboardPlayerLabel";
 
 type LeagueMemberDisplay = LeaderboardRecord & {
   displayPoints: number;
@@ -381,12 +382,16 @@ function LeagueDetailView({
                                     : "bg-slate-950/40 border-slate-855"
                                 }`}
                               >
-                                <div className="flex items-center gap-1.5">
-                                  <span className="font-semibold text-slate-300">
-                                    {member.nickname}
-                                  </span>
+                                <div className="flex items-center gap-1.5 min-w-0 flex-1 mr-2">
+                                  <LeaderboardPlayerLabel
+                                    nickname={member.nickname}
+                                    firstName={member.firstName}
+                                    surname={member.surname}
+                                    nicknameClassName="text-xs text-slate-300"
+                                    className="min-w-0"
+                                  />
                                   {isMe && (
-                                    <span className="text-[8px] font-mono bg-emerald-500/20 text-emerald-455 font-bold px-1 rounded-3xs">
+                                    <span className="text-[8px] font-mono bg-emerald-500/20 text-emerald-455 font-bold px-1 rounded-3xs shrink-0 self-start mt-0.5">
                                       YOU
                                     </span>
                                   )}

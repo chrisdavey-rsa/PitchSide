@@ -5,12 +5,11 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Routes, Route, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'motion/react';
 import { Award, Lock, Star } from 'lucide-react';
 import { dbFetchPlayers, dbDeletePlayerAccount, dbSaveArchivedPlayer, dbSaveUnsubscribedEmail, dbUpdatePlayerAdmin, dbFetchPredictions, supabase, testSupabaseConnection } from './supabase';
 import { UserProfile } from './types';
-import PitchSideLogo from './components/PitchSideLogo';
-import PitchSideMark from './components/PitchSideMark';
 import AuthFlow from './components/AuthFlow';
 import LoginView from './components/auth/LoginView';
 import ResetPasswordView from './components/auth/ResetPasswordView';
@@ -20,12 +19,17 @@ import RulesInfo from './components/RulesInfo';
 import AdminPanel from './components/AdminPanel';
 import AccountPortal from './components/AccountPortal';
 import InstallPWA from './components/InstallPWA';
+import SplashScreen from './components/SplashScreen';
 import JoinLeague from './pages/JoinLeague';
 import { RadialOrigin } from './radial';
 import { useBodyScrollLock } from './hooks/useBodyScrollLock';
 import { useSupabaseRealtime } from './hooks/useSupabaseRealtime';
 import { useOverlayHistory, retainOverlayHistoryDuringTransition, transferOverlay } from './hooks/useOverlayHistory';
 import { pendingInviteToPath, readPendingInvite } from './lib/pendingInvite';
+import { initializePlatform } from './lib/initializePlatform';
+
+/** Brand animation floor — splash never exits sooner than this, even if data is ready. */
+const MIN_SPLASH_MS = 2200;
 
 /** Which guest auth screen is currently shown. */
 type GuestAuthView = 'login' | 'signup' | 'reset-request' | 'reset-update';
@@ -40,8 +44,11 @@ export default function App() {
 
 function AppShell() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
-  const [isSplash, setIsSplash] = useState(true);
+  /** Gatekeeper: only the splash renders until platform init + min brand time complete. */
+  const [isAppReady, setIsAppReady] = useState(false);
+  const skipMinSplash = useRef(false);
   const [guestAuthView, setGuestAuthView] = useState<GuestAuthView>('login');
   const [loginSuccessMessage, setLoginSuccessMessage] = useState<string | undefined>();
   const [dashboardWelcome, setDashboardWelcome] = useState<string | null>(null);
@@ -113,38 +120,52 @@ function AppShell() {
   });
 
   const skipSplashForAuthRedirect = useCallback(() => {
-    setIsSplash(false);
+    skipMinSplash.current = true;
+    setIsAppReady(true);
   }, []);
 
   const replaySplash = useCallback(() => {
-    setIsSplash(true);
-    setTimeout(() => setIsSplash(false), 2200);
+    setIsAppReady(false);
+    setTimeout(() => setIsAppReady(true), MIN_SPLASH_MS);
   }, []);
-  // Load auth state from storage on start
+
+  // Concurrent platform boot: auth + fixtures + user data, then lift the splash gate.
   useEffect(() => {
-    const savedUser = localStorage.getItem('pitchside_logged_in');
-    if (savedUser) {
+    let cancelled = false;
+
+    async function boot() {
+      const startedAt = Date.now();
       try {
-        const parsed = JSON.parse(savedUser);
-        if (parsed && parsed.id && parsed.email) {
-          setCurrentUser(parsed);
-        } else {
-          localStorage.removeItem('pitchside_logged_in');
+        const init = await initializePlatform(queryClient);
+        if (cancelled) return;
+
+        if (init.profile) {
+          setCurrentUser(init.profile);
+          localStorage.setItem('pitchside_logged_in', JSON.stringify(init.profile));
+        } else if (!emailVerifyPending.current) {
           setCurrentUser(null);
+          localStorage.removeItem('pitchside_logged_in');
         }
-      } catch (e) {
-        localStorage.removeItem('pitchside_logged_in');
-        setCurrentUser(null);
+      } catch (err) {
+        console.error('Platform initialization failed:', err);
+      } finally {
+        if (cancelled) return;
+
+        if (!skipMinSplash.current) {
+          const remaining = Math.max(0, MIN_SPLASH_MS - (Date.now() - startedAt));
+          if (remaining > 0) {
+            await new Promise((resolve) => setTimeout(resolve, remaining));
+          }
+        }
+        if (!cancelled) setIsAppReady(true);
       }
     }
 
-    // Hold the splash for the perimeter-trace + glow cycle (must stay 2200ms)
-    const splashTimer = setTimeout(() => {
-      setIsSplash(false);
-    }, 2200);
-
-    return () => clearTimeout(splashTimer);
-  }, []);
+    void boot();
+    return () => {
+      cancelled = true;
+    };
+  }, [queryClient]);
 
   // Verify Supabase connection on load
   useEffect(() => {
@@ -368,7 +389,7 @@ function AppShell() {
     <div className="relative min-h-screen w-full bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-slate-950 overflow-x-clip">
       {/* Decorative backdrop lives outside motion.main so transforms never trap
           fixed layers, and pointer-events:none lets every touch reach the page. */}
-      {!isSplash && (
+      {isAppReady && (
         <div
           aria-hidden="true"
           className="app-ambient-backdrop fixed inset-0 overflow-hidden pointer-events-none z-0"
@@ -379,43 +400,10 @@ function AppShell() {
           <div className="magical-diagonal-ribbon" />
         </div>
       )}
-      {!isSplash && <InstallPWA />}
+      {isAppReady && <InstallPWA />}
       <AnimatePresence mode="wait">
-        {isSplash ? (
-          /* Splash Screen Overlay Intro */
-          <motion.div
-            key="splash"
-            initial={{ opacity: 1 }}
-            exit={{ opacity: 0, scale: 1.03 }}
-            transition={{ duration: 0.55, ease: 'easeInOut' }}
-            className="fixed inset-0 bg-slate-950 flex flex-col items-center justify-center z-50 p-6 text-center overflow-hidden"
-          >
-            {/* Ambient brand glows */}
-            <div className="absolute w-[520px] h-[520px] rounded-full bg-emerald-500/10 blur-[120px] pointer-events-none" />
-            <div className="absolute top-1/3 right-1/4 w-[300px] h-[300px] rounded-full bg-blue-500/5 blur-[100px] pointer-events-none" />
-
-            <div className="relative flex flex-col items-center gap-6">
-              <motion.div
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-                className="drop-shadow-[0_12px_40px_rgba(16,185,129,0.25)]"
-              >
-                <PitchSideMark size={132} animate={true} />
-              </motion.div>
-
-              <PitchSideLogo size="xl" autoplay={true} />
-
-              <motion.div
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 1.1, duration: 0.5 }}
-                className="text-[10px] text-slate-500 font-mono tracking-[0.35em] uppercase"
-              >
-                Play. Predict. Prevail.
-              </motion.div>
-            </div>
-          </motion.div>
+        {!isAppReady ? (
+          <SplashScreen />
         ) : (
           /* Main Application Frame Router —
              w-full + no overflow-x-hidden (that forces overflow-y:auto nested scroll).

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Trophy, ArrowUpDown, X } from "lucide-react";
 import { Match, SportType, UserProfile } from "../../types";
 import { calculatePoints } from "../../utils";
@@ -11,6 +11,16 @@ import {
   seasonHorizonLabel,
 } from "../../lib/leagueStandings";
 import { mapLeaderboardForSport } from "../../hooks/usePitchsideQueries";
+import LeaderboardPlayerLabel, {
+  formatPlayerRealName,
+} from "./LeaderboardPlayerLabel";
+import {
+  SportIcon,
+  isEmergingSport,
+  isSportAccessible,
+  useUserRole,
+  type SportKey,
+} from "../../sports/emerging";
 
 type SortKey = "name" | "points";
 type SortDir = "asc" | "desc";
@@ -27,6 +37,20 @@ interface LeaderboardsPageProps {
   /** Pre-filtered league-scoped season rows (when scope === league). */
   leagueSeasonRows?: LeaderboardItem[];
   globalSeasonRows?: LeaderboardItem[];
+  /**
+   * When set with `syncSportFromParent`, rankings follow Dashboard `activeSport`
+   * and the local sport toggle is hidden (sidebar embed).
+   */
+  activeSport?: SportKey;
+  syncSportFromParent?: boolean;
+  /** Dedicated Leaderboards page: show Golf/F1 toggles for admins. */
+  showEmergingSportTabs?: boolean;
+}
+
+function coreSportFromKey(sport: SportKey): SportType | null {
+  if (sport === "football") return SportType.FOOTBALL;
+  if (sport === "rugby") return SportType.RUGBY;
+  return null;
 }
 
 function recomputedHorizonRows(
@@ -98,36 +122,52 @@ export default function LeaderboardsPage({
   leagueName,
   leagueSeasonRows,
   globalSeasonRows,
+  activeSport,
+  syncSportFromParent = false,
+  showEmergingSportTabs = false,
 }: LeaderboardsPageProps) {
-  const [sport, setSport] = useState<SportType>(
-    () => user.preferredSport ?? SportType.FOOTBALL,
+  const userRole = useUserRole(user.id, user.isAdmin);
+  const [boardSport, setBoardSport] = useState<SportKey>(
+    () => (user.preferredSport as SportKey | undefined) ?? "football",
   );
   const [horizon, setHorizon] = useState<StandingsHorizon>("season");
   const [sortKey, setSortKey] = useState<SortKey>("points");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [formPlayer, setFormPlayer] = useState<LeaderboardItem | null>(null);
 
+  useEffect(() => {
+    if (syncSportFromParent && activeSport) {
+      setBoardSport(activeSport);
+    }
+  }, [syncSportFromParent, activeSport]);
+
+  useEffect(() => {
+    if (!isSportAccessible(boardSport, userRole)) {
+      setBoardSport("football");
+    }
+  }, [boardSport, userRole]);
+
+  const coreSport = coreSportFromKey(boardSport);
+  const emergingSelected = isEmergingSport(boardSport);
+
   const baseRows = useMemo(() => {
+    if (emergingSelected || !coreSport) return [];
+
     if (horizon === "season") {
       if (scope === "league" && leagueSeasonRows) {
-        return leagueSeasonRows.filter((r) =>
-          sport === SportType.FOOTBALL
-            ? r.displayPredictions >= 0
-            : r.displayPredictions >= 0,
-        );
+        return leagueSeasonRows.filter((r) => r.displayPredictions >= 0);
       }
       if (globalSeasonRows && scope === "global") {
-        // Re-map when sport changes from parent season cache for the active sport.
         return mapLeaderboardForSport(
           leaderboardList,
-          sport,
+          coreSport,
           user.id,
           provisionalByUser,
         );
       }
       return mapLeaderboardForSport(
         leaderboardList,
-        sport,
+        coreSport,
         user.id,
         provisionalByUser,
       );
@@ -136,50 +176,56 @@ export default function LeaderboardsPage({
     return recomputedHorizonRows(
       leaderboardList,
       allMatches,
-      sport,
+      coreSport,
       horizon,
       user.id,
     );
   }, [
+    emergingSelected,
+    coreSport,
     horizon,
     scope,
     leagueSeasonRows,
     globalSeasonRows,
     leaderboardList,
-    sport,
     user.id,
     provisionalByUser,
     allMatches,
   ]);
 
-  // When league scope + season, parent rows are already sport-filtered — refresh
-  // from leaderboardList filtered to league members is handled upstream.
   const seasonLeagueAware = useMemo(() => {
-    if (horizon !== "season" || scope !== "league" || !leagueSeasonRows) {
+    if (
+      emergingSelected ||
+      !coreSport ||
+      horizon !== "season" ||
+      scope !== "league" ||
+      !leagueSeasonRows
+    ) {
       return baseRows;
     }
-    // leagueSeasonRows from parent use globalLeaderboardSport — remap locally.
     return mapLeaderboardForSport(
       leaderboardList.filter((r) =>
         leagueSeasonRows.some((l) => l.playerId === r.playerId),
       ),
-      sport,
+      coreSport,
       user.id,
       provisionalByUser,
     );
   }, [
+    emergingSelected,
+    coreSport,
     horizon,
     scope,
     leagueSeasonRows,
     baseRows,
     leaderboardList,
-    sport,
     user.id,
     provisionalByUser,
   ]);
 
   const displayRows = useMemo(() => {
-    const source = horizon === "season" && scope === "league" ? seasonLeagueAware : baseRows;
+    const source =
+      horizon === "season" && scope === "league" ? seasonLeagueAware : baseRows;
     const sorted = [...source];
     sorted.sort((a, b) => {
       if (sortKey === "name") {
@@ -191,6 +237,17 @@ export default function LeaderboardsPage({
     });
     return sorted;
   }, [baseRows, seasonLeagueAware, horizon, scope, sortKey, sortDir]);
+
+  const sportTabs: { id: SportKey; label: string }[] = [
+    { id: "football", label: "Football" },
+    { id: "rugby", label: "Rugby" },
+  ];
+  if (showEmergingSportTabs && userRole === "admin") {
+    sportTabs.push(
+      { id: "formula1", label: "Formula 1" },
+      { id: "golf", label: "Golf" },
+    );
+  }
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -227,38 +284,53 @@ export default function LeaderboardsPage({
         </div>
       </div>
 
-      <div
-        role="tablist"
-        aria-label="Sport"
-        className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-slate-950/70 border border-slate-800"
-      >
-        {(
-          [
-            { id: SportType.FOOTBALL, label: "Football" },
-            { id: SportType.RUGBY, label: "Rugby" },
-          ] as const
-        ).map((tab) => {
-          const active = sport === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => setSport(tab.id)}
-              className={`py-2.5 rounded-lg text-xs font-mono font-bold uppercase tracking-wider transition-colors cursor-pointer ${
-                active
-                  ? tab.id === SportType.FOOTBALL
-                    ? "bg-blue-600 text-white shadow-md"
-                    : "bg-amber-600 text-white shadow-md"
-                  : "text-slate-500 hover:text-slate-300 hover:bg-slate-900"
-              }`}
-            >
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
+      {!syncSportFromParent && (
+        <div
+          role="tablist"
+          aria-label="Sport"
+          className={`grid gap-1.5 p-1 rounded-xl bg-slate-950/70 border border-slate-800 ${
+            sportTabs.length > 2 ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-2"
+          }`}
+        >
+          {sportTabs.map((tab) => {
+            const active = boardSport === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setBoardSport(tab.id)}
+                className={`flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-mono font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                  active
+                    ? tab.id === "football"
+                      ? "bg-blue-600 text-white shadow-md"
+                      : tab.id === "rugby"
+                        ? "bg-amber-600 text-white shadow-md"
+                        : tab.id === "formula1"
+                          ? "bg-red-600/90 text-white shadow-md"
+                          : "bg-emerald-600 text-white shadow-md"
+                    : "text-slate-500 hover:text-slate-300 hover:bg-slate-900"
+                }`}
+              >
+                <SportIcon sport={tab.id} colored className="h-4 w-4" />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {syncSportFromParent && (
+        <p className="text-[10px] font-mono text-slate-500 uppercase tracking-wider px-0.5">
+          Rankings ·{" "}
+          <span className="text-slate-300">
+            {boardSport === "formula1"
+              ? "Formula 1"
+              : boardSport.charAt(0).toUpperCase() + boardSport.slice(1)}
+          </span>
+        </p>
+      )}
 
       <div
         role="tablist"
@@ -342,7 +414,11 @@ export default function LeaderboardsPage({
           </button>
         </div>
 
-        {displayRows.length === 0 ? (
+        {emergingSelected ? (
+          <p className="py-12 text-center text-xs text-slate-500 font-mono px-4">
+            Rankings for this sport unlock with the public launch.
+          </p>
+        ) : displayRows.length === 0 ? (
           <p className="py-12 text-center text-xs text-slate-500 font-mono px-4">
             No settled results in this window yet.
           </p>
@@ -365,17 +441,23 @@ export default function LeaderboardsPage({
                     <span className="font-mono text-[11px] text-slate-500">
                       #{sortKey === "points" && sortDir === "desc" ? item.rank : idx + 1}
                     </span>
-                    <span className="flex items-center gap-1.5 min-w-0">
+                    <span className="flex items-center gap-2 min-w-0">
                       <span
-                        className={`font-semibold text-sm truncate ${
-                          isYou ? "text-emerald-300" : "text-slate-100"
-                        }`}
+                        className="text-sm shrink-0 leading-none"
+                        title={item.nationality}
+                        aria-hidden
                       >
-                        {item.nickname}
-                      </span>
-                      <span className="text-sm shrink-0" title={item.nationality}>
                         {getCountryFlag(item.nationality)}
                       </span>
+                      <LeaderboardPlayerLabel
+                        nickname={item.nickname}
+                        firstName={item.firstName}
+                        surname={item.surname}
+                        nicknameClassName={`text-sm ${
+                          isYou ? "text-emerald-300" : "text-slate-100"
+                        }`}
+                        className="min-w-0 flex-1"
+                      />
                     </span>
                     <span
                       className={`text-right font-display font-bold text-sm tabular-nums ${
@@ -404,6 +486,11 @@ export default function LeaderboardsPage({
                 <h3 className="text-lg font-display font-extrabold text-white">
                   {formPlayer.nickname}
                 </h3>
+                {formatPlayerRealName(formPlayer.firstName, formPlayer.surname) ? (
+                  <p className="text-[11px] font-light tracking-[0.04em] text-slate-500 mt-0.5">
+                    {formatPlayerRealName(formPlayer.firstName, formPlayer.surname)}
+                  </p>
+                ) : null}
                 <p className="text-xs text-slate-400 font-mono mt-1">
                   {formPlayer.displayPoints} pts · {formPlayer.displayPredictions}{" "}
                   picks · {formPlayer.displayAccuracy} accuracy

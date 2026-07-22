@@ -6,6 +6,7 @@ import { supabase } from '../../supabase';
 import { NATIONS_LIST } from './data';
 import CountryFlag from '../CountryFlag';
 import { filterTeams } from '../../data/supportedTeams';
+import { useTeamsCatalogQuery } from '../../hooks/usePitchsideQueries';
 
 interface GeneralSettingsProps {
   user: UserProfile;
@@ -22,6 +23,7 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ user, onUpdate
   const [supportedTeam, setSupportedTeam] = useState(user.supportedTeam || '');
   const [teamSearch, setTeamSearch] = useState('');
   const [isTeamDropdownOpen, setIsTeamDropdownOpen] = useState(false);
+  const { data: teamCatalog = [] } = useTeamsCatalogQuery();
 
   const teamSport =
     user.preferredSport === SportType.RUGBY ? 'Rugby' : 'Football';
@@ -307,7 +309,11 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ user, onUpdate
                   className="absolute left-0 right-0 mt-2 max-h-52 overflow-y-auto bg-slate-950 border border-slate-800 rounded-xl shadow-2xl z-50 custom-scrollbar"
                 >
                   {(() => {
-                    const { countries, clubs } = filterTeams(teamSport, teamSearch);
+                    const { countries, clubs } = filterTeams(
+                      teamCatalog,
+                      teamSport,
+                      teamSearch,
+                    );
                     if (countries.length === 0 && clubs.length === 0) {
                       return (
                         <button

@@ -4,6 +4,8 @@ export interface LeaderboardItem {
   playerId: string;
   rank: number;
   nickname: string;
+  firstName?: string;
+  surname?: string;
   nationality: string;
   displayPredictions: number;
   displayAccuracy: string;

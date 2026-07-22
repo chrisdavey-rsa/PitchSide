@@ -2,12 +2,10 @@ import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   supabase,
-  mapMatchRow,
   type PredictionEntry,
   type LiveProvisionalMatrix,
 } from '../supabase';
 import { queryKeys } from '../lib/queryKeys';
-import type { Match } from '../types';
 
 type RealtimeTable =
   | 'profiles'
@@ -21,6 +19,7 @@ type QueryKeyLike = readonly unknown[];
 const TABLE_QUERY_MAP: Record<RealtimeTable, readonly QueryKeyLike[]> = {
   profiles: [queryKeys.leaderboard, queryKeys.players],
   predictions: [queryKeys.leaderboard],
+  // matches live scores are patched by src/lib/matchesRealtime.ts (via useMatchesQuery)
   matches: [queryKeys.matches, queryKeys.activeCompetitions, queryKeys.leaderboard],
   leagues: [queryKeys.leagues],
   league_members: [queryKeys.leagues],
@@ -48,31 +47,6 @@ function patchLiveProvisionalCell(
         next[userId] = userRow;
       }
       return next;
-    },
-  );
-}
-
-function removeMatchFromLiveProvisional(
-  queryClient: ReturnType<typeof useQueryClient>,
-  matchId: string,
-) {
-  queryClient.setQueriesData<LiveProvisionalMatrix>(
-    { queryKey: ['liveProvisional'] },
-    (prev) => {
-      if (!prev) return prev;
-      let changed = false;
-      const next: LiveProvisionalMatrix = {};
-      for (const [uid, byMatch] of Object.entries(prev)) {
-        if (!(matchId in byMatch)) {
-          next[uid] = byMatch;
-          continue;
-        }
-        changed = true;
-        const rest = { ...byMatch };
-        delete rest[matchId];
-        if (Object.keys(rest).length > 0) next[uid] = rest;
-      }
-      return changed ? next : prev;
     },
   );
 }
@@ -117,37 +91,8 @@ export function useSupabaseRealtime(
       }
     };
 
-    channel.on(
-      'postgres_changes',
-      { event: 'UPDATE', schema: 'public', table: 'matches' },
-      (payload) => {
-        const row = payload.new as Record<string, unknown> | null;
-        if (!row?.id) {
-          invalidate('matches');
-          return;
-        }
-
-        const mapped = mapMatchRow(row);
-        queryClient.setQueryData<Match[]>(queryKeys.matches, (prev) => {
-          if (!prev) return prev;
-          const idx = prev.findIndex((m) => m.id === mapped.id);
-          if (idx === -1) {
-            invalidate('matches');
-            return prev;
-          }
-          const next = [...prev];
-          next[idx] = { ...next[idx], ...mapped };
-          return next;
-        });
-
-        if (mapped.status === 'completed') {
-          queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard });
-          removeMatchFromLiveProvisional(queryClient, mapped.id);
-        } else if (mapped.status !== 'live') {
-          removeMatchFromLiveProvisional(queryClient, mapped.id);
-        }
-      },
-    );
+    // matches UPDATE is owned by useMatchesQuery → acquireMatchesRealtime
+    // (silent cache patch, no invalidate on live ticks).
 
     channel.on(
       'postgres_changes',
@@ -204,7 +149,20 @@ export function useSupabaseRealtime(
       );
     });
 
-    (['matches', 'predictions'] as const).forEach((table) => {
+    // Schedule inserts/deletes for matches are rare — one invalidate is fine.
+    // Live score ticks must NOT land here (they use the dedicated matches channel).
+    channel.on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'matches' },
+      () => invalidate('matches'),
+    );
+    channel.on(
+      'postgres_changes',
+      { event: 'DELETE', schema: 'public', table: 'matches' },
+      () => invalidate('matches'),
+    );
+
+    (['predictions'] as const).forEach((table) => {
       channel.on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table },
