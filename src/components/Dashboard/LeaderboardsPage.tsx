@@ -335,6 +335,7 @@ export default function LeaderboardsPage({
       <div
         role="tablist"
         aria-label="Time horizon"
+        data-no-swipe="true"
         className="flex gap-1.5 overflow-x-auto pb-0.5"
       >
         {horizonOptions.map((opt) => {

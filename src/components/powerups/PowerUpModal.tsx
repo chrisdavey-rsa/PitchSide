@@ -1,12 +1,12 @@
 import React from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
-import { X, Trophy, Zap, Target, Lock } from "lucide-react";
-import { getPowerUp } from "../../data/powerUps";
+import { Lock, Trophy, Zap, Target, X } from "lucide-react";
+import { getPowerUp } from "../../constants/powerups";
 import { useBodyScrollLock } from "../../hooks/useBodyScrollLock";
 
 interface PowerUpModalProps {
-  /** Id of the power-up to display (see src/data/powerUps.ts). */
+  /** Id of the power-up to display (see src/constants/powerups.ts). */
   powerUpId: string | null;
   onClose: () => void;
 }
@@ -124,12 +124,25 @@ export default function PowerUpModal({ powerUpId, onClose }: PowerUpModalProps) 
             ))}
           </div>
 
-          {/* Dormant status footer */}
-          <div className="mt-5 flex items-center justify-center gap-2 rounded-xl border border-slate-800 bg-slate-950/60 py-2.5 text-slate-500">
-            <Lock className="h-3.5 w-3.5" />
-            <span className="text-[10px] font-mono font-bold uppercase tracking-widest">
-              Deploy coming soon
-            </span>
+          {/* Season-scoped lifecycle footer */}
+          <div className="mt-5 space-y-2">
+            <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3.5">
+              <div className="mb-1 flex items-center gap-1.5 text-slate-400">
+                <Lock className="h-4 w-4" />
+                <span className="text-[10px] font-mono font-bold uppercase tracking-widest">
+                  Season Expiry
+                </span>
+              </div>
+              <p className="text-xs leading-relaxed text-slate-400">
+                Power-ups are scoped to a sport season. When that season is no longer active,
+                remaining chips expire automatically and cannot be carried over.
+              </p>
+            </div>
+            {powerUp.notes && (
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3.5 text-xs text-amber-200/90 leading-relaxed">
+                {powerUp.notes}
+              </div>
+            )}
           </div>
         </div>
       </motion.div>

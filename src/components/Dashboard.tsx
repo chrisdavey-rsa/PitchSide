@@ -37,6 +37,7 @@ import {
 } from "../hooks/useOfflineDraft";
 import {
   dbSavePrediction,
+  dbLockPrediction,
   dbCreateLeague,
   dbJoinLeague,
   dbLeaveLeague,
@@ -75,6 +76,7 @@ import LeagueManagementPanel from './Dashboard/LeagueManagementPanel';
 import MobileNavigation, { type MobileNavTab } from './Dashboard/MobileNavigation';
 import PredictionsPage from './Dashboard/PredictionsPage';
 import LeaderboardsPage from './Dashboard/LeaderboardsPage';
+import AppShell from './AppShell';
 import OnboardingTour, { type TourStep } from './OnboardingTour';
 import CommunityShieldEvent, {
   isCommunityShieldOpen,
@@ -132,7 +134,6 @@ export default function Dashboard({
   onUserUpdate,
 }: DashboardProps) {
   const isMobileLayout = useIsMobileLayout();
-  const [tourForceSettings, setTourForceSettings] = useState(false);
   const authStatus = useAuthStatus();
   const queryClient = useQueryClient();
   /** Debounce timers for draft prediction upserts (one per match). */
@@ -281,7 +282,6 @@ export default function Dashboard({
 
   const completeOnboarding = () => {
     setShowOnboarding(false);
-    setTourForceSettings(false);
     void markFeatureSeen(SeenFeature.MainWalkthrough);
   };
 
@@ -312,7 +312,7 @@ export default function Dashboard({
           targetId: "tour-mobile-leagues",
           title: "Leagues",
           description:
-            "Create a private league or join with a code. You need at least one league before Predictions unlocks.",
+            "Create a private league or join with a code to compete with friends. You are already active on the Global Leaderboard.",
           placement: "above",
         },
         {
@@ -344,31 +344,22 @@ export default function Dashboard({
         targetId: "tour-match-predictor",
         title: "Predictions",
         description:
-          "Pick Football or Rugby from the top bar, choose a competition, enter your scoreline, and lock it before kick-off.",
+          "Pick Football or Rugby from the sport banner, choose a competition, enter your scoreline, and lock it before kick-off.",
         placement: "below",
       },
       {
         targetId: "tour-league-manager",
         title: "Leagues",
         description:
-          "Create or join leagues with a code and password. You need at least one league before Predictions unlocks.",
+          "Create or join leagues with a code and password to compete with friends. You are already active on the Global Leaderboard.",
         placement: "below",
       },
       {
-        targetId: "tour-sports-switcher",
-        title: "Sports",
+        targetId: "nav-account-btn",
+        title: "Account & Rules",
         description:
-          "Switch between Football and Rugby fixtures from this menu.",
+          "Account and Rules sit in the top bar next to Leagues — open them any time to manage your profile or review scoring.",
         placement: "below",
-      },
-      {
-        targetId: "tour-settings-menu",
-        title: "Settings",
-        description:
-          "Account and Rules are inside this hamburger menu, next to Log out — tap it any time to manage your profile or review scoring.",
-        placement: "below",
-        onEnter: () => setTourForceSettings(true),
-        onExit: () => setTourForceSettings(false),
       },
     ];
   }, [isMobileLayout]);
@@ -822,7 +813,10 @@ export default function Dashboard({
     );
   };
 
-  const submitPrediction = async (matchId: string) => {
+  const submitPrediction = async (
+    matchId: string,
+    powerupInstanceId?: string | null,
+  ) => {
     const pred = predictions[matchId];
     if (!pred || pred.submitted) return;
 
@@ -846,14 +840,14 @@ export default function Dashboard({
     }
 
     try {
-      await dbSavePrediction(
+      await dbLockPrediction(
         user.id,
         matchId,
         sport,
         competitionId,
         pred.home,
         pred.away,
-        true,
+        powerupInstanceId ?? null,
       );
 
       const nextPredictions = {
@@ -881,6 +875,9 @@ export default function Dashboard({
       queryClient.invalidateQueries({
         queryKey: ["completedMatches", "leagueStandings"],
       });
+      queryClient.invalidateQueries({
+        queryKey: ["userPowerups", user.id],
+      });
 
       const draft = loadOfflineDraft<OfflinePredictionDraft>(
         offlineDraftStorageKey,
@@ -897,7 +894,11 @@ export default function Dashboard({
         }
       }
 
-      triggerToast("Prediction submitted successfully!");
+      triggerToast(
+        powerupInstanceId
+          ? "Prediction locked — Power-Up consumed."
+          : "Prediction submitted successfully!",
+      );
     } catch (e) {
       console.error("Error locking prediction:", e);
       setPredictions(previousPredictions);
@@ -958,14 +959,14 @@ export default function Dashboard({
         };
 
         try {
-          await dbSavePrediction(
+          await dbLockPrediction(
             user.id,
             matchId,
             (entry.sport as SportType) || SportType.FOOTBALL,
             entry.competitionId || "f-epl",
             entry.home,
             entry.away,
-            true,
+            null,
           );
           nextPredictions = {
             ...nextPredictions,
@@ -1436,12 +1437,9 @@ export default function Dashboard({
         onOpenAdmin={onOpenAdmin}
         onOpenAccount={onOpenAccount}
         onOpenLeagues={openLeaguesModal}
-        onSelectSport={handleSelectActiveSport}
-        selectedSport={activeSport}
         desktopMainView={desktopMainView}
         onSelectDesktopView={setDesktopMainView}
         isUserInAnyLeague={isUserInAnyLeague}
-        forceSettingsOpen={tourForceSettings}
         onResetState={() => {
           setActiveLeagueId(null);
           setMobileNavTab("predictions");
@@ -1638,8 +1636,12 @@ export default function Dashboard({
             )}
           </div>
 
-          {/* Mobile: true tab router — one viewport, no overlays */}
-          <div className="md:hidden space-y-4">
+          {/* Mobile: true tab router — swipe + back-gesture shell */}
+          <AppShell
+            activeTab={mobileNavTab}
+            onSelectTab={handleMobileNavTab}
+            onLogout={onLogout}
+          >
             {mobileNavTab === "predictions" && (
               <div
                 ref={predictionsAnchorMobileRef}
@@ -1784,7 +1786,7 @@ export default function Dashboard({
             {mobileNavTab === "rules" && (
               <RulesInfo user={user} />
             )}
-          </div>
+          </AppShell>
         </>
       )}
 

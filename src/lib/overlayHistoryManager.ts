@@ -50,9 +50,11 @@ function popBrowserHistory() {
   clearOverlayHistoryMarker();
 }
 
-function handlePopState() {
+function handlePopState(event: PopStateEvent) {
   if (suppressNextPop) {
     suppressNextPop = false;
+    // Still consume so tab-back logic doesn't also react to this synthetic pop.
+    event.stopImmediatePropagation();
     return;
   }
 
@@ -67,11 +69,14 @@ function handlePopState() {
     historyActive = false;
   }
   top.onClose();
+  // Capture-phase + stop so AppShell tab-back does not also fire for this pop.
+  event.stopImmediatePropagation();
 }
 
 function ensureListener() {
   if (listenerInstalled) return;
-  window.addEventListener('popstate', handlePopState);
+  // Capture so overlays win over mobile tab back-navigation.
+  window.addEventListener('popstate', handlePopState, true);
   listenerInstalled = true;
 }
 
@@ -143,6 +148,11 @@ export function transferOverlay(fromId: string, toId: string, onClose: () => voi
   if (stack.length > 0) {
     historyActive = true;
   }
+}
+
+/** True while a synthetic overlay history entry is active (modals / hubs). */
+export function hasActiveOverlayHistory(): boolean {
+  return stack.length > 0 || historyActive;
 }
 
 export function useOverlayHistory(isOpen: boolean, onClose: () => void, overlayId: string) {

@@ -10,8 +10,11 @@ export const SeenFeature = {
   FootballIntro: "football_intro",
   /** Just-in-time Rugby scoring intro. */
   RugbyIntro: "rugby_intro",
-  // Future examples (uncomment when shipping):
-  // GolfTutorial: "golf_tutorial",
+  /** Dismissible How-to-Predict stepper per sport. */
+  HowToPredictFootball: "how_to_predict_football",
+  HowToPredictRugby: "how_to_predict_rugby",
+  HowToPredictFormula1: "how_to_predict_formula1",
+  HowToPredictGolf: "how_to_predict_golf",
 } as const;
 
 export type SeenFeatureKey =

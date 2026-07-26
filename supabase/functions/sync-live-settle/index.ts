@@ -270,6 +270,58 @@ function calculateRugbyPoints(
   return 0;
 }
 
+type PowerUpType =
+  | "double_bubble"
+  | "safety_net"
+  | "sniper"
+  | "banker"
+  | "pitchside_master";
+
+const EXACT_SCORE_POINTS = 5;
+const SAFETY_FLOOR = 5;
+
+/** Keep in sync with sync-settlement / scoringEngine / pitchside_apply_powerup. */
+function applyPowerUp(
+  basePoints: number,
+  powerup: PowerUpType | null | undefined,
+  predictedHome: number,
+  predictedAway: number,
+  actualHome: number,
+  actualAway: number,
+): { points: number; isBankerExact: boolean } {
+  let points = basePoints;
+  let isBankerExact = false;
+
+  const predictedWinner = predictedHome > predictedAway
+    ? "home"
+    : predictedHome < predictedAway
+    ? "away"
+    : "draw";
+  const actualWinner = actualHome > actualAway
+    ? "home"
+    : actualHome < actualAway
+    ? "away"
+    : "draw";
+  const outcomeCorrect = predictedWinner === actualWinner;
+  const isExact = predictedHome === actualHome && predictedAway === actualAway;
+
+  if (powerup === "banker") {
+    if (outcomeCorrect) {
+      points = EXACT_SCORE_POINTS;
+      isBankerExact = true;
+    }
+  } else if (powerup === "sniper" && isExact) {
+    points = Math.round(points * 1.5);
+  }
+
+  if (powerup === "double_bubble") points *= 2;
+  else if (powerup === "pitchside_master") points *= 3;
+
+  if (powerup === "safety_net" && points === 0) points = SAFETY_FLOOR;
+
+  return { points, isBankerExact };
+}
+
 function applyMultiplier(
   basePoints: number,
   multiplier: number | null,
@@ -329,7 +381,9 @@ async function gradePredictions(
 ): Promise<number> {
   const { data: predictions, error } = await supabase
     .from("predictions")
-    .select("id, predicted_home_score, predicted_away_score")
+    .select(
+      "id, user_id, predicted_home_score, predicted_away_score, applied_powerup_id",
+    )
     .eq("match_id", matchId);
 
   if (error) {
@@ -339,8 +393,29 @@ async function gradePredictions(
     return 0;
   }
 
+  const powerupIds = [
+    ...new Set(
+      (predictions ?? [])
+        .map((p) => p.applied_powerup_id as string | null)
+        .filter((id): id is string => !!id),
+    ),
+  ];
+  const powerupTypeById = new Map<string, PowerUpType>();
+  if (powerupIds.length > 0) {
+    const { data: chips } = await supabase
+      .from("user_powerups")
+      .select("id, powerup_type")
+      .in("id", powerupIds);
+    for (const chip of chips ?? []) {
+      powerupTypeById.set(chip.id, chip.powerup_type as PowerUpType);
+    }
+  }
+
   let graded = 0;
   for (const pred of predictions ?? []) {
+    const powerupType = pred.applied_powerup_id
+      ? powerupTypeById.get(pred.applied_powerup_id) ?? null
+      : null;
     const base = sport === "football"
       ? calculateFootballPoints(
         pred.predicted_home_score,
@@ -354,10 +429,21 @@ async function gradePredictions(
         actualHome,
         actualAway,
       );
-    const pointsWon = applyMultiplier(base, multiplier);
+    const powered = applyPowerUp(
+      base,
+      powerupType,
+      pred.predicted_home_score,
+      pred.predicted_away_score,
+      actualHome,
+      actualAway,
+    );
+    const pointsWon = applyMultiplier(powered.points, multiplier);
     const { error: updErr } = await supabase
       .from("predictions")
-      .update({ points_won: pointsWon })
+      .update({
+        points_won: pointsWon,
+        is_banker_exact: powered.isBankerExact,
+      })
       .eq("id", pred.id);
     if (updErr) {
       console.warn(
@@ -365,6 +451,20 @@ async function gradePredictions(
       );
       continue;
     }
+
+    // Chip is normally marked used at lock time; keep settlement idempotent.
+    if (pred.applied_powerup_id) {
+      await supabase
+        .from("user_powerups")
+        .update({
+          status: "used",
+          used_at: new Date().toISOString(),
+          applied_fixture_id: matchId,
+        })
+        .eq("id", pred.applied_powerup_id)
+        .eq("status", "available");
+    }
+
     graded++;
   }
   return graded;

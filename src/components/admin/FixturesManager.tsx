@@ -12,7 +12,8 @@ import {
 import { supabase, dbSaveMatch, dbSetMatchVisibility } from '../../supabase';
 import { SportType, Match } from '../../types';
 import { getCompetitions } from '../../competitions';
-import { calculatePoints } from '../../utils';
+import { calculatePoints, settlePredictionWithPowerUp } from '../../utils';
+import type { PowerUpId } from '../../constants/powerups';
 import { getAvailableSeasons, getLatestSeason } from '../../seasons';
 
 interface FixturesManagerProps {
@@ -235,23 +236,68 @@ export default function FixturesManager({
         const { data: predsData } = await supabase
           .from('predictions')
           .select(
-            'id, predicted_home_score, predicted_away_score, user_id, match_id',
+            'id, predicted_home_score, predicted_away_score, user_id, match_id, applied_powerup_id',
           )
           .eq('match_id', fixture.id);
 
         if (predsData) {
+          const powerupIds = [
+            ...new Set(
+              predsData
+                .map((p) => p.applied_powerup_id as string | null)
+                .filter((id): id is string => !!id),
+            ),
+          ];
+          const powerupTypeById = new Map<string, PowerUpId>();
+          if (powerupIds.length > 0) {
+            const { data: chips } = await supabase
+              .from('user_powerups')
+              .select('id, powerup_type')
+              .in('id', powerupIds);
+            for (const chip of chips ?? []) {
+              powerupTypeById.set(chip.id, chip.powerup_type as PowerUpId);
+            }
+          }
+
           for (const predRow of predsData) {
-            const pointsWon = calculatePoints(
+            const settled = settlePredictionWithPowerUp(
               fixture.sport,
               predRow.predicted_home_score,
               predRow.predicted_away_score,
               homeScore,
-              awayScore
+              awayScore,
+              predRow.applied_powerup_id
+                ? powerupTypeById.get(predRow.applied_powerup_id) ?? null
+                : null,
             );
             await supabase
               .from('predictions')
-              .update({ submitted: true, points_won: pointsWon })
+              .update({
+                submitted: true,
+                points_won: settled.earnedPoints,
+                is_banker_exact: settled.isBankerExact,
+              })
               .eq('id', predRow.id);
+
+            if (predRow.applied_powerup_id) {
+              await supabase
+                .from('user_powerups')
+                .update({
+                  status: 'used',
+                  used_at: new Date().toISOString(),
+                  applied_fixture_id: fixture.id,
+                })
+                .eq('id', predRow.applied_powerup_id)
+                .eq('status', 'available');
+            }
+
+            if (predRow.user_id) {
+              await supabase.rpc('evaluate_powerup_unlocks', {
+                p_user_id: predRow.user_id,
+                p_sport_type: fixture.sport,
+                p_season_id: null,
+              });
+            }
           }
         }
       }
@@ -307,22 +353,54 @@ export default function FixturesManager({
           const { data: predsData } = await supabase
             .from('predictions')
             .select(
-              'id, predicted_home_score, predicted_away_score, user_id, match_id',
+              'id, predicted_home_score, predicted_away_score, user_id, match_id, applied_powerup_id',
             )
             .eq('match_id', fixture.id);
           if (predsData) {
+            const powerupIds = [
+              ...new Set(
+                predsData
+                  .map((p) => p.applied_powerup_id as string | null)
+                  .filter((id): id is string => !!id),
+              ),
+            ];
+            const powerupTypeById = new Map<string, PowerUpId>();
+            if (powerupIds.length > 0) {
+              const { data: chips } = await supabase
+                .from('user_powerups')
+                .select('id, powerup_type')
+                .in('id', powerupIds);
+              for (const chip of chips ?? []) {
+                powerupTypeById.set(chip.id, chip.powerup_type as PowerUpId);
+              }
+            }
+
             for (const predRow of predsData) {
-              const pointsWon = calculatePoints(
+              const settled = settlePredictionWithPowerUp(
                 fixture.sport,
                 predRow.predicted_home_score,
                 predRow.predicted_away_score,
                 fixture.homeScore,
-                fixture.awayScore
+                fixture.awayScore,
+                predRow.applied_powerup_id
+                  ? powerupTypeById.get(predRow.applied_powerup_id) ?? null
+                  : null,
               );
               await supabase
                 .from('predictions')
-                .update({ points_won: pointsWon })
+                .update({
+                  points_won: settled.earnedPoints,
+                  is_banker_exact: settled.isBankerExact,
+                })
                 .eq('id', predRow.id);
+
+              if (predRow.user_id) {
+                await supabase.rpc('evaluate_powerup_unlocks', {
+                  p_user_id: predRow.user_id,
+                  p_sport_type: fixture.sport,
+                  p_season_id: null,
+                });
+              }
             }
           }
           settledCount++;

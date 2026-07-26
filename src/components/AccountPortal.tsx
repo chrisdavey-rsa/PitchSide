@@ -119,12 +119,12 @@ export default function AccountPortal({
                 {activeTab === 'leagues' && 'My Registered Leagues'}
                 {activeTab === 'change-email' && 'Change Email'}
                 {activeTab === 'change-password' && 'Change Password'}
-                {activeTab === 'historic-scores' && 'Contestant Historic Scores'}
+                {activeTab === 'historic-scores' && 'Prediction History'}
                 {activeTab === 'delete-account' && 'Erase Account Data'}
               </h4>
               <p className="text-[10px] text-slate-500 font-mono uppercase tracking-wider">
                 {activeTab === 'leagues' && 'League Memberships by Season'}
-                {activeTab === 'historic-scores' && 'Performance Vectors & Seasonal Archives'}
+                {activeTab === 'historic-scores' && 'Performance HUD & Match Results'}
                 {activeTab === 'delete-account' && 'Irreversible Personal Data Erasure'}
               </p>
             </div>

@@ -1,15 +1,14 @@
 /**
- * @license
- * SPDX-License-Identifier: Apache-2.0
+ * PitchSide Player Guide — sport-scoped rules + dedicated Power-Ups section.
+ * Mobile: sticky horizontal tabs. Desktop: left sidebar + content pane.
  */
 
-import React, { useState } from 'react';
-import { AnimatePresence } from 'motion/react';
+import React, { useMemo, useState } from "react";
+import { AnimatePresence } from "motion/react";
 import {
   Award,
   Info,
   Shield,
-  HelpCircle,
   X,
   LifeBuoy,
   Ghost,
@@ -18,293 +17,240 @@ import {
   Users,
   Lock,
   ChevronRight,
-} from 'lucide-react';
-import { UserProfile } from '../types';
-import { useCommunityShieldScheduled } from './events/CommunityShieldEvent';
-import { POWER_UPS } from '../data/powerUps';
-import PowerUpModal from './powerups/PowerUpModal';
-import { btnClose } from '../ui';
-import { retainOverlayHistoryDuringTransition } from '../hooks/useOverlayHistory';
+  BookOpen,
+  Target,
+  Zap,
+} from "lucide-react";
+import { UserProfile } from "../types";
+import { useCommunityShieldScheduled } from "./events/CommunityShieldEvent";
+import { POWER_UPS } from "../constants/powerups";
+import PowerUpModal from "./powerups/PowerUpModal";
+import HowToPredictStepper from "./predictions/HowToPredictStepper";
+import { btnClose } from "../ui";
+import { retainOverlayHistoryDuringTransition } from "../hooks/useOverlayHistory";
+
+type RulesSport = "football" | "rugby" | "formula1" | "golf";
+type RulesNavId = RulesSport | "powerups";
+
+type NavItem = {
+  id: RulesNavId;
+  label: string;
+  short: string;
+  accent: string;
+  activeAccent: string;
+  adminOnly?: boolean;
+};
+
+const SPORT_NAV: NavItem[] = [
+  {
+    id: "football",
+    label: "Football",
+    short: "FT",
+    accent: "text-blue-300 border-blue-500/30",
+    activeAccent: "bg-blue-500/15 text-blue-100 border-blue-500/40",
+  },
+  {
+    id: "rugby",
+    label: "Rugby",
+    short: "RU",
+    accent: "text-amber-300 border-amber-500/30",
+    activeAccent: "bg-amber-500/15 text-amber-100 border-amber-500/40",
+  },
+  {
+    id: "formula1",
+    label: "Formula 1",
+    short: "F1",
+    accent: "text-red-300 border-red-500/30",
+    activeAccent: "bg-red-500/15 text-red-100 border-red-500/40",
+    adminOnly: true,
+  },
+  {
+    id: "golf",
+    label: "Golf",
+    short: "GF",
+    accent: "text-emerald-300 border-emerald-500/30",
+    activeAccent: "bg-emerald-500/15 text-emerald-100 border-emerald-500/40",
+    adminOnly: true,
+  },
+];
+
+const POWERUPS_NAV: NavItem = {
+  id: "powerups",
+  label: "Power-Ups",
+  short: "PU",
+  accent: "text-violet-300 border-violet-500/30",
+  activeAccent: "bg-violet-500/15 text-violet-100 border-violet-500/40",
+};
 
 interface RulesInfoProps {
   user?: UserProfile | null;
   onClose?: () => void;
 }
 
-export default function RulesInfo({ user, onClose }: RulesInfoProps) {
-  const communityShieldScheduled = useCommunityShieldScheduled();
-  const [activePowerUp, setActivePowerUp] = useState<string | null>(null);
-
-  const handleReturnToDashboard = () => {
-    if (!onClose) return;
-    // Close back to Dashboard — never history.back() / window.close().
-    retainOverlayHistoryDuringTransition();
-    onClose();
-  };
-
+function SectionHeading({
+  icon: Icon,
+  title,
+  barClass,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  barClass: string;
+}) {
   return (
-    <div
-      className="bg-slate-900/90 backdrop-blur-md rounded-2xl border border-slate-800 p-6 shadow-2xl text-slate-100 max-w-4xl mx-auto my-4 overflow-hidden relative"
-    >
-      {onClose && (
-        <button
-          id="close-rules-btn"
-          type="button"
-          onClick={handleReturnToDashboard}
-          className={`absolute top-4 right-4 z-10 ${btnClose}`}
-          title="Return to Dashboard"
-        >
-          <X className="w-5 h-5" />
-        </button>
-      )}
+    <h3 className="text-lg font-bold font-display text-white mb-3 flex items-center gap-2">
+      <span className={`w-1.5 h-5 rounded-full ${barClass}`} />
+      <Icon className="w-4.5 h-4.5 text-slate-400" />
+      {title}
+    </h3>
+  );
+}
 
-      <div className="flex items-center gap-3 mb-6 border-b border-slate-800 pb-4">
-        <Award className="w-8 h-8 text-yellow-400" />
-        <div>
-          <h2 className="text-2xl font-bold font-display tracking-tight text-white">
-            PitchSide Player Guide
-          </h2>
-          <p className="text-xs text-slate-400 font-mono">
-            SCORING, LEAGUES & THE FORGIVENESS MECHANIC
+function FootballContent({
+  communityShieldScheduled,
+}: {
+  communityShieldScheduled: boolean;
+}) {
+  return (
+    <div className="space-y-8">
+      <HowToPredictStepper sport="football" />
+
+      <section>
+        <SectionHeading icon={BookOpen} title="How to Play" barClass="bg-blue-400" />
+        <div className="p-4 bg-slate-950/40 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed space-y-3">
+          <p>
+            You are automatically entered into the Global Leaderboard so you can start playing
+            immediately. Want to compete directly with friends? Create or join a Private League from
+            the navigation menu.
+          </p>
+          <p>
+            Lock scoreline predictions before kick-off. Points are awarded automatically once a match
+            is settled - the closer your call, the more you score.
           </p>
         </div>
-      </div>
+      </section>
 
-      {/* ================= HOW IT WORKS ================= */}
-      <div className="mb-8 p-4 bg-slate-950/40 rounded-xl border border-slate-800 text-sm text-slate-300 leading-relaxed">
-        <p>
-          Welcome to PitchSide. Join or create a <span className="text-white font-semibold">League</span>,
-          predict the scorelines of upcoming fixtures, and climb the leaderboard. Points are awarded
-          automatically once a match is settled — the closer your prediction, the more you score.
-        </p>
-      </div>
-
-      {/* ================= CORE SCORING ================= */}
-      <h3 className="text-lg font-bold font-display text-white mb-3 flex items-center gap-2">
-        <span className="w-1.5 h-5 bg-yellow-400 rounded-full" />
-        Core Scoring Mechanics
-      </h3>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* Football Rules Card */}
-        <div className="p-5 bg-slate-950/40 rounded-xl border border-blue-900/30 hover:border-blue-800/40 transition-all flex flex-col justify-between">
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <span className="p-2 bg-blue-500/10 rounded-lg text-blue-400 font-bold text-sm">FT</span>
-              <h3 className="text-lg font-bold font-display text-blue-300">Football Predictions</h3>
-            </div>
-            <p className="text-sm text-slate-300 mb-4 font-sans leading-relaxed">
-              Football rewards accuracy — from nailing the exact scoreline down to simply calling
-              the right winner:
-            </p>
-
-            <div className="space-y-3.5 mb-6">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-6 shrink-0 bg-emerald-500/20 text-emerald-400 font-mono text-xs font-bold flex items-center justify-center rounded-sm">5 pts</div>
-                <div>
-                  <h4 className="text-sm font-semibold text-white">Correct Exact Scoreline</h4>
-                  <p className="text-xs text-slate-400">Guessing the exact final scoreline. E.g., predicted 2–0 when result is 2–0.</p>
-                </div>
+      <section>
+        <SectionHeading icon={Target} title="Points System" barClass="bg-yellow-400" />
+        <div className="p-5 bg-slate-950/40 rounded-xl border border-blue-900/30 space-y-3.5">
+          <p className="text-sm text-slate-300 font-sans leading-relaxed">
+            Football rewards accuracy - from nailing the exact scoreline down to calling the right
+            winner:
+          </p>
+          {[
+            {
+              pts: "5 pts",
+              tone: "bg-emerald-500/20 text-emerald-400",
+              title: "Correct Exact Scoreline",
+              body: "Guessing the exact final scoreline. E.g., predicted 2-0 when result is 2-0.",
+            },
+            {
+              pts: "3 pts",
+              tone: "bg-blue-500/20 text-blue-400",
+              title: "Correct Outcome + Goal Margin",
+              body: "Correct result (win/draw/loss) AND goal margin but different scores.",
+            },
+            {
+              pts: "1 pt",
+              tone: "bg-slate-500/30 text-slate-300",
+              title: "Correct Winner / Incorrect Margin",
+              body: "Picking the correct outcome but with a different margin.",
+            },
+            {
+              pts: "0 pts",
+              tone: "bg-red-500/20 text-red-400",
+              title: "Incorrect Match Outcome",
+              body: "Predicting the wrong winner or incorrectly predicting a draw.",
+            },
+          ].map((row) => (
+            <div key={row.title} className="flex items-start gap-3">
+              <div
+                className={`w-10 h-6 shrink-0 font-mono text-xs font-bold flex items-center justify-center rounded-sm ${row.tone}`}
+              >
+                {row.pts}
               </div>
-
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-6 shrink-0 bg-blue-500/20 text-blue-400 font-mono text-xs font-bold flex items-center justify-center rounded-sm">3 pts</div>
-                <div>
-                  <h4 className="text-sm font-semibold text-white">Correct Outcome + Goal Margin</h4>
-                  <p className="text-xs text-slate-400 font-sans">Correct result (win/draw/loss) AND goal margin but different scores. E.g., predicted 3–1 when actual is 2–0.</p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-6 shrink-0 bg-slate-500/30 text-slate-300 font-mono text-xs font-bold flex items-center justify-center rounded-sm">1 pt</div>
-                <div>
-                  <h4 className="text-sm font-semibold text-white">Correct Winner / Incorrect Margin</h4>
-                  <p className="text-xs text-slate-400">Picking the correct outcome but with a different margin. E.g., predicted 2–0 when the match finished 1–0.</p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-6 shrink-0 bg-red-500/20 text-red-400 font-mono text-xs font-bold flex items-center justify-center rounded-sm">0 pts</div>
-                <div>
-                  <h4 className="text-sm font-semibold text-white">Incorrect Match Outcome</h4>
-                  <p className="text-xs text-slate-400">Predicting the wrong winner or incorrectly predicting a draw.</p>
-                </div>
+              <div>
+                <h4 className="text-sm font-semibold text-white">{row.title}</h4>
+                <p className="text-xs text-slate-400">{row.body}</p>
               </div>
             </div>
-          </div>
-
+          ))}
           <div className="bg-blue-950/20 p-3 rounded-lg border border-blue-500/10 text-xs text-blue-300 font-sans flex items-start gap-2">
             <Info className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>Draws with matching margins (e.g., predicting 1-1 and result is 2-2) qualify for the 3 points bracket.</span>
+            <span>
+              Draws with matching margins (e.g., predicting 1-1 and result is 2-2) qualify for the 3
+              points bracket.
+            </span>
           </div>
         </div>
 
-        {/* Rugby Rules Card */}
-        <div className="p-5 bg-slate-950/40 rounded-xl border border-amber-950/30 hover:border-amber-800/40 transition-all flex flex-col justify-between">
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <span className="p-2 bg-amber-500/10 rounded-lg text-amber-400 font-bold text-sm">RU</span>
-              <h3 className="text-lg font-bold font-display text-amber-300">Rugby Predictions</h3>
-            </div>
-            <p className="text-sm text-slate-300 mb-4 font-sans leading-relaxed">
-              Rugby is all about the <span className="text-white font-semibold">margin</span>. Pick the
-              winning side and how close you get to their winning margin decides your points:
-            </p>
-
-            <div className="space-y-3.5 mb-6">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-6 shrink-0 bg-emerald-500/20 text-emerald-400 font-mono text-xs font-bold flex items-center justify-center rounded-sm">5 pts</div>
-                <div>
-                  <h4 className="text-sm font-semibold text-white">Correct Winner + Exact Margin</h4>
-                  <p className="text-xs text-slate-400">Picking the correct winner and perfectly guessing the winning margin of points.</p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-6 shrink-0 bg-amber-500/20 text-amber-400 font-mono text-xs font-bold flex items-center justify-center rounded-sm">3 pts</div>
-                <div>
-                  <h4 className="text-sm font-semibold text-white font-sans">Correct Winner + Margin (±7 points)</h4>
-                  <p className="text-xs text-slate-400">Correct winner with your estimated margin within 7 points (above/below) the actual margin.</p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-6 shrink-0 bg-slate-500/30 text-slate-300 font-mono text-xs font-bold flex items-center justify-center rounded-sm">1 pt</div>
-                <div>
-                  <h4 className="text-sm font-semibold text-white font-sans">Correct Winner + Margin (±10 points)</h4>
-                  <p className="text-xs text-slate-400">Correct winner with your estimated margin within 10 points (above/below) the actual margin.</p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-6 shrink-0 bg-red-500/20 text-red-400 font-mono text-xs font-bold flex items-center justify-center rounded-sm">0 pts</div>
-                <div>
-                  <h4 className="text-sm font-semibold text-white font-sans">Incorrect Outcome or Margin &gt; 10 pts</h4>
-                  <p className="text-xs text-slate-400">Predicting the wrong winner, or the correct winner but a margin off by more than 10 points.</p>
-                </div>
-              </div>
-            </div>
+        <div className="mt-5 p-5 bg-slate-950/40 rounded-xl border border-emerald-900/30">
+          <div className="flex items-center gap-2 mb-3">
+            <LifeBuoy className="w-5 h-5 text-emerald-400" />
+            <h4 className="text-base font-bold font-display text-emerald-300">
+              The Football Forgiveness Mechanic
+            </h4>
           </div>
-
-          <div className="bg-amber-950/20 p-3 rounded-lg border border-amber-500/15 text-xs text-amber-300 font-sans flex items-start gap-2">
-            <Info className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>If the outcome doesn't match or the guessed margin error exceeds 10 points, 0 points are assigned. Note: Rugby has no drops — every game counts.</span>
-          </div>
-        </div>
-      </div>
-
-      {/* ================= FOOTBALL FORGIVENESS MECHANIC ================= */}
-      <h3 className="text-lg font-bold font-display text-white mt-8 mb-3 flex items-center gap-2">
-        <span className="w-1.5 h-5 bg-emerald-400 rounded-full" />
-        The Football Forgiveness Mechanic
-      </h3>
-      <div className="p-5 bg-slate-950/40 rounded-xl border border-emerald-900/30">
-        <div className="flex items-center gap-2 mb-3">
-          <LifeBuoy className="w-5 h-5 text-emerald-400" />
-          <h4 className="text-base font-bold font-display text-emerald-300">Your Best Results Count — Worst Weeks Are Dropped</h4>
-        </div>
-        <p className="text-sm text-slate-300 leading-relaxed mb-4">
-          Nobody predicts a perfect football season. To keep the leaderboard fair, each football
-          competition lets you
-          <span className="text-white font-semibold"> drop a number of your worst results</span>. Once
-          you've played more games than your drop allowance, your lowest-scoring weeks stop counting
-          toward your total — so a couple of bad rounds won't sink your season.
-        </p>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-          <div className="bg-slate-900/60 rounded-lg border border-slate-800 p-3">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="w-6 h-6 rounded-md bg-emerald-500/15 text-emerald-400 text-xs font-bold flex items-center justify-center">✓</span>
-              <span className="text-xs font-bold text-white uppercase font-mono">Best Results</span>
-            </div>
-            <p className="text-xs text-slate-400">Your kept results — this is your official leaderboard total.</p>
-          </div>
-          <div className="bg-slate-900/60 rounded-lg border border-slate-800 p-3">
-            <div className="flex items-center gap-2 mb-1">
-              <Ghost className="w-5 h-5 text-slate-400" />
-              <span className="text-xs font-bold text-white uppercase font-mono">Ghost Points</span>
-            </div>
-            <p className="text-xs text-slate-400">What your score <em>would</em> be if no weeks were dropped. Shown in muted text on the leaderboard.</p>
-          </div>
-          <div className="bg-slate-900/60 rounded-lg border border-slate-800 p-3">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase">Drops: 4</span>
-            </div>
-            <p className="text-xs text-slate-400">The badge by your name shows how many drops you still have remaining this sport.</p>
-          </div>
-        </div>
-
-        <div className="bg-slate-900/50 rounded-lg border border-slate-800 p-3.5">
-          <p className="text-xs font-bold text-slate-300 uppercase font-mono mb-2">Football Drop Allowance By Competition</p>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-            <div className="bg-slate-950/50 rounded-md p-2 border border-slate-800">
-              <div className="text-white font-semibold">Premier League</div>
-              <div className="text-emerald-400 font-mono">4 drops</div>
-            </div>
-            <div className="bg-slate-950/50 rounded-md p-2 border border-slate-800">
-              <div className="text-white font-semibold">Championship</div>
-              <div className="text-emerald-400 font-mono">6 drops</div>
-            </div>
-            <div className="bg-slate-950/50 rounded-md p-2 border border-slate-800">
-              <div className="text-white font-semibold">Scottish Prem</div>
-              <div className="text-emerald-400 font-mono">4 drops</div>
-            </div>
-            <div className="bg-slate-950/50 rounded-md p-2 border border-slate-800">
-              <div className="text-white font-semibold">Other Football</div>
-              <div className="text-slate-500 font-mono">0 drops</div>
-            </div>
-          </div>
-          <p className="text-[11px] text-slate-500 mt-2.5 leading-relaxed">
-            Long football league seasons grant more forgiveness. Drops only kick in once you've played
-            more games than the allowance, so you always keep a full set of results. Rugby has no drops
-            — every rugby prediction counts toward your total.
+          <p className="text-sm text-slate-300 leading-relaxed mb-4">
+            Each football competition lets you drop a number of your lowest-scoring weeks. The exact
+            drop allowance scales based on the length of the season:
           </p>
+          <ul className="mb-4 space-y-2 text-sm text-slate-300">
+            <li className="flex gap-2">
+              <span className="text-emerald-400 font-bold shrink-0">*</span>
+              <span>
+                <span className="text-white font-semibold">Premier League:</span> 38 games · 3 drop
+                weeks.
+              </span>
+            </li>
+            <li className="flex gap-2">
+              <span className="text-emerald-400 font-bold shrink-0">*</span>
+              <span>
+                <span className="text-white font-semibold">Scottish Premiership:</span> 38 games
+                (including the post-split fixtures) · 3 drop weeks.
+              </span>
+            </li>
+            <li className="flex gap-2">
+              <span className="text-emerald-400 font-bold shrink-0">*</span>
+              <span>
+                <span className="text-white font-semibold">EFL Championship:</span> 46 games · 4 drop
+                weeks.
+              </span>
+            </li>
+          </ul>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+            <div className="bg-slate-900/60 rounded-lg border border-slate-800 p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-6 h-6 rounded-md bg-emerald-500/15 text-emerald-400 text-xs font-bold flex items-center justify-center">
+                  ✓
+                </span>
+                <span className="text-xs font-bold text-white uppercase font-mono">Best Results</span>
+              </div>
+              <p className="text-xs text-slate-400">Your kept results - official leaderboard total.</p>
+            </div>
+            <div className="bg-slate-900/60 rounded-lg border border-slate-800 p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <Ghost className="w-5 h-5 text-slate-400" />
+                <span className="text-xs font-bold text-white uppercase font-mono">Ghost Points</span>
+              </div>
+              <p className="text-xs text-slate-400">
+                What your score would be if no weeks were dropped.
+              </p>
+            </div>
+            <div className="bg-slate-900/60 rounded-lg border border-slate-800 p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase">
+                  Drops
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">Badge by your name shows remaining drops.</p>
+            </div>
+          </div>
         </div>
-      </div>
+      </section>
 
-      {/* ================= POWER-UP CHIPS ================= */}
-      <h3 className="text-lg font-bold font-display text-white mt-8 mb-3 flex items-center gap-2">
-        <span className="w-1.5 h-5 bg-amber-400 rounded-full" />
-        Power-Up Chips
-      </h3>
-      <div className="p-5 bg-slate-950/40 rounded-xl border border-slate-800">
-        <p className="text-sm text-slate-300 leading-relaxed mb-4">
-          Power-Up Chips are strategic assets you deploy for a tactical edge. Tap any chip to see
-          how to earn it, how to use it, and the impact it has on your points.
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {POWER_UPS.map((powerUp) => {
-            const Icon = powerUp.icon;
-            return (
-              <button
-                key={powerUp.id}
-                onClick={() => setActivePowerUp(powerUp.id)}
-                className={`group flex items-center gap-3 text-left p-3.5 rounded-xl border ${powerUp.theme.border} ${powerUp.theme.bg} hover:brightness-125 transition-all cursor-pointer`}
-              >
-                <div className={`shrink-0 flex h-10 w-10 items-center justify-center rounded-lg border ${powerUp.theme.border} bg-slate-950/50`}>
-                  <Icon className={`h-5 w-5 ${powerUp.theme.iconText}`} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <h4 className={`text-sm font-bold font-display ${powerUp.theme.accentText}`}>
-                    {powerUp.name}
-                  </h4>
-                  <p className="text-xs text-slate-400 whitespace-normal break-words leading-snug">
-                    {powerUp.tagline}
-                  </p>
-                </div>
-                <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-slate-400 group-hover:translate-x-0.5 transition-all shrink-0" />
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ================= GOLDEN TICKET (only when a Community Shield game is scheduled) ================= */}
       {communityShieldScheduled && (
-        <>
-          <h3 className="text-lg font-bold font-display text-white mt-8 mb-3 flex items-center gap-2">
-            <span className="w-1.5 h-5 bg-amber-400 rounded-full" />
-            The Golden Ticket
-          </h3>
+        <section>
+          <SectionHeading icon={Ticket} title="The Golden Ticket" barClass="bg-amber-400" />
           <div className="p-5 rounded-xl border border-amber-400/30 bg-gradient-to-br from-amber-500/10 via-slate-950/40 to-slate-950/40">
             <div className="flex items-start gap-3">
               <div className="shrink-0 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-amber-300 to-yellow-600 shadow-lg shadow-amber-900/40">
@@ -313,80 +259,422 @@ export default function RulesInfo({ user, onClose }: RulesInfoProps) {
               <div>
                 <div className="flex items-center gap-1.5 mb-1">
                   <Sparkles className="w-4 h-4 text-amber-300" />
-                  <h4 className="text-base font-bold font-display text-amber-200">Community Shield Special</h4>
+                  <h4 className="text-base font-bold font-display text-amber-200">
+                    Community Shield Special
+                  </h4>
                 </div>
                 <p className="text-sm text-slate-300 leading-relaxed">
-                  Football is back! Before the <span className="text-white font-semibold">Community Shield</span>{' '}
-                  kicks off, a special pop-up invites you to predict the <span className="text-amber-200 font-semibold">exact
-                  final score</span>. Nail it and you win a <span className="text-amber-200 font-semibold">Golden Ticket</span> —
-                  a one-off season-opener reward. It's a single bonus fixture, separate from your league standings.
+                  Nail the exact Community Shield scoreline for a one-off Golden Ticket reward -
+                  separate from your league standings.
                 </p>
               </div>
             </div>
           </div>
-        </>
+        </section>
       )}
+    </div>
+  );
+}
 
-      {/* ================= LEAGUES ================= */}
-      <h3 className="text-lg font-bold font-display text-white mt-8 mb-3 flex items-center gap-2">
-        <span className="w-1.5 h-5 bg-purple-400 rounded-full" />
-        Leagues
-      </h3>
-      <div className="p-5 bg-slate-950/40 rounded-xl border border-slate-800">
-        <div className="flex items-center gap-2 mb-2">
-          <Users className="w-5 h-5 text-yellow-500" />
-          <h4 className="text-base font-bold font-display text-white">Where You Compete</h4>
+function RugbyContent() {
+  return (
+    <div className="space-y-8">
+      <HowToPredictStepper sport="rugby" />
+
+      <section>
+        <SectionHeading icon={BookOpen} title="How to Play" barClass="bg-amber-400" />
+        <div className="p-4 bg-slate-950/40 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed space-y-3">
+          <p>
+            Pick the match winner and select their exact winning margin. Lock it in before kick-off.
+            Remember: Rugby requires total consistency. Every gameweek counts and there are no drop
+            weeks.
+          </p>
         </div>
-        <p className="text-sm text-slate-300 leading-relaxed">
-          Open <span className="text-white font-semibold">Leagues</span> from the main menu. Use{' '}
-          <span className="text-white font-semibold">View</span>,{' '}
-          <span className="text-white font-semibold">Join</span> (code + password), or{' '}
-          <span className="text-white font-semibold">Create</span> to get into a competition. You must
-          be in at least one league before the Match Predictor unlocks.
-        </p>
+      </section>
+
+      <section>
+        <SectionHeading icon={Target} title="Points System" barClass="bg-yellow-400" />
+        <div className="p-5 bg-slate-950/40 rounded-xl border border-amber-950/30 space-y-3.5">
+          {[
+            {
+              pts: "5 pts",
+              tone: "bg-emerald-500/20 text-emerald-400",
+              title: "Correct Winner + Exact Margin",
+              body: "Correct winner and perfectly guessing the winning margin.",
+            },
+            {
+              pts: "3 pts",
+              tone: "bg-amber-500/20 text-amber-400",
+              title: "Correct Winner + Margin (±7)",
+              body: "Correct winner with margin within 7 points of actual.",
+            },
+            {
+              pts: "1 pt",
+              tone: "bg-slate-500/30 text-slate-300",
+              title: "Correct Winner + Margin (±10)",
+              body: "Correct winner with margin within 10 points of actual.",
+            },
+            {
+              pts: "0 pts",
+              tone: "bg-red-500/20 text-red-400",
+              title: "Incorrect Outcome or Margin > 10",
+              body: "Wrong winner, or margin off by more than 10 points.",
+            },
+          ].map((row) => (
+            <div key={row.title} className="flex items-start gap-3">
+              <div
+                className={`w-10 h-6 shrink-0 font-mono text-xs font-bold flex items-center justify-center rounded-sm ${row.tone}`}
+              >
+                {row.pts}
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold text-white">{row.title}</h4>
+                <p className="text-xs text-slate-400">{row.body}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function Formula1Content() {
+  return (
+    <div className="space-y-8">
+      <HowToPredictStepper sport="formula1" />
+      <section>
+        <SectionHeading icon={BookOpen} title="How to Play" barClass="bg-red-400" />
+        <div className="p-4 bg-slate-950/40 rounded-xl border border-slate-800 text-sm text-slate-300 leading-relaxed">
+          Build Qualifying Top 10 and Race grids before the session locks. Drag or tap drivers into
+          slots, then confirm.
+          <p className="text-xs text-red-300/80 font-mono uppercase tracking-wider mt-3">
+            Admin preview - not yet live for players
+          </p>
+        </div>
+      </section>
+      <section>
+        <SectionHeading icon={Target} title="Points System" barClass="bg-yellow-400" />
+        <div className="p-5 bg-slate-950/40 rounded-xl border border-red-900/30 text-sm text-slate-300">
+          Scoring rewards correct drivers in the right positions across Qualifying and Race, with
+          Fastest Lap bonuses. Final bands publish before public launch.
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function GolfContent() {
+  return (
+    <div className="space-y-8">
+      <HowToPredictStepper sport="golf" />
+      <section>
+        <SectionHeading icon={BookOpen} title="How to Play" barClass="bg-emerald-400" />
+        <div className="p-4 bg-slate-950/40 rounded-xl border border-slate-800 text-sm text-slate-300 leading-relaxed">
+          Select finishers across OWGR tiers, then lock before Thursday&apos;s first tee time.
+          <p className="text-xs text-emerald-300/80 font-mono uppercase tracking-wider mt-3">
+            Admin preview - not yet live for players
+          </p>
+        </div>
+      </section>
+      <section>
+        <SectionHeading icon={Target} title="Points System" barClass="bg-yellow-400" />
+        <div className="p-5 bg-slate-950/40 rounded-xl border border-emerald-900/30 text-sm text-slate-300">
+          Points scale with how close your predicted finishers land to the official leaderboard.
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function PowerUpsRulesContent({ isAdmin }: { isAdmin?: boolean }) {
+  const [activePowerUp, setActivePowerUp] = useState<string | null>(null);
+
+  return (
+    <div className="space-y-6">
+      <section>
+        <SectionHeading icon={Zap} title="Power-Ups" barClass="bg-violet-400" />
+        <div className="p-4 bg-slate-950/40 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed space-y-3">
+          <p>
+            Power-Ups give you a strategic edge. They are earned by making consistent predictions and
+            must be used before the end of that specific sport&apos;s season. Unused chips do not
+            carry over to the next year.
+          </p>
+          <p>
+            Power-Ups apply to Football and Rugby seasons.
+            {isAdmin && (
+              <>
+                {" "}
+                Administrators can also preview Power-Up behaviour for Formula 1 and Golf ahead of
+                public launch.
+              </>
+            )}
+          </p>
+        </div>
+      </section>
+
+      <div className="overflow-hidden rounded-xl border border-slate-800">
+        <table className="w-full text-left">
+          <thead>
+            <tr className="border-b border-slate-800 bg-slate-950/60">
+              <th className="px-3 py-2 text-[9px] font-mono uppercase tracking-widest text-slate-500 font-semibold">
+                Chip Name
+              </th>
+              <th className="px-3 py-2 text-[9px] font-mono uppercase tracking-widest text-slate-500 font-semibold">
+                Core Function
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {POWER_UPS.map((powerUp) => (
+              <tr
+                key={`ref-${powerUp.id}`}
+                className="border-b border-slate-800/80 last:border-b-0"
+              >
+                <td className="px-3 py-2.5 text-[11px] font-bold font-display text-slate-200 whitespace-nowrap align-top">
+                  {powerUp.name}
+                </td>
+                <td className="px-3 py-2.5 text-[11px] text-slate-400 font-sans leading-snug">
+                  {powerUp.tagline}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
-      {/* ================= ADMIN (admins only) ================= */}
-      {user?.isAdmin && (
-        <>
-          <h3 className="text-lg font-bold font-display text-white mt-8 mb-3 flex items-center gap-2">
-            <span className="w-1.5 h-5 bg-purple-500 rounded-full" />
-            Administrator Tools
-          </h3>
-          <div className="p-5 rounded-xl border border-purple-500/30 bg-purple-950/20">
-            <div className="flex items-center gap-2 mb-2">
-              <Lock className="w-5 h-5 text-purple-400" />
-              <h4 className="text-base font-bold font-display text-purple-300">Admin Area</h4>
-            </div>
-            <p className="text-sm text-slate-300 leading-relaxed">
-              As an administrator you can open the <span className="text-white font-semibold">Admin Area</span> to
-              manage fixtures, enter final scores (which triggers automatic scoring), review every player's
-              predictions and points, and manage player accounts. Entering a match's final score settles it and
-              updates the global leaderboard for all players.
-            </p>
-            <p className="text-[11px] text-purple-300/70 mt-2 font-mono uppercase tracking-wider">
-              Visible to administrators only
-            </p>
-          </div>
-        </>
-      )}
-
-      <div className="mt-8 pt-4 border-t border-slate-800 text-center text-xs text-slate-500 font-mono flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="flex items-center gap-1.5 justify-center">
-          <Shield className="w-4 h-4 text-slate-400" />
-          <span>Fair Play Guarantee: Scoring runs server-side on the leaderboard</span>
-        </div>
-        <div>Version 1.3.0</div>
+      <div className="grid grid-cols-1 gap-3">
+        {POWER_UPS.map((powerUp) => {
+          const Icon = powerUp.icon;
+          return (
+            <button
+              key={powerUp.id}
+              type="button"
+              onClick={() => setActivePowerUp(powerUp.id)}
+              className={`group text-left rounded-2xl border p-4 transition-all cursor-pointer hover:brightness-110 ${
+                powerUp.isPremium
+                  ? "border-amber-300/50 bg-linear-to-br from-amber-500/15 via-yellow-500/10 to-slate-950 shadow-[0_0_28px_rgba(251,191,36,0.2)]"
+                  : `${powerUp.theme.border} ${powerUp.theme.bg}`
+              }`}
+            >
+              <div className="flex items-start gap-3">
+                <div
+                  className={`shrink-0 flex h-11 w-11 items-center justify-center rounded-xl border ${
+                    powerUp.isPremium
+                      ? "border-amber-200/40 bg-slate-950/70"
+                      : `${powerUp.theme.border} bg-slate-950/50`
+                  }`}
+                >
+                  <Icon
+                    className={`h-5 w-5 ${
+                      powerUp.isPremium ? "text-amber-200" : powerUp.theme.iconText
+                    }`}
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <h4
+                      className={`text-xs font-bold font-display ${
+                        powerUp.isPremium ? "text-amber-100" : powerUp.theme.accentText
+                      }`}
+                    >
+                      {powerUp.name}
+                    </h4>
+                    <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-slate-400 shrink-0" />
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-0.5">{powerUp.tagline}</p>
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
+                    <div className="rounded-lg border border-slate-800/80 bg-slate-950/40 px-2.5 py-2">
+                      <span className="block text-[8px] font-mono uppercase tracking-widest text-slate-500 mb-1">
+                        Function
+                      </span>
+                      <p className="text-slate-300 leading-snug">{powerUp.gameImpact}</p>
+                    </div>
+                    <div className="rounded-lg border border-slate-800/80 bg-slate-950/40 px-2.5 py-2">
+                      <span className="block text-[8px] font-mono uppercase tracking-widest text-slate-500 mb-1">
+                        How earned
+                      </span>
+                      <p className="text-slate-300 leading-snug">{powerUp.howToEarn}</p>
+                    </div>
+                  </div>
+                  {powerUp.notes && (
+                    <p className="mt-2 text-[9px] text-amber-200/80 leading-snug">{powerUp.notes}</p>
+                  )}
+                </div>
+              </div>
+            </button>
+          );
+        })}
       </div>
 
       <AnimatePresence>
         {activePowerUp && (
-          <PowerUpModal
-            powerUpId={activePowerUp}
-            onClose={() => setActivePowerUp(null)}
-          />
+          <PowerUpModal powerUpId={activePowerUp} onClose={() => setActivePowerUp(null)} />
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+export default function RulesInfo({ user, onClose }: RulesInfoProps) {
+  const communityShieldScheduled = useCommunityShieldScheduled();
+  const visibleNav = useMemo(() => {
+    const sports = SPORT_NAV.filter((s) => !s.adminOnly || user?.isAdmin === true);
+    return [...sports, POWERUPS_NAV];
+  }, [user?.isAdmin]);
+
+  const [activeNav, setActiveNav] = useState<RulesNavId>("football");
+
+  const safeNav = visibleNav.some((s) => s.id === activeNav) ? activeNav : "football";
+
+  const handleReturnToDashboard = () => {
+    if (!onClose) return;
+    retainOverlayHistoryDuringTransition();
+    onClose();
+  };
+
+  return (
+    <div className="bg-slate-900/90 backdrop-blur-md rounded-2xl border border-slate-800 shadow-2xl text-slate-100 max-w-5xl mx-auto my-4 overflow-hidden relative">
+      {onClose && (
+        <button
+          id="close-rules-btn"
+          type="button"
+          onClick={handleReturnToDashboard}
+          className={`absolute top-4 right-4 z-20 ${btnClose}`}
+          title="Return to Dashboard"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      )}
+
+      <div className="flex items-center gap-3 px-5 sm:px-6 pt-5 pb-4 border-b border-slate-800">
+        <Award className="w-8 h-8 text-yellow-400 shrink-0" />
+        <div className="min-w-0 pr-10">
+          <h2 className="text-2xl font-bold font-display tracking-tight text-white">
+            PitchSide Player Guide
+          </h2>
+          <p className="text-xs text-slate-400 font-mono">
+            HOW TO PLAY · POINTS · POWER-UPS
+          </p>
+        </div>
+      </div>
+
+      <div
+        data-no-swipe="true"
+        className="md:hidden sticky top-0 z-10 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-3 py-2.5"
+      >
+        <div role="tablist" aria-label="Rules sections" className="flex gap-1.5 overflow-x-auto pb-0.5">
+          {visibleNav.map((item) => {
+            const active = safeNav === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setActiveNav(item.id)}
+                className={`shrink-0 px-3.5 py-2 rounded-full text-[10px] font-mono font-bold uppercase tracking-wide border transition-colors cursor-pointer ${
+                  active ? item.activeAccent : `bg-slate-950/60 ${item.accent}`
+                }`}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="md:flex md:min-h-[28rem]">
+        <aside className="hidden md:flex w-52 shrink-0 flex-col border-r border-slate-800 bg-slate-950/40 p-4 gap-1">
+          <span className="text-[10px] font-extrabold text-slate-500 font-mono uppercase tracking-widest px-2 mb-2">
+            Sports
+          </span>
+          {visibleNav
+            .filter((item) => item.id !== "powerups")
+            .map((item) => {
+              const active = safeNav === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setActiveNav(item.id)}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl text-xs font-semibold font-mono flex items-center gap-2.5 border transition-all cursor-pointer ${
+                    active
+                      ? item.activeAccent
+                      : "border-transparent text-slate-400 hover:bg-slate-900/50 hover:text-white"
+                  }`}
+                >
+                  <span
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold border ${
+                      active ? "border-current/30 bg-slate-950/40" : "border-slate-700 bg-slate-900"
+                    }`}
+                  >
+                    {item.short}
+                  </span>
+                  {item.label}
+                </button>
+              );
+            })}
+
+          <span className="text-[10px] font-extrabold text-slate-500 font-mono uppercase tracking-widest px-2 mt-4 mb-2">
+            Power-Ups
+          </span>
+          <button
+            type="button"
+            onClick={() => setActiveNav("powerups")}
+            className={`w-full text-left px-3 py-2.5 rounded-xl text-xs font-semibold font-mono flex items-center gap-2.5 border transition-all cursor-pointer ${
+              safeNav === "powerups"
+                ? POWERUPS_NAV.activeAccent
+                : "border-transparent text-slate-400 hover:bg-slate-900/50 hover:text-white"
+            }`}
+          >
+            <span
+              className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold border ${
+                safeNav === "powerups"
+                  ? "border-current/30 bg-slate-950/40"
+                  : "border-slate-700 bg-slate-900"
+              }`}
+            >
+              PU
+            </span>
+            Power-Ups
+          </button>
+        </aside>
+
+        <div className="flex-1 p-5 sm:p-6 overflow-y-auto max-h-[min(70vh,720px)] md:max-h-[min(75vh,780px)]">
+          {safeNav === "football" && (
+            <FootballContent communityShieldScheduled={communityShieldScheduled} />
+          )}
+          {safeNav === "rugby" && <RugbyContent />}
+          {safeNav === "formula1" && <Formula1Content />}
+          {safeNav === "golf" && <GolfContent />}
+          {safeNav === "powerups" && <PowerUpsRulesContent isAdmin={user?.isAdmin} />}
+
+          {user?.isAdmin && safeNav !== "powerups" && (
+            <div className="mt-8 p-5 rounded-xl border border-purple-500/30 bg-purple-950/20">
+              <div className="flex items-center gap-2 mb-2">
+                <Lock className="w-5 h-5 text-purple-400" />
+                <h4 className="text-base font-bold font-display text-purple-300">Admin Area</h4>
+              </div>
+              <p className="text-sm text-slate-300 leading-relaxed">
+                Administrators can manage fixtures, enter final scores, review predictions, and
+                manage player accounts from the Admin Area.
+              </p>
+            </div>
+          )}
+
+          <div className="mt-8 pt-4 border-t border-slate-800 text-center text-xs text-slate-500 font-mono flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-1.5 justify-center">
+              <Shield className="w-4 h-4 text-slate-400" />
+              <span>Fair Play Guarantee: Scoring runs server-side</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Users className="w-3.5 h-3.5" />
+              Version 1.5.0
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

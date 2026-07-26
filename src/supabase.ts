@@ -69,7 +69,7 @@ const MATCH_LIST_COLUMNS =
   "id, competition_id, competition_name, sport, home_team, away_team, actual_home_score, actual_away_score, kickoff_time, status, match_tag, round_name, venue_name, odds_home_win, odds_draw, odds_away_win, base_multiplier, provisional_home_score, provisional_away_score, match_minute, is_visible";
 
 const PREDICTION_USER_COLUMNS =
-  "match_id, predicted_home_score, predicted_away_score, submitted, created_at, provisional_points, points_won, sport";
+  "match_id, predicted_home_score, predicted_away_score, submitted, created_at, provisional_points, points_won, sport, applied_powerup_id";
 
 export async function dbFetchPlayers(): Promise<UserProfile[]> {
   const MOCK_NICKNAMES_FILTER = [
@@ -243,6 +243,8 @@ export type PredictionEntry = {
   lockedAt?: string;
   /** Live "As It Stands" points while the match is in play. */
   provisionalPoints?: number;
+  /** Attached power-up instance id (consumed at lock). */
+  appliedPowerupId?: string | null;
 };
 
 export async function dbFetchPredictions(
@@ -264,6 +266,7 @@ export async function dbFetchPredictions(
       submitted?: boolean | null;
       created_at?: string | null;
       provisional_points?: number | null;
+      applied_powerup_id?: string | null;
     }) => {
       result[p.match_id] = {
         home: p.predicted_home_score,
@@ -271,6 +274,7 @@ export async function dbFetchPredictions(
         submitted: p.submitted ?? false,
         lockedAt: p.submitted ? p.created_at ?? undefined : undefined,
         provisionalPoints: p.provisional_points ?? 0,
+        appliedPowerupId: p.applied_powerup_id ?? null,
       };
     });
   }
@@ -392,6 +396,90 @@ export async function dbSavePrediction(userId: string, matchId: string, sport: S
       throw new Error(PREDICTION_EVENT_LOCKED_MESSAGE);
     }
     throw error;
+  }
+}
+
+/**
+ * Lock a prediction and optionally consume a user_powerups row (atomic RPC).
+ */
+export async function dbLockPrediction(
+  userId: string,
+  matchId: string,
+  sport: SportType,
+  compId: string,
+  homeScore: number,
+  awayScore: number,
+  powerupId?: string | null,
+): Promise<{ applied_powerup_id: string | null; consumed: boolean }> {
+  if (!supabase) throw new Error("Database not connected.");
+
+  const { data, error } = await supabase.rpc("pitchside_lock_prediction", {
+    p_user_id: userId,
+    p_match_id: matchId,
+    p_sport: sport,
+    p_competition_id: compId,
+    p_home: homeScore,
+    p_away: awayScore,
+    p_powerup_id: powerupId ?? null,
+  });
+
+  if (error) {
+    if (/event locked|predictions can no longer be submitted/i.test(error.message || "")) {
+      throw new Error(PREDICTION_EVENT_LOCKED_MESSAGE);
+    }
+    throw error;
+  }
+
+  const row = (data ?? {}) as Record<string, unknown>;
+  return {
+    applied_powerup_id: (row.applied_powerup_id as string) ?? null,
+    consumed: Boolean(row.consumed),
+  };
+}
+
+export type UserPowerupRow = {
+  id: string;
+  powerup_type: string;
+  sport_type: string;
+  sport_season_id: string;
+  status: "available" | "used" | "expired";
+  earned_at: string | null;
+  used_at: string | null;
+  applied_fixture_id: string | null;
+};
+
+export async function dbFetchUserPowerups(
+  userId: string,
+  sportType?: string,
+): Promise<UserPowerupRow[]> {
+  if (!supabase) return [];
+  let query = supabase
+    .from("user_powerups")
+    .select(
+      "id, powerup_type, sport_type, sport_season_id, status, earned_at, used_at, applied_fixture_id",
+    )
+    .eq("user_id", userId)
+    .order("earned_at", { ascending: false });
+
+  if (sportType) {
+    query = query.eq("sport_type", sportType);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.warn("Failed to fetch user_powerups:", error.message);
+    return [];
+  }
+  return (data ?? []) as UserPowerupRow[];
+}
+
+export async function dbEnsureBaselinePowerups(userId: string): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase.rpc("grant_baseline_double_bubble", {
+    p_user_id: userId,
+  });
+  if (error) {
+    console.warn("grant_baseline_double_bubble:", error.message);
   }
 }
 
@@ -1310,13 +1398,12 @@ export interface LeaderboardRecord {
 }
 
 // Per-competition drop allowance. Mirrors public.pitchside_competition_drops()
-// in supabase/migrations/20260713130000_leaderboard_best34.sql. Keep the two in
-// sync: EPL = 4, Championship = 6, Scottish Premiership = 4, everything else
-// (rugby / cups) = 0.
+// and src/services/scoringEngine.ts: EPL = 3, Scottish Prem = 3,
+// Championship = 4, everything else (rugby / cups) = 0.
 const COMPETITION_DROPS_ALLOWED: Record<string, number> = {
-  "f-epl": 4,
-  "f-championship": 6,
-  "f-spfl": 4,
+  "f-epl": 3,
+  "f-championship": 4,
+  "f-spfl": 3,
 };
 
 export function dropsAllowedForCompetition(competitionId?: string | null): number {
@@ -1326,6 +1413,7 @@ export function dropsAllowedForCompetition(competitionId?: string | null): numbe
 
 function formatAccuracy(points: number, predictions: number): string {
   if (predictions <= 0) return "0%";
+  // Max base points per prediction is 5 (exact score / exact rugby margin).
   return `${Math.round((points / (predictions * 5)) * 100)}%`;
 }
 

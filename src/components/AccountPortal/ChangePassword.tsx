@@ -117,7 +117,7 @@ export const ChangePassword: React.FC<ChangePasswordProps> = ({ user, onUpdateUs
   return (
     <form onSubmit={handleUpdatePassword} className="space-y-4 bg-slate-950/20 p-5 rounded-2xl border border-slate-805 animate-fade-in">
       <div>
-        <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider mb-1">Old Security Password</label>
+        <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider mb-1">Old Password</label>
         <div className="relative">
           <Lock className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-500" />
           <input
@@ -141,7 +141,7 @@ export const ChangePassword: React.FC<ChangePasswordProps> = ({ user, onUpdateUs
 
       <div className="border-t border-slate-850/60 pt-3 space-y-4">
         <div className="flex justify-between items-center">
-          <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider">New Secret Password</label>
+          <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider">New Password</label>
           <button
             type="button"
             onClick={handleSuggestPassword}

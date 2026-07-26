@@ -3,8 +3,16 @@ import { Users } from "lucide-react";
 import { SportType, Competition, Match, UserProfile } from "../../types";
 import MatchPredictor from "./MatchPredictor";
 import OfflineDraftBanner from "../OfflineDraftBanner";
+import HowToPredictStepper, {
+  type HowToPredictSport,
+} from "../predictions/HowToPredictStepper";
 import type { PredictionEntry } from "../../supabase";
-import type { SeenFeatureKey, SeenFeatures } from "../../lib/seenFeatures";
+import {
+  SeenFeature,
+  hasSeenFeature,
+  type SeenFeatureKey,
+  type SeenFeatures,
+} from "../../lib/seenFeatures";
 import {
   EmergingSportWorkspace,
   SportSelectorBanner,
@@ -12,6 +20,24 @@ import {
   useUserRole,
   type SportKey,
 } from "../../sports/emerging";
+
+function howToPredictFeatureKey(sport: SportKey): SeenFeatureKey {
+  switch (sport) {
+    case "rugby":
+      return SeenFeature.HowToPredictRugby;
+    case "formula1":
+      return SeenFeature.HowToPredictFormula1;
+    case "golf":
+      return SeenFeature.HowToPredictGolf;
+    default:
+      return SeenFeature.HowToPredictFootball;
+  }
+}
+
+function toHowToPredictSport(sport: SportKey): HowToPredictSport {
+  if (sport === "rugby" || sport === "formula1" || sport === "golf") return sport;
+  return "football";
+}
 
 interface PredictionsPageProps {
   user: UserProfile;
@@ -39,7 +65,7 @@ interface PredictionsPageProps {
     winner: "home" | "away" | "draw" | null,
     marginStr: string,
   ) => void;
-  onSubmitPrediction: (matchId: string) => void;
+  onSubmitPrediction: (matchId: string, powerupInstanceId?: string | null) => void;
   onOpenLeagues: () => void;
   /** Offline drafting banner (core sports only). */
   isOffline?: boolean;
@@ -89,31 +115,6 @@ export default function PredictionsPage({
     }
   }, [selectedSport, setSelectedSport, user.preferredSport]);
 
-  if (!isUserInAnyLeague && !showEmerging) {
-    return (
-      <div className="rounded-3xl border border-emerald-500/25 bg-slate-900/60 p-8 text-center space-y-4">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-500/30 bg-emerald-500/10">
-          <Users className="h-6 w-6 text-emerald-400" aria-hidden />
-        </div>
-        <h2 className="text-lg font-display font-extrabold text-white">
-          Join a league to unlock predictions
-        </h2>
-        <p className="text-xs text-slate-400 font-sans max-w-sm mx-auto leading-relaxed">
-          You must be in at least one league before the Match Predictor unlocks.
-          Create a private league or join with a code — this is not a fixtures
-          outage.
-        </p>
-        <button
-          type="button"
-          onClick={onOpenLeagues}
-          className="inline-flex items-center justify-center px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold font-display cursor-pointer transition-colors"
-        >
-          Browse Leagues — Join or Create
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-4 w-full">
       {/*
@@ -151,6 +152,24 @@ export default function PredictionsPage({
             className="w-full shrink-0"
           />
 
+          {!isUserInAnyLeague && !showEmerging && (
+            <div className="rounded-2xl border border-emerald-500/20 bg-emerald-950/20 px-4 py-3.5 space-y-2">
+              <p className="text-xs text-slate-300 font-sans leading-relaxed">
+                You are active in the Global Leaderboard. Select a sport above to
+                start predicting. Want to compete directly with friends? Create or
+                join a Private League from the navigation menu.
+              </p>
+              <button
+                type="button"
+                onClick={onOpenLeagues}
+                className="inline-flex items-center gap-1.5 text-[10px] font-bold font-display uppercase tracking-wide text-emerald-400 hover:text-emerald-300 cursor-pointer"
+              >
+                <Users className="h-3.5 w-3.5" />
+                Browse Private Leagues
+              </button>
+            </div>
+          )}
+
           {!showEmerging && (
             <OfflineDraftBanner
               isOffline={isOffline}
@@ -159,31 +178,24 @@ export default function PredictionsPage({
               applying={applyingOfflineDraft}
             />
           )}
+
+          {!hasSeenFeature(seenFeatures, howToPredictFeatureKey(activeSport)) && (
+            <HowToPredictStepper
+              sport={toHowToPredictSport(activeSport)}
+              dismissible
+              onDismiss={() => {
+                void onFeatureSeen(howToPredictFeatureKey(activeSport));
+              }}
+            />
+          )}
         </div>
       </div>
 
       {showEmerging ? (
         <EmergingSportWorkspace sport={activeSport} userId={user.id} />
-      ) : !isUserInAnyLeague ? (
-        <div className="rounded-3xl border border-emerald-500/25 bg-slate-900/60 p-8 text-center space-y-4">
-          <h2 className="text-lg font-display font-extrabold text-white">
-            Join a league to unlock predictions
-          </h2>
-          <p className="text-xs text-slate-400 font-sans max-w-sm mx-auto leading-relaxed">
-            You must be in at least one league before the Match Predictor unlocks.
-          </p>
-          <button
-            type="button"
-            onClick={onOpenLeagues}
-            className="inline-flex items-center justify-center px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold font-display cursor-pointer transition-colors"
-          >
-            Browse Leagues — Join or Create
-          </button>
-        </div>
       ) : (
         <MatchPredictor
           selectedSport={selectedSport}
-          setSelectedSport={setSelectedSport}
           selectedCompId={selectedCompId}
           setSelectedCompId={setSelectedCompId}
           allMatches={allMatches}
@@ -198,6 +210,7 @@ export default function PredictionsPage({
           onScoreChange={onScoreChange}
           onRugbyPredictionChange={onRugbyPredictionChange}
           onSubmitPrediction={onSubmitPrediction}
+          userId={user.id}
         />
       )}
     </div>

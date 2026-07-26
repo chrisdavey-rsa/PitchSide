@@ -100,28 +100,21 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ user, onUpdate
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs relative z-10">
           <div>
-            <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider mb-1">First Name</label>
+            <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider mb-1">Name</label>
             <div className="bg-slate-900/60 px-3.5 py-2.5 rounded-xl border border-slate-800/60 text-slate-350 font-semibold text-xs">
-              {user.firstName || 'Davy'}
+              {[user.firstName, user.surname].filter(Boolean).join(' ') || '—'}
             </div>
           </div>
           <div>
-            <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider mb-1">Surname</label>
-            <div className="bg-slate-900/60 px-3.5 py-2.5 rounded-xl border border-slate-800/60 text-slate-350 font-semibold text-xs">
-              {user.surname || 'Predicts'}
+            <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider mb-1">Date of Birth</label>
+            <div className="bg-slate-900/60 px-3.5 py-2.5 rounded-xl border border-slate-800/60 text-slate-350 font-mono text-xs flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-slate-500" />
+              {user.dob || '—'}
             </div>
           </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs relative z-10">
-          <div>
-            <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider mb-1">Date of Birth</label>
-            <div className="bg-slate-900/60 px-3.5 py-2.5 rounded-xl border border-slate-800/60 text-slate-350 font-mono text-xs flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-slate-500" />
-              {user.dob || '1990-11-20'}
-            </div>
-          </div>
-          
           <div>
             <div className="flex justify-between items-center mb-1">
               <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider">Leaderboard Nickname</label>
@@ -130,19 +123,18 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ user, onUpdate
               {user.nickname}
             </div>
           </div>
-        </div>
-
-        <div className="relative z-10">
-          <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider mb-1">Registered Email Coordinate</label>
-          <div className="bg-slate-900/60 px-3.5 py-2.5 rounded-xl border border-slate-800/60 text-slate-400 text-xs flex items-center justify-between">
-            <span className="font-mono">{user.email}</span>
-            <button
-              type="button"
-              onClick={() => setActiveTab('change-email')}
-              className="text-[10px] font-mono text-emerald-400 hover:text-emerald-300 font-bold underline cursor-pointer"
-            >
-              Change Email →
-            </button>
+          <div>
+            <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider mb-1">Email</label>
+            <div className="bg-slate-900/60 px-3.5 py-2.5 rounded-xl border border-slate-800/60 text-slate-400 text-xs flex items-center justify-between gap-2">
+              <span className="font-mono truncate">{user.email}</span>
+              <button
+                type="button"
+                onClick={() => setActiveTab('change-email')}
+                className="text-[10px] font-mono text-emerald-400 hover:text-emerald-300 font-bold underline cursor-pointer shrink-0"
+              >
+                Change →
+              </button>
+            </div>
           </div>
         </div>
       </div>

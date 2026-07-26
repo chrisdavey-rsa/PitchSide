@@ -64,6 +64,30 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
           </button>
         </div>
 
+        <div className="space-y-1 mb-6">
+          <span className="text-[10px] font-extrabold text-slate-500 font-mono uppercase tracking-widest pl-2 block mb-2">
+            Statistics
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('historic-scores');
+              setStatusMsg({ text: '', mode: 'none' });
+            }}
+            className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-semibold font-mono flex items-center justify-between transition-all cursor-pointer ${
+              activeTab === 'historic-scores'
+                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                : 'text-slate-400 hover:bg-slate-900/40 hover:text-white border border-transparent'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <Award className="w-4 h-4 shrink-0" />
+              <span>Prediction History</span>
+            </div>
+            <ChevronRight className={`w-3 h-3 text-slate-500 ${activeTab === 'historic-scores' ? 'text-emerald-400' : ''}`} />
+          </button>
+        </div>
+
         <div className="space-y-1">
           <span className="text-[10px] font-extrabold text-slate-500 font-mono uppercase tracking-widest pl-2 block mb-2">
             Preferences
@@ -126,30 +150,6 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
             </div>
             <ChevronRight className={`w-3 h-3 text-slate-500 ${activeTab === 'change-password' ? 'text-emerald-400' : ''}`} />
           </button>
-
-          <div className="pt-3 border-t border-slate-800/40 mt-3">
-            <span className="text-[10px] font-extrabold text-slate-500 font-mono uppercase tracking-widest pl-2 block mb-2">
-              Statistics
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab('historic-scores');
-                setStatusMsg({ text: '', mode: 'none' });
-              }}
-              className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-semibold font-mono flex items-center justify-between transition-all cursor-pointer ${
-                activeTab === 'historic-scores'
-                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                  : 'text-slate-400 hover:bg-slate-900/40 hover:text-white border border-transparent'
-              }`}
-            >
-              <div className="flex items-center gap-2.5">
-                <Award className="w-4 h-4 shrink-0" />
-                <span>Historic Scores</span>
-              </div>
-              <ChevronRight className={`w-3 h-3 text-slate-500 ${activeTab === 'historic-scores' ? 'text-emerald-400' : ''}`} />
-            </button>
-          </div>
         </div>
       </div>
 

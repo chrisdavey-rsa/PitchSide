@@ -128,10 +128,19 @@ function extractFinalScores(sport: Sport, item: any): FinalScores | null {
     : extractRugbyFinalScores(item);
 }
 
+type PowerUpType =
+  | "double_bubble"
+  | "safety_net"
+  | "sniper"
+  | "banker"
+  | "pitchside_master";
+
+const EXACT_SCORE_POINTS = 5;
+const SAFETY_FLOOR = 5;
+
 /**
- * Football scoring (5 / 3 / 1 / 0).
- * Keep in sync with src/utils.ts calculateFootballPoints and
- * SQL public.pitchside_football_points.
+ * Football base: Exact 5 · Exact GD 3 · Outcome 1 · Miss 0.
+ * Keep in sync with src/services/scoringEngine.ts and SQL pitchside_football_points.
  */
 function calculateFootballPoints(
   predictedHome: number,
@@ -157,11 +166,10 @@ function calculateFootballPoints(
   const actualMargin = actualHome - actualAway;
   if (predictedMargin === actualMargin) return 3;
 
-  // Correct outcome, wrong margin (e.g. predicted 2–0, finished 1–0)
   return 1;
 }
 
-/** Keep in sync with src/utils.ts calculateRugbyPoints / pitchside_rugby_points */
+/** Keep in sync with scoringEngine / pitchside_rugby_points (5 / 3 / 1). */
 function calculateRugbyPoints(
   predictedHome: number,
   predictedAway: number,
@@ -201,6 +209,47 @@ function calculateBasePoints(
   return sport === "football"
     ? calculateFootballPoints(predictedHome, predictedAway, actualHome, actualAway)
     : calculateRugbyPoints(predictedHome, predictedAway, actualHome, actualAway);
+}
+
+function applyPowerUp(
+  basePoints: number,
+  powerup: PowerUpType | null | undefined,
+  predictedHome: number,
+  predictedAway: number,
+  actualHome: number,
+  actualAway: number,
+): { points: number; isBankerExact: boolean } {
+  let points = basePoints;
+  let isBankerExact = false;
+
+  const predictedWinner = predictedHome > predictedAway
+    ? "home"
+    : predictedHome < predictedAway
+    ? "away"
+    : "draw";
+  const actualWinner = actualHome > actualAway
+    ? "home"
+    : actualHome < actualAway
+    ? "away"
+    : "draw";
+  const outcomeCorrect = predictedWinner === actualWinner;
+  const isExact = predictedHome === actualHome && predictedAway === actualAway;
+
+  if (powerup === "banker") {
+    if (outcomeCorrect) {
+      points = EXACT_SCORE_POINTS;
+      isBankerExact = true;
+    }
+  } else if (powerup === "sniper" && isExact) {
+    points = Math.round(points * 1.5);
+  }
+
+  if (powerup === "double_bubble") points *= 2;
+  else if (powerup === "pitchside_master") points *= 3;
+
+  if (powerup === "safety_net" && points === 0) points = SAFETY_FLOOR;
+
+  return { points, isBankerExact };
 }
 
 function applyMultiplier(basePoints: number, multiplier: number | null): number {
@@ -414,7 +463,9 @@ Deno.serve(async (req: Request) => {
 
     const { data: predictions, error: predFetchErr } = await supabase
       .from("predictions")
-      .select("id, predicted_home_score, predicted_away_score")
+      .select(
+        "id, user_id, predicted_home_score, predicted_away_score, applied_powerup_id",
+      )
       .eq("match_id", match.id);
 
     if (predFetchErr) {
@@ -422,8 +473,31 @@ Deno.serve(async (req: Request) => {
       continue;
     }
 
+    const powerupIds = [
+      ...new Set(
+        (predictions ?? [])
+          .map((p) => p.applied_powerup_id as string | null)
+          .filter((id): id is string => !!id),
+      ),
+    ];
+    const powerupTypeById = new Map<string, PowerUpType>();
+    if (powerupIds.length > 0) {
+      const { data: chips } = await supabase
+        .from("user_powerups")
+        .select("id, powerup_type")
+        .in("id", powerupIds);
+      for (const chip of chips ?? []) {
+        powerupTypeById.set(chip.id, chip.powerup_type as PowerUpType);
+      }
+    }
+
     const multiplier = existing.base_multiplier;
+    const usersToEvaluate = new Set<string>();
+
     for (const pred of predictions ?? []) {
+      const powerupType = pred.applied_powerup_id
+        ? powerupTypeById.get(pred.applied_powerup_id) ?? null
+        : null;
       const basePoints = calculateBasePoints(
         sport,
         pred.predicted_home_score,
@@ -431,18 +505,51 @@ Deno.serve(async (req: Request) => {
         match.actual_home_score,
         match.actual_away_score,
       );
-      const pointsWon = applyMultiplier(basePoints, multiplier);
+      const powered = applyPowerUp(
+        basePoints,
+        powerupType,
+        pred.predicted_home_score,
+        pred.predicted_away_score,
+        match.actual_home_score,
+        match.actual_away_score,
+      );
+      const pointsWon = applyMultiplier(powered.points, multiplier);
 
       const { error: predUpdateErr } = await supabase
         .from("predictions")
-        .update({ points_won: pointsWon })
+        .update({
+          points_won: pointsWon,
+          is_banker_exact: powered.isBankerExact,
+        })
         .eq("id", pred.id);
 
       if (predUpdateErr) {
         errors.push(`${pred.id}: prediction update failed — ${predUpdateErr.message}`);
         continue;
       }
+
+      if (pred.applied_powerup_id) {
+        await supabase
+          .from("user_powerups")
+          .update({
+            status: "used",
+            used_at: new Date().toISOString(),
+            applied_fixture_id: match.id,
+          })
+          .eq("id", pred.applied_powerup_id)
+          .eq("status", "available");
+      }
+
+      if (pred.user_id) usersToEvaluate.add(pred.user_id);
       predictionsGraded++;
+    }
+
+    for (const userId of usersToEvaluate) {
+      await supabase.rpc("evaluate_powerup_unlocks", {
+        p_user_id: userId,
+        p_sport_type: sport,
+        p_season_id: null,
+      });
     }
   }
 

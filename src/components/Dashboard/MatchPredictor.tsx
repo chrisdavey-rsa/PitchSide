@@ -3,21 +3,34 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { AnimatePresence } from "motion/react";
 import {
   ShieldAlert,
   Plus,
   Minus,
-  Sparkles,
   Users,
+  Sparkles,
 } from "lucide-react";
 import { SportType, Competition, Match } from "../../types";
-import { calculatePoints } from "../../utils";
+import { settlePredictionWithPowerUp } from "../../utils";
 import LockGuessButton from "./LockGuessButton";
 import SportIntroModal from "../onboarding/SportIntroModal";
-import { getPowerUp } from "../../data/powerUps";
+import PowerUpSelector from "../predictions/PowerUpSelector";
+import PowerUpLockConfirmModal from "../predictions/PowerUpLockConfirmModal";
+import {
+  POWER_UP_IDS,
+  buildSeasonWallet,
+  toPowerUpSportType,
+  type PowerUpId,
+  type UserPowerUpInstance,
+} from "../../constants/powerups";
 import type { PredictionEntry } from "../../supabase";
+import {
+  dbEnsureBaselinePowerups,
+  dbFetchUserPowerups,
+} from "../../supabase";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useOverlayHistory } from "../../hooks/useOverlayHistory";
 import { useBodyScrollLock } from "../../hooks/useBodyScrollLock";
 import {
@@ -26,9 +39,6 @@ import {
   type SeenFeatureKey,
   type SeenFeatures,
 } from "../../lib/seenFeatures";
-
-/** Power-up catalog ids shown in the launch-locked wallet teaser (no fake balances). */
-const WALLET_CHIP_IDS = ["urc-shield-bank", "ucl-joker"] as const;
 
 function getMatchStatusDisplay(match: Match) {
   if (match.status === "completed") {
@@ -54,7 +64,6 @@ function getMatchStatusDisplay(match: Match) {
 
 interface MatchPredictorProps {
   selectedSport: SportType | null;
-  setSelectedSport: (sport: SportType | null) => void;
   selectedCompId: string | null;
   setSelectedCompId: (id: string | null) => void;
   allMatches: Match[];
@@ -68,7 +77,9 @@ interface MatchPredictorProps {
   onFeatureSeen: (featureKey: SeenFeatureKey) => void | Promise<unknown>;
   onScoreChange: (matchId: string, side: "home" | "away", val: string) => void;
   onRugbyPredictionChange: (matchId: string, winner: "home" | "away" | "draw" | null, marginStr: string) => void;
-  onSubmitPrediction: (matchId: string) => void;
+  onSubmitPrediction: (matchId: string, powerupInstanceId?: string | null) => void;
+  /** Needed to load / consume season power-up inventory. */
+  userId?: string;
 }
 
 /** Kickoff key: same calendar day + clock minute → one visual group. */
@@ -94,7 +105,6 @@ function kickoffGroupLabel(matchDate: string): string {
 
 export default function MatchPredictor({
   selectedSport,
-  setSelectedSport,
   selectedCompId,
   setSelectedCompId,
   allMatches,
@@ -109,7 +119,9 @@ export default function MatchPredictor({
   onScoreChange,
   onRugbyPredictionChange,
   onSubmitPrediction,
+  userId,
 }: MatchPredictorProps) {
+  const queryClient = useQueryClient();
   // Just-in-time onboarding: first open of Football / Rugby (profiles.seen_features).
   const [introSport, setIntroSport] = useState<"football" | "rugby" | null>(null);
 
@@ -142,6 +154,132 @@ export default function MatchPredictor({
 
   useBodyScrollLock(!!introSport);
   useOverlayHistory(!!introSport, dismissIntro, "sport-intro");
+
+  const powerUpSport = toPowerUpSportType(selectedSport);
+  const sportSeasonId = selectedCompId || selectedCompetition?.id || "season";
+
+  const { data: powerupRows = [] } = useQuery({
+    queryKey: ["userPowerups", userId, powerUpSport],
+    enabled: !!userId && !!powerUpSport,
+    queryFn: async () => {
+      if (!userId) return [];
+      await dbEnsureBaselinePowerups(userId);
+      return dbFetchUserPowerups(userId, powerUpSport);
+    },
+    staleTime: 30_000,
+  });
+
+  const wallet = useMemo(() => {
+    const defaults = buildSeasonWallet({
+      sportType: powerUpSport,
+      sportSeasonId,
+      seasonIsActive: true,
+    });
+
+    const byType = new Map<PowerUpId, (typeof powerupRows)[number]>();
+    for (const row of powerupRows) {
+      const type = row.powerup_type as PowerUpId;
+      if (!POWER_UP_IDS.includes(type)) continue;
+      const existing = byType.get(type);
+      // Prefer available over used/expired for the chip face.
+      if (
+        !existing ||
+        (row.status === "available" && existing.status !== "available")
+      ) {
+        byType.set(type, row);
+      }
+    }
+
+    return defaults.map((chip): UserPowerUpInstance => {
+      const row = byType.get(chip.powerUpId);
+      if (!row) return chip;
+
+      const status =
+        row.status === "available"
+          ? "available"
+          : row.status === "used"
+            ? "consumed"
+            : "expired";
+
+      return {
+        ...chip,
+        instanceId: row.id,
+        unlocked: row.status === "available" || row.status === "used",
+        status,
+        armedMatchId: row.applied_fixture_id,
+        earnedAt: row.earned_at,
+        progressHint:
+          row.status === "available" ? undefined : chip.progressHint,
+      };
+    });
+  }, [powerUpSport, sportSeasonId, powerupRows]);
+
+  /** Chip selected and waiting for a fixture tap. */
+  const [assigningPowerUpId, setAssigningPowerUpId] = useState<PowerUpId | null>(null);
+  /** matchId → user_powerups.id (uuid) */
+  const [armedInstanceByMatch, setArmedInstanceByMatch] = useState<
+    Record<string, string>
+  >({});
+
+  const isAssigningPowerUp = assigningPowerUpId !== null;
+
+  const hasOpenFixtures = useMemo(
+    () =>
+      sortedActiveMatches.some((m) => {
+        const started = m.status === "live" || new Date() > new Date(m.matchDate);
+        const submitted = predictions[m.id]?.submitted;
+        return !started && !submitted;
+      }),
+    [sortedActiveMatches, predictions],
+  );
+
+  const [pendingLock, setPendingLock] = useState<{
+    matchId: string;
+    powerupInstanceId: string;
+    powerUpId: PowerUpId;
+    fixtureLabel: string;
+  } | null>(null);
+
+  const assignedPowerUpIds = useMemo(() => {
+    const ids: PowerUpId[] = [];
+    for (const instanceId of Object.values(armedInstanceByMatch)) {
+      const chip = wallet.find((w) => w.instanceId === instanceId);
+      if (chip) ids.push(chip.powerUpId);
+    }
+    return ids;
+  }, [armedInstanceByMatch, wallet]);
+
+  const assignPowerUpToMatch = useCallback(
+    (matchId: string) => {
+      if (!assigningPowerUpId) return;
+      const instance = wallet.find(
+        (w) =>
+          w.powerUpId === assigningPowerUpId &&
+          w.status === "available" &&
+          w.unlocked,
+      );
+      if (!instance) {
+        setAssigningPowerUpId(null);
+        return;
+      }
+
+      setArmedInstanceByMatch((prev) => {
+        const next: Record<string, string> = {};
+        // One chip can only arm one fixture — drop prior bindings for this instance.
+        for (const [mid, iid] of Object.entries(prev)) {
+          if (iid !== instance.instanceId) next[mid] = iid;
+        }
+        // Toggle off if tapping the same fixture again.
+        if (prev[matchId] === instance.instanceId) {
+          return next;
+        }
+        next[matchId] = instance.instanceId;
+        return next;
+      });
+      setAssigningPowerUpId(null);
+    },
+    [assigningPowerUpId, wallet],
+  );
 
   return (
     <>
@@ -248,21 +386,60 @@ export default function MatchPredictor({
               {/* SPECIFIC COMPETITION FIXTURES PREDICTOR */}
               {selectedCompId && filteredCompetitions.length > 0 && (
                 <div className="mt-6 pt-5 border-t border-slate-800 space-y-4">
-                  {/* POWER-UP WALLET: slim coming-soon strip (not competing with prediction UI) */}
-                  <div
-                    className="flex items-center gap-2 rounded-lg border border-slate-800/60 bg-slate-950/40 px-3 py-1.5"
-                    title="Power-up chips launch soon"
-                  >
-                    <Sparkles className="h-3.5 w-3.5 text-slate-500 shrink-0" aria-hidden />
-                    <p className="min-w-0 flex-1 text-[10px] text-slate-500 font-sans leading-snug">
-                      <span className="font-semibold text-slate-400">Power-Ups</span>
-                      {" — "}
-                      {WALLET_CHIP_IDS.map((id) => getPowerUp(id)?.name)
-                        .filter(Boolean)
-                        .join(" · ")}
-                      {" · coming soon"}
-                    </p>
-                  </div>
+                  <PowerUpSelector
+                    sportType={powerUpSport}
+                    instances={wallet}
+                    assigningPowerUpId={assigningPowerUpId}
+                    assignedPowerUpIds={assignedPowerUpIds}
+                    hasOpenFixtures={hasOpenFixtures}
+                    onSelect={(powerUpId) => {
+                      if (!hasOpenFixtures) return;
+                      const instance = wallet.find(
+                        (w) =>
+                          w.powerUpId === powerUpId &&
+                          w.status === "available" &&
+                          w.unlocked,
+                      );
+                      if (!instance) return;
+
+                      // If already assigned, clear assignment and exit.
+                      const assignedMatchId = Object.entries(
+                        armedInstanceByMatch,
+                      ).find(([, iid]) => iid === instance.instanceId)?.[0];
+                      if (assignedMatchId) {
+                        setArmedInstanceByMatch((prev) => {
+                          const next = { ...prev };
+                          delete next[assignedMatchId];
+                          return next;
+                        });
+                        setAssigningPowerUpId(null);
+                        return;
+                      }
+
+                      // Toggle assigning mode for this chip.
+                      setAssigningPowerUpId((cur) =>
+                        cur === powerUpId ? null : powerUpId,
+                      );
+                    }}
+                  />
+
+                  {isAssigningPowerUp && (
+                    <div
+                      role="status"
+                      className="sticky top-2 z-20 rounded-xl border border-violet-500/40 bg-violet-950/90 px-3 py-2.5 text-center shadow-lg shadow-violet-950/40 backdrop-blur-md"
+                    >
+                      <p className="text-[11px] font-semibold text-violet-100 font-sans leading-snug">
+                        Select the fixture you'd like to boost.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setAssigningPowerUpId(null)}
+                        className="mt-1.5 text-[9px] font-mono uppercase tracking-wider text-violet-300/80 hover:text-white cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
 
                   {activeMatches.length === 0 ? (
                     <div className="rounded-xl border border-slate-800/70 bg-slate-950/30 px-5 py-10 text-center space-y-2">
@@ -312,21 +489,35 @@ export default function MatchPredictor({
                         // scores; fall back to the DB provisional_points field.
                         const liveHome = match.provisionalHomeScore;
                         const liveAway = match.provisionalAwayScore;
+                        const armedInstanceId = armedInstanceByMatch[match.id];
+                        const poweredChip =
+                          (armedInstanceId
+                            ? wallet.find((w) => w.instanceId === armedInstanceId)
+                            : undefined) ||
+                          (savedPred.appliedPowerupId
+                            ? wallet.find(
+                                (w) => w.instanceId === savedPred.appliedPowerupId,
+                              )
+                            : undefined);
                         const asItStandsPoints =
                           isLive &&
                           isSubmitted &&
                           liveHome != null &&
                           liveAway != null
-                            ? calculatePoints(
+                            ? settlePredictionWithPowerUp(
                                 match.sport,
                                 savedPred.home,
                                 savedPred.away,
                                 liveHome,
                                 liveAway,
-                              )
+                                poweredChip?.powerUpId ?? null,
+                              ).earnedPoints
                             : savedPred.provisionalPoints ?? 0;
 
                         const matchStatus = getMatchStatusDisplay(match);
+                        const hasPowerUpAssigned = Boolean(
+                          armedInstanceByMatch[match.id],
+                        );
 
                         return (
                           <React.Fragment key={match.id}>
@@ -338,9 +529,46 @@ export default function MatchPredictor({
                               </div>
                             )}
                             <div
+                              role={isAssigningPowerUp && !isLocked ? "button" : undefined}
+                              tabIndex={
+                                isAssigningPowerUp && !isLocked ? 0 : undefined
+                              }
+                              onClick={(e) => {
+                                if (!isAssigningPowerUp) return;
+                                // Closed / locked fixtures cannot receive a Power-Up.
+                                if (isLocked) {
+                                  setAssigningPowerUpId(null);
+                                  return;
+                                }
+                                const el = e.target as HTMLElement;
+                                if (
+                                  el.closest(
+                                    "button, input, select, textarea, a, [role='spinbutton']",
+                                  )
+                                ) {
+                                  return;
+                                }
+                                assignPowerUpToMatch(match.id);
+                              }}
+                              onKeyDown={(e) => {
+                                if (
+                                  isAssigningPowerUp &&
+                                  !isLocked &&
+                                  (e.key === "Enter" || e.key === " ")
+                                ) {
+                                  e.preventDefault();
+                                  assignPowerUpToMatch(match.id);
+                                }
+                              }}
                               className={`relative p-4 sm:p-5 rounded-2xl border transition-all w-full ${
+                                hasPowerUpAssigned ? "powerup-assigned-ring " : ""
+                              }${
                                 isLive
                                   ? "border-rose-500/40 bg-slate-900 shadow-[0_0_24px_rgba(244,63,94,0.08)]"
+                                  : isAssigningPowerUp && !isLocked
+                                  ? "border-violet-500/60 bg-slate-900 ring-1 ring-violet-400/40 cursor-pointer"
+                                  : hasPowerUpAssigned
+                                  ? "border-violet-500/40 bg-slate-900"
                                   : showActiveGreen
                                   ? "border-emerald-500 bg-slate-900 shadow-[0_0_20px_rgba(16,185,129,0.12)]"
                                   : match.matchTag
@@ -350,6 +578,13 @@ export default function MatchPredictor({
                                   : "bg-slate-900/40 border-slate-800/40"
                               }`}
                             >
+                              {hasPowerUpAssigned && !isLocked && (
+                                <div className="absolute -top-2.5 right-4 z-10">
+                                  <span className="inline-flex items-center rounded-full border border-violet-400/60 bg-violet-500/15 px-2 py-0.5 text-[9px] font-mono font-bold uppercase tracking-widest text-violet-200">
+                                    Boost armed
+                                  </span>
+                                </div>
+                              )}
                               {/* HIGH STAKES TAG: premium gold/neon badge with a subtle pulse */}
                               {match.matchTag && (
                                 <div className="absolute -top-2.5 left-4 z-10">
@@ -420,7 +655,25 @@ export default function MatchPredictor({
                                       <LockGuessButton
                                         id={`submit-pred-btn-${match.id}`}
                                         submitted={isSubmitted}
-                                        onClick={() => onSubmitPrediction(match.id)}
+                                        onClick={() => {
+                                          const powerupId =
+                                            armedInstanceByMatch[match.id] ?? null;
+                                          if (powerupId) {
+                                            const chip = wallet.find(
+                                              (w) => w.instanceId === powerupId,
+                                            );
+                                            if (chip) {
+                                              setPendingLock({
+                                                matchId: match.id,
+                                                powerupInstanceId: powerupId,
+                                                powerUpId: chip.powerUpId,
+                                                fixtureLabel: `${match.homeTeam} v ${match.awayTeam}`,
+                                              });
+                                              return;
+                                            }
+                                          }
+                                          onSubmitPrediction(match.id, null);
+                                        }}
                                       />
                                     ) : null}
                                   </div>
@@ -821,6 +1074,28 @@ export default function MatchPredictor({
               )}
             </div>
           )}
+
+      {pendingLock && (
+        <PowerUpLockConfirmModal
+          open
+          powerUpId={pendingLock.powerUpId}
+          fixtureLabel={pendingLock.fixtureLabel}
+          onCancel={() => setPendingLock(null)}
+          onConfirm={() => {
+            const { matchId, powerupInstanceId } = pendingLock;
+            setPendingLock(null);
+            onSubmitPrediction(matchId, powerupInstanceId);
+            setArmedInstanceByMatch((prev) => {
+              const next = { ...prev };
+              delete next[matchId];
+              return next;
+            });
+            void queryClient.invalidateQueries({
+              queryKey: ["userPowerups", userId, powerUpSport],
+            });
+          }}
+        />
+      )}
     </>
   );
 }

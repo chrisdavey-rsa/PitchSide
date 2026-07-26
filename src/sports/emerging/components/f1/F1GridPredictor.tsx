@@ -644,6 +644,7 @@ export default function F1GridPredictor({
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={onDragStart} onDragEnd={onDragEnd}>
+      <div data-no-swipe="true" className="contents">
       {isOffline && (
         <div className="mb-3 flex items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
           <CloudOff className="h-4 w-4 shrink-0" />
@@ -781,6 +782,7 @@ export default function F1GridPredictor({
             </>
           )}
         </section>
+      </div>
       </div>
 
       <DragOverlay>

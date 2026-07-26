@@ -84,10 +84,6 @@ export type EmergingProfileSlice = {
 /** Grid size for qualifying (top 10) vs race (top 6). */
 export type F1GridMode = 'quali_top_10' | 'race_top_6';
 
-export function gridSlotsForMode(mode: F1GridMode): number {
-  return mode === 'quali_top_10' ? 10 : 6;
-}
-
 export const EMERGING_SPORT_META: Record<
   EmergingSportKey,
   { label: string; badge: string }
