@@ -1,7 +1,7 @@
 /**
  * Feature-flagged sports navigation for Golf + Formula 1 (and core sports labels).
- * Players: Golf / F1 are greyscale + inactive (no badges / notify CTAs).
- * Admins: Golf / F1 are fully interactive.
+ * Players: Football / Rugby only.
+ * Admins: also Golf / F1 (full interactive preview).
  */
 
 import React from 'react';
@@ -42,9 +42,10 @@ export default function EmergingSportNav({
   showCoreSports = true,
   className = '',
 }: EmergingSportNavProps) {
-  const visible = showCoreSports
-    ? ITEMS
-    : ITEMS.filter((i) => i.kind === 'emerging');
+  const visible = (showCoreSports ? ITEMS : ITEMS.filter((i) => i.kind === 'emerging')).filter(
+    (item) =>
+      item.kind === 'core' || isSportAccessible(item.key, userRole),
+  );
 
   return (
     <nav
@@ -61,13 +62,13 @@ export default function EmergingSportNav({
               onClick={() => onSelectSport(item.key)}
               className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${
                 active
-                  ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/25'
-                  : 'text-slate-300 hover:bg-slate-900 border border-transparent'
+                  ? 'bg-slate-800 text-white border border-slate-600/80 shadow-[inset_0_-2px_0_0_rgb(52_211_153)]'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900 border border-transparent'
               }`}
             >
-              <SportIcon sport={item.key} colored className="h-5 w-5" />
+              <SportIcon sport={item.key} colored className="h-8 w-8" />
               <div className="min-w-0 flex-1">
-                <span className="block text-xs font-semibold">{item.label}</span>
+                <span className="block text-sm font-semibold tracking-wide">{item.label}</span>
                 <span className="block text-[10px] text-slate-500 font-mono">
                   Active
                 </span>
@@ -77,50 +78,26 @@ export default function EmergingSportNav({
         }
 
         const meta = EMERGING_SPORT_META[item.key];
-        const accessible = isSportAccessible(item.key, userRole);
-
-        if (accessible) {
-          const active = selectedSport === item.key;
-          return (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => onSelectSport(item.key)}
-              className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${
-                active
-                  ? 'bg-violet-500/15 text-violet-200 border border-violet-500/30'
-                  : 'text-slate-300 hover:bg-slate-900 border border-transparent'
-              }`}
-            >
-              <SportIcon sport={item.key} colored className="h-5 w-5" />
-              <div className="min-w-0 flex-1">
-                <span className="block text-xs font-semibold">{meta.label}</span>
-                <span className="block text-[10px] text-violet-400/80 font-mono">
-                  Admin preview
-                </span>
-              </div>
-            </button>
-          );
-        }
-
-        // Player / locked: greyscale, non-interactive, no badge or notify CTA.
+        const active = selectedSport === item.key;
         return (
-          <div
+          <button
             key={item.key}
-            role="presentation"
-            aria-disabled="true"
-            className="rounded-xl border border-slate-800/90 bg-slate-900/40 px-3 py-2.5 flex items-center gap-3 opacity-45 select-none pointer-events-none grayscale"
+            type="button"
+            onClick={() => onSelectSport(item.key)}
+            className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${
+              active
+                ? 'bg-slate-800 text-white border border-slate-600/80 shadow-[inset_0_-2px_0_0_rgb(167_139_250)]'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900 border border-transparent'
+            }`}
           >
-            <SportIcon sport={item.key} colored={false} className="h-5 w-5" />
+            <SportIcon sport={item.key} colored className="h-8 w-8" />
             <div className="min-w-0 flex-1">
-              <span className="block text-xs font-semibold text-slate-400">
-                {meta.label}
-              </span>
-              <span className="block text-[10px] text-slate-500 font-mono italic">
-                Coming soon…
+              <span className="block text-sm font-semibold tracking-wide">{meta.label}</span>
+              <span className="block text-[10px] text-violet-400/80 font-mono">
+                Admin preview
               </span>
             </div>
-          </div>
+          </button>
         );
       })}
     </nav>

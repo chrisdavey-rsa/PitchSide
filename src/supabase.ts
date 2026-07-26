@@ -60,6 +60,17 @@ export async function testSupabaseConnection(): Promise<{ ok: boolean; error?: s
 // DB OPERATIONS: PLAYERS/CONTESTANTS PROFILE
 // ==========================================
 
+/** Columns needed to hydrate UserProfile from profiles (no SELECT *). */
+const PROFILE_LIST_COLUMNS =
+  "id, first_name, surname, email, username, dob, phone, nationality, supported_team, preferred_sport, is_admin, is_verified, is_profile_public, created_at, seen_features, selected_sports, favorite_f1_team, favorite_golfer, role, golf_mulligans_available";
+
+/** Match columns used by mapMatchRow — keep in sync with Match domain model. */
+const MATCH_LIST_COLUMNS =
+  "id, competition_id, competition_name, sport, home_team, away_team, actual_home_score, actual_away_score, kickoff_time, status, match_tag, round_name, venue_name, odds_home_win, odds_draw, odds_away_win, base_multiplier, provisional_home_score, provisional_away_score, match_minute, is_visible";
+
+const PREDICTION_USER_COLUMNS =
+  "match_id, predicted_home_score, predicted_away_score, submitted, created_at, provisional_points, points_won, sport";
+
 export async function dbFetchPlayers(): Promise<UserProfile[]> {
   const MOCK_NICKNAMES_FILTER = [
     "scrummaster", "striker99", "goalgetter", "lineoutking",
@@ -71,27 +82,52 @@ export async function dbFetchPlayers(): Promise<UserProfile[]> {
 
   const { data, error } = await supabase
     .from("profiles")
-    .select("*")
+    .select(PROFILE_LIST_COLUMNS)
     .order("created_at", { ascending: true });
 
   if (error) throw error;
   if (!data) return [];
 
-  const activeData = data.filter((d: any) => d.username && !d.username.startsWith("freed_nick_"));
-  const seenIds = new Set();
-  const dedupedActiveData = activeData.filter((d: any) => {
+  type ProfileRow = {
+    id?: string;
+    username?: string | null;
+    first_name?: string | null;
+    surname?: string | null;
+    email?: string | null;
+    dob?: string | null;
+    phone?: string | null;
+    created_at?: string | null;
+    is_verified?: boolean | null;
+    is_admin?: boolean | null;
+    nationality?: string | null;
+    supported_team?: string | null;
+    preferred_sport?: string | null;
+    seen_features?: unknown;
+    selected_sports?: unknown;
+    favorite_f1_team?: string | null;
+    favorite_golfer?: string | null;
+    role?: string | null;
+    golf_mulligans_available?: number | null;
+    is_profile_public?: boolean | null;
+  };
+
+  const activeData = data.filter(
+    (d: ProfileRow) => d.username && !d.username.startsWith("freed_nick_"),
+  );
+  const seenIds = new Set<string>();
+  const dedupedActiveData = activeData.filter((d: ProfileRow) => {
     if (!d.id || seenIds.has(d.id)) return false;
     seenIds.add(d.id);
     return true;
   });
 
-  const mapped = dedupedActiveData.map((d: any) => ({
-    id: d.id,
+  const mapped = dedupedActiveData.map((d: ProfileRow) => ({
+    id: d.id!,
     firstName: d.first_name || "",
     surname: d.surname || "",
     email: d.email || "",
     dob: d.dob || "2000-01-01",
-    nickname: d.username || d.nickname || "Contestant",
+    nickname: d.username || "Contestant",
     phone: d.phone || "",
     createdAt: d.created_at || new Date().toISOString(),
     emailVerified: d.is_verified ?? false,
@@ -100,6 +136,14 @@ export async function dbFetchPlayers(): Promise<UserProfile[]> {
     nationality: d.nationality || "United Kingdom",
     supportedTeam: d.supported_team || "None",
     preferredSport: d.preferred_sport as SportType | undefined,
+    selectedSports: Array.isArray(d.selected_sports)
+      ? (d.selected_sports as UserProfile["selectedSports"])
+      : undefined,
+    favoriteF1Team: d.favorite_f1_team ?? null,
+    favoriteGolfer: d.favorite_golfer ?? null,
+    role: d.role ?? null,
+    golfMulligansAvailable: d.golf_mulligans_available ?? null,
+    isProfilePublic: d.is_profile_public ?? undefined,
     seenFeatures: parseSeenFeatures(d.seen_features),
   }));
 
@@ -205,17 +249,27 @@ export async function dbFetchPredictions(
   userId: string,
 ): Promise<Record<string, PredictionEntry>> {
   if (!supabase) throw new Error("Database not connected.");
-  const { data, error } = await supabase.from("predictions").select("*").eq("user_id", userId);
+  const { data, error } = await supabase
+    .from("predictions")
+    .select(PREDICTION_USER_COLUMNS)
+    .eq("user_id", userId);
   if (error) throw error;
 
   const result: Record<string, PredictionEntry> = {};
   if (data) {
-    data.forEach((p: any) => {
+    data.forEach((p: {
+      match_id: string;
+      predicted_home_score: number;
+      predicted_away_score: number;
+      submitted?: boolean | null;
+      created_at?: string | null;
+      provisional_points?: number | null;
+    }) => {
       result[p.match_id] = {
         home: p.predicted_home_score,
         away: p.predicted_away_score,
         submitted: p.submitted ?? false,
-        lockedAt: p.submitted ? p.created_at : undefined,
+        lockedAt: p.submitted ? p.created_at ?? undefined : undefined,
         provisionalPoints: p.provisional_points ?? 0,
       };
     });
@@ -313,6 +367,10 @@ export async function dbFetchLiveProvisionalByUser(
   return sumLiveProvisionalMatrix(await dbFetchLiveProvisionalMatrix(liveMatchIds));
 }
 
+/** Thrown / matched when kickoff lock has passed (DB trigger). */
+export const PREDICTION_EVENT_LOCKED_MESSAGE =
+  "Event locked. Predictions can no longer be submitted.";
+
 export async function dbSavePrediction(userId: string, matchId: string, sport: SportType, compId: string, homeScore: number, awayScore: number, submitted: boolean): Promise<void> {
   if (!supabase) throw new Error("Database not connected.");
   const payload = {
@@ -329,7 +387,12 @@ export async function dbSavePrediction(userId: string, matchId: string, sport: S
   };
 
   const { error } = await supabase.from("predictions").upsert(payload, { onConflict: "id" });
-  if (error) throw error;
+  if (error) {
+    if (/event locked|predictions can no longer be submitted/i.test(error.message || "")) {
+      throw new Error(PREDICTION_EVENT_LOCKED_MESSAGE);
+    }
+    throw error;
+  }
 }
 
 // ==========================================
@@ -338,6 +401,8 @@ export async function dbSavePrediction(userId: string, matchId: string, sport: S
 
 /** Sliding prediction window — upcoming fixtures within this many days. */
 export const MATCH_HORIZON_DAYS = 9;
+/** Completed fixtures window for league standings (avoids full-table downloads). */
+export const STANDINGS_COMPLETED_HORIZON_DAYS = 180;
 
 function resolveCompetitionName(
   competitionId: string | null | undefined,
@@ -374,22 +439,22 @@ export function filterMatchesToHorizon(
 }
 
 /** Map a raw matches row into the Match domain model (including live fields). */
-export function mapMatchRow(d: any): Match {
+export function mapMatchRow(d: Record<string, unknown>): Match {
   return {
-    id: d.id,
-    competitionId: d.competition_id,
-    competitionName: d.competition_name || undefined,
+    id: String(d.id),
+    competitionId: String(d.competition_id ?? ""),
+    competitionName: (d.competition_name as string) || undefined,
     sport: d.sport as SportType,
-    homeTeam: d.home_team,
-    awayTeam: d.away_team,
-    homeScore: d.actual_home_score ?? undefined,
-    awayScore: d.actual_away_score ?? undefined,
-    matchDate: d.kickoff_time,
-    status: d.status || "upcoming",
-    season: d.season || undefined,
-    matchTag: d.match_tag || undefined,
-    roundName: d.round_name || undefined,
-    venueName: d.venue_name || undefined,
+    homeTeam: String(d.home_team ?? ""),
+    awayTeam: String(d.away_team ?? ""),
+    homeScore: d.actual_home_score != null ? Number(d.actual_home_score) : undefined,
+    awayScore: d.actual_away_score != null ? Number(d.actual_away_score) : undefined,
+    matchDate: String(d.kickoff_time ?? ""),
+    status: (d.status as Match["status"]) || "upcoming",
+    season: (d.season as string) || undefined,
+    matchTag: (d.match_tag as string) || undefined,
+    roundName: (d.round_name as string) || undefined,
+    venueName: (d.venue_name as string) || undefined,
     oddsHomeWin: d.odds_home_win != null ? Number(d.odds_home_win) : undefined,
     oddsDraw: d.odds_draw != null ? Number(d.odds_draw) : undefined,
     oddsAwayWin: d.odds_away_win != null ? Number(d.odds_away_win) : undefined,
@@ -398,7 +463,7 @@ export function mapMatchRow(d: any): Match {
       d.provisional_home_score != null ? Number(d.provisional_home_score) : undefined,
     provisionalAwayScore:
       d.provisional_away_score != null ? Number(d.provisional_away_score) : undefined,
-    matchMinute: d.match_minute || undefined,
+    matchMinute: (d.match_minute as string) || undefined,
     isVisible: d.is_visible !== false,
   };
 }
@@ -443,10 +508,10 @@ export async function dbFetchMatches(
   // Unbounded / status-scoped fetch (admin, standings) — still filtered in PostgREST.
   if (horizonDays == null) {
     const { data, error } = await applyFilters(
-      supabase.from("matches").select("*"),
+      supabase.from("matches").select(MATCH_LIST_COLUMNS),
     );
     if (error) throw error;
-    return (data || []).map(mapMatchRow);
+    return (data || []).map((row) => mapMatchRow(row as Record<string, unknown>));
   }
 
   const now = new Date();
@@ -460,7 +525,7 @@ export async function dbFetchMatches(
     applyFilters(
       supabase
         .from("matches")
-        .select("*")
+        .select(MATCH_LIST_COLUMNS)
         .gte("kickoff_time", start)
         .lte("kickoff_time", end),
     ),
@@ -468,7 +533,7 @@ export async function dbFetchMatches(
     statusFilter &&
       !(Array.isArray(statusFilter) ? statusFilter.includes("live") : statusFilter === "live")
       ? Promise.resolve({ data: [] as unknown[], error: null })
-      : applyFilters(supabase.from("matches").select("*").eq("status", "live")),
+      : applyFilters(supabase.from("matches").select(MATCH_LIST_COLUMNS).eq("status", "live")),
   ]);
 
   if (windowRes.error) throw windowRes.error;
@@ -476,7 +541,7 @@ export async function dbFetchMatches(
 
   const byId = new Map<string, Match>();
   for (const row of [...(windowRes.data || []), ...(liveRes.data || [])]) {
-    const mapped = mapMatchRow(row);
+    const mapped = mapMatchRow(row as Record<string, unknown>);
     byId.set(mapped.id, mapped);
   }
 
@@ -968,13 +1033,13 @@ export async function dbFetchLeagueMembers(leagueId: string): Promise<UserProfil
 
   const { data: profileRows, error: profileError } = await supabase
     .from("profiles")
-    .select("*")
+    .select(PROFILE_LIST_COLUMNS)
     .in("id", userIds);
   if (profileError) throw profileError;
 
-  const profileMap: Record<string, any> = {};
-  (profileRows || []).forEach((p: any) => {
-    profileMap[p.id] = p;
+  const profileMap: Record<string, Record<string, unknown>> = {};
+  (profileRows || []).forEach((p: Record<string, unknown>) => {
+    if (p.id) profileMap[String(p.id)] = p;
   });
 
   return userIds
@@ -982,21 +1047,21 @@ export async function dbFetchLeagueMembers(leagueId: string): Promise<UserProfil
       const p = profileMap[uid];
       if (!p) return null;
       return {
-        id: p.id,
-        email: p.email || "",
-        firstName: p.first_name || "",
-        surname: p.surname || "",
-        dob: p.dob || "",
+        id: String(p.id),
+        email: String(p.email || ""),
+        firstName: String(p.first_name || ""),
+        surname: String(p.surname || ""),
+        dob: String(p.dob || ""),
         // profiles.username is the canonical nickname column
-        nickname: p.username || p.nickname || "Anonymous",
-        createdAt: p.created_at || new Date().toISOString(),
-        emailVerified: p.is_verified || p.email_verified || false,
-        isAdmin: p.is_admin || false,
-        agreedToTerms: p.agreed_to_terms || false,
-        nationality: p.nationality || "",
-        isProfilePublic: p.is_profile_public ?? true,
-        supportedTeam: p.supported_team || "",
-        preferredSport: p.preferred_sport || undefined,
+        nickname: String(p.username || "Anonymous"),
+        createdAt: String(p.created_at || new Date().toISOString()),
+        emailVerified: Boolean(p.is_verified),
+        isAdmin: Boolean(p.is_admin),
+        agreedToTerms: true,
+        nationality: String(p.nationality || ""),
+        isProfilePublic: (p.is_profile_public as boolean | undefined) ?? true,
+        supportedTeam: String(p.supported_team || ""),
+        preferredSport: (p.preferred_sport as SportType | undefined) || undefined,
       } as UserProfile;
     })
     .filter((p): p is UserProfile => p !== null);

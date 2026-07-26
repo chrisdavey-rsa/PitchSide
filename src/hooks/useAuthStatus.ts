@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import type { Subscription } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../supabase';
 
 export function useAuthStatus() {
@@ -26,8 +27,7 @@ export function useAuthStatus() {
 
     checkStatus();
 
-    // Listen to auth changes
-    let authListener: any = null;
+    let authListener: Subscription | null = null;
     if (isSupabaseConfigured() && supabase) {
       const { data } = supabase.auth.onAuthStateChange((_event, session) => {
         if (mounted) {
@@ -39,7 +39,7 @@ export function useAuthStatus() {
 
     return () => {
       mounted = false;
-      if (authListener) authListener.unsubscribe();
+      authListener?.unsubscribe();
     };
   }, []);
 

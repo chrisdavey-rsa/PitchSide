@@ -15,6 +15,7 @@ import LoginView from './components/auth/LoginView';
 import ResetPasswordView from './components/auth/ResetPasswordView';
 import { readAuthHash, clearAuthHash, profileFromSession } from './components/auth/authSession';
 import Dashboard from './components/Dashboard';
+import OnboardingFlow, { needsOnboarding } from './components/OnboardingFlow';
 import RulesInfo from './components/RulesInfo';
 import AdminPanel from './components/AdminPanel';
 import AccountPortal from './components/AccountPortal';
@@ -454,6 +455,22 @@ function AppShell() {
                 element={
                   <>
             {currentUser ? (
+              needsOnboarding(currentUser) ? (
+                <OnboardingFlow
+                  user={currentUser}
+                  onComplete={(updated) => {
+                    setCurrentUser(updated);
+                    try {
+                      localStorage.setItem(
+                        "pitchside_logged_in",
+                        JSON.stringify(updated),
+                      );
+                    } catch {
+                      /* ignore */
+                    }
+                  }}
+                />
+              ) : (
               /* Authenticated Platform Dashboard */
               <Dashboard
                 user={currentUser}
@@ -477,6 +494,7 @@ function AppShell() {
                   }
                 }}
               />
+              )
             ) : guestAuthView === 'reset-request' || guestAuthView === 'reset-update' ? (
               <div className="flex-1 flex items-center justify-center py-6">
                 <ResetPasswordView

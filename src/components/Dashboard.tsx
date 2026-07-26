@@ -29,6 +29,13 @@ import {
   X,
 } from "lucide-react";
 import {
+  useOfflineDraft,
+  offlineDraftKey,
+  isEventLockedError,
+  LOCK_TIME_PASSED_TOAST,
+  type OfflinePredictionDraft,
+} from "../hooks/useOfflineDraft";
+import {
   dbSavePrediction,
   dbCreateLeague,
   dbJoinLeague,
@@ -159,6 +166,20 @@ export default function Dashboard({
     user?.preferredSport ?? SportType.FOOTBALL,
   );
   const [selectedCompId, setSelectedCompId] = useState<string | null>(null);
+
+  const offlineDraftEventId = selectedCompId || selectedSport || "workspace";
+  const offlineDraftStorageKey = offlineDraftKey(
+    user?.id || "guest",
+    offlineDraftEventId,
+  );
+  const {
+    isOffline,
+    draftExists: hasOfflineDraft,
+    saveDraft: saveOfflineDraft,
+    loadDraft: loadOfflineDraft,
+    clearDraft: clearOfflineDraft,
+  } = useOfflineDraft(offlineDraftStorageKey);
+  const [applyingOfflineDraft, setApplyingOfflineDraft] = useState(false);
   /** Desktop-only leagues modal (mobile uses bottom-nav tab instead). */
   const [showLeagues, setShowLeagues] = useState(false);
   /** Mobile tab router — replaces main viewport (not overlays). */
@@ -449,6 +470,30 @@ export default function Dashboard({
     };
   }, []);
 
+  const persistOfflinePredictionDraft = useCallback(
+    (
+      matchId: string,
+      home: number,
+      away: number,
+      sport: SportType,
+      competitionId: string,
+    ) => {
+      const existing =
+        loadOfflineDraft<OfflinePredictionDraft>(offlineDraftStorageKey) || {
+          savedAt: new Date().toISOString(),
+          entries: {},
+        };
+      saveOfflineDraft(offlineDraftStorageKey, {
+        savedAt: new Date().toISOString(),
+        entries: {
+          ...existing.entries,
+          [matchId]: { home, away, sport, competitionId },
+        },
+      } satisfies OfflinePredictionDraft);
+    },
+    [loadOfflineDraft, offlineDraftStorageKey, saveOfflineDraft],
+  );
+
   const queueDraftPredictionSave = useCallback(
     (
       matchId: string,
@@ -462,6 +507,17 @@ export default function Dashboard({
         queryKeys.predictions(user.id),
         snapshot,
       );
+
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        persistOfflinePredictionDraft(
+          matchId,
+          home,
+          away,
+          sport,
+          competitionId,
+        );
+        return;
+      }
 
       const existing = draftSaveTimers.current[matchId];
       if (existing) clearTimeout(existing);
@@ -479,11 +535,23 @@ export default function Dashboard({
             false,
           );
         } catch (e) {
+          if (isEventLockedError(e)) {
+            console.warn("Score write blocked — event locked:", matchId);
+            return;
+          }
+          // Network blip: keep an explicit offline draft so reconnect can recover.
+          persistOfflinePredictionDraft(
+            matchId,
+            home,
+            away,
+            sport,
+            competitionId,
+          );
           console.warn("Silent score write exception:", e);
         }
       }, 450);
     },
-    [queryClient, user.id],
+    [persistOfflinePredictionDraft, queryClient, user.id],
   );
 
   const userPoints = useMemo(() => {
@@ -760,13 +828,29 @@ export default function Dashboard({
 
     const previousPredictions = predictions;
     const matchObj = allMatches.find((m) => m.id === matchId);
+    const sport = matchObj?.sport || SportType.FOOTBALL;
+    const competitionId = matchObj?.competitionId || "f-epl";
+
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      persistOfflinePredictionDraft(
+        matchId,
+        pred.home,
+        pred.away,
+        sport,
+        competitionId,
+      );
+      triggerToast(
+        "Offline mode. Predictions will be saved locally as a draft.",
+      );
+      return;
+    }
 
     try {
       await dbSavePrediction(
         user.id,
         matchId,
-        matchObj?.sport || SportType.FOOTBALL,
-        matchObj?.competitionId || "f-epl",
+        sport,
+        competitionId,
         pred.home,
         pred.away,
         true,
@@ -797,6 +881,22 @@ export default function Dashboard({
       queryClient.invalidateQueries({
         queryKey: ["completedMatches", "leagueStandings"],
       });
+
+      const draft = loadOfflineDraft<OfflinePredictionDraft>(
+        offlineDraftStorageKey,
+      );
+      if (draft?.entries?.[matchId]) {
+        const { [matchId]: _removed, ...rest } = draft.entries;
+        if (Object.keys(rest).length === 0) {
+          clearOfflineDraft(offlineDraftStorageKey);
+        } else {
+          saveOfflineDraft(offlineDraftStorageKey, {
+            savedAt: new Date().toISOString(),
+            entries: rest,
+          });
+        }
+      }
+
       triggerToast("Prediction submitted successfully!");
     } catch (e) {
       console.error("Error locking prediction:", e);
@@ -809,7 +909,117 @@ export default function Dashboard({
         queryKeys.predictions(user.id),
         previousPredictions,
       );
+      if (isEventLockedError(e)) {
+        triggerToast(LOCK_TIME_PASSED_TOAST);
+        return;
+      }
+      persistOfflinePredictionDraft(
+        matchId,
+        pred.home,
+        pred.away,
+        sport,
+        competitionId,
+      );
       triggerToast("Network error: Prediction not saved. Please try again.");
+    }
+  };
+
+  const applyAndSubmitOfflineDraft = async () => {
+    const draft = loadOfflineDraft<OfflinePredictionDraft>(
+      offlineDraftStorageKey,
+    );
+    if (!draft?.entries || Object.keys(draft.entries).length === 0) {
+      clearOfflineDraft(offlineDraftStorageKey);
+      return;
+    }
+
+    setApplyingOfflineDraft(true);
+    try {
+      let nextPredictions = { ...predictions };
+      const remaining: OfflinePredictionDraft["entries"] = {};
+      let lockedOut = false;
+      let submittedCount = 0;
+
+      for (const [matchId, entry] of Object.entries(draft.entries)) {
+        if (nextPredictions[matchId]?.submitted) continue;
+
+        nextPredictions = {
+          ...nextPredictions,
+          [matchId]: {
+            ...(nextPredictions[matchId] || {
+              home: 0,
+              away: 0,
+              submitted: false,
+            }),
+            home: entry.home,
+            away: entry.away,
+            submitted: false,
+          },
+        };
+
+        try {
+          await dbSavePrediction(
+            user.id,
+            matchId,
+            (entry.sport as SportType) || SportType.FOOTBALL,
+            entry.competitionId || "f-epl",
+            entry.home,
+            entry.away,
+            true,
+          );
+          nextPredictions = {
+            ...nextPredictions,
+            [matchId]: {
+              ...nextPredictions[matchId],
+              home: entry.home,
+              away: entry.away,
+              submitted: true,
+              lockedAt: new Date().toISOString(),
+            },
+          };
+          submittedCount += 1;
+        } catch (e) {
+          if (isEventLockedError(e)) {
+            lockedOut = true;
+            continue;
+          }
+          remaining[matchId] = entry;
+        }
+      }
+
+      setPredictions(nextPredictions);
+      localStorage.setItem(
+        `predictions_${user.id}`,
+        JSON.stringify(nextPredictions),
+      );
+      queryClient.setQueryData(
+        queryKeys.predictions(user.id),
+        nextPredictions,
+      );
+      queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard });
+
+      if (Object.keys(remaining).length === 0) {
+        clearOfflineDraft(offlineDraftStorageKey);
+      } else {
+        saveOfflineDraft(offlineDraftStorageKey, {
+          savedAt: new Date().toISOString(),
+          entries: remaining,
+        });
+      }
+
+      if (lockedOut) {
+        triggerToast(LOCK_TIME_PASSED_TOAST);
+      } else if (submittedCount > 0) {
+        triggerToast(
+          submittedCount === 1
+            ? "Draft applied and submitted!"
+            : `Draft applied — ${submittedCount} predictions submitted.`,
+        );
+      } else if (Object.keys(remaining).length > 0) {
+        triggerToast("Network error: Prediction not saved. Please try again.");
+      }
+    } finally {
+      setApplyingOfflineDraft(false);
     }
   };
 
@@ -1356,6 +1566,10 @@ export default function Dashboard({
                   onRugbyPredictionChange={handleRugbyPredictionChange}
                   onSubmitPrediction={submitPrediction}
                   onOpenLeagues={() => openLeaguesModal()}
+                  isOffline={isOffline}
+                  hasOfflineDraft={hasOfflineDraft}
+                  onApplyOfflineDraft={applyAndSubmitOfflineDraft}
+                  applyingOfflineDraft={applyingOfflineDraft}
                 />
               </div>
             ) : (
@@ -1390,6 +1604,10 @@ export default function Dashboard({
                     onRugbyPredictionChange={handleRugbyPredictionChange}
                     onSubmitPrediction={submitPrediction}
                     onOpenLeagues={() => openLeaguesModal()}
+                    isOffline={isOffline}
+                    hasOfflineDraft={hasOfflineDraft}
+                    onApplyOfflineDraft={applyAndSubmitOfflineDraft}
+                    applyingOfflineDraft={applyingOfflineDraft}
                   />
                 </div>
                 <div className="lg:col-span-1 w-full">
@@ -1453,6 +1671,10 @@ export default function Dashboard({
                 onRugbyPredictionChange={handleRugbyPredictionChange}
                 onSubmitPrediction={submitPrediction}
                 onOpenLeagues={() => handleMobileNavTab("leagues")}
+                isOffline={isOffline}
+                hasOfflineDraft={hasOfflineDraft}
+                onApplyOfflineDraft={applyAndSubmitOfflineDraft}
+                applyingOfflineDraft={applyingOfflineDraft}
               />
               </div>
             )}

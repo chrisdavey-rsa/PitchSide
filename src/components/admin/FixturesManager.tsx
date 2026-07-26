@@ -234,7 +234,9 @@ export default function FixturesManager({
       if (supabase) {
         const { data: predsData } = await supabase
           .from('predictions')
-          .select('*')
+          .select(
+            'id, predicted_home_score, predicted_away_score, user_id, match_id',
+          )
           .eq('match_id', fixture.id);
 
         if (predsData) {
@@ -304,7 +306,9 @@ export default function FixturesManager({
         if (fixture.homeScore !== undefined && fixture.awayScore !== undefined) {
           const { data: predsData } = await supabase
             .from('predictions')
-            .select('*')
+            .select(
+              'id, predicted_home_score, predicted_away_score, user_id, match_id',
+            )
             .eq('match_id', fixture.id);
           if (predsData) {
             for (const predRow of predsData) {

@@ -50,10 +50,10 @@ export const HistoricScores: React.FC<HistoricScoresProps> = ({
                 role="tab"
                 aria-selected={isActive}
                 onClick={() => setSelectedSeason(season)}
-                className={`flex-1 min-w-[4.5rem] py-2.5 px-3 rounded-xl text-xs font-bold font-mono uppercase border transition-all cursor-pointer ${
+                className={`flex-1 min-w-[4.5rem] py-2 px-3 rounded-lg text-xs font-semibold font-mono border transition-colors cursor-pointer ${
                   isActive
-                    ? 'bg-blue-600 border-blue-500 text-white shadow-[0_2px_8px_rgba(59,130,246,0.3)]'
-                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-white'
+                    ? 'bg-transparent border-slate-400 text-white ring-1 ring-slate-500/60'
+                    : 'bg-transparent border-slate-800 text-slate-400 hover:border-slate-600 hover:text-slate-200'
                 }`}
               >
                 {season}

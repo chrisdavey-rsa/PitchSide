@@ -40,6 +40,38 @@ export type GolfPlayer = {
   profileImageUrl: string | null;
 };
 
+/** Mirrors public.f1_predictions */
+export type F1Prediction = {
+  id: string;
+  userId: string | null;
+  raceId: string | null;
+  qualiTop10: string[] | null;
+  raceTop6: string[] | null;
+  fastestLap: string | null;
+  qualiPoints: number | null;
+  racePoints: number | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+/** Mirrors public.golf_predictions */
+export type GolfPrediction = {
+  id: string;
+  userId: string | null;
+  tournamentId: string | null;
+  tier1Pick: string | null;
+  tier2Pick: string | null;
+  tier3Pick: string | null;
+  tier4Pick: string | null;
+  tier5Pick: string | null;
+  mulliganUsed: boolean | null;
+  mulliganSwappedPlayer: string | null;
+  mulliganNewPlayer: string | null;
+  totalScore: number | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
 export type EmergingProfileSlice = {
   userId: string;
   role: UserRole;

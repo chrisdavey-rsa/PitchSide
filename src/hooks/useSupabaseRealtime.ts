@@ -98,7 +98,7 @@ export function useSupabaseRealtime(
       'postgres_changes',
       { event: 'UPDATE', schema: 'public', table: 'predictions' },
       (payload) => {
-        const row = payload.new as Record<string, any> | null;
+        const row = payload.new as Record<string, unknown> | null;
         if (!row?.match_id) {
           invalidate('predictions');
           return;

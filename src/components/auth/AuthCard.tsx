@@ -26,6 +26,10 @@ export default function AuthCard({ children, badge, onLogoClick }: AuthCardProps
         <p className="text-xs text-slate-400 font-mono mt-2 uppercase tracking-widest">
           Play. Predict. Prevail.
         </p>
+        {/* Mobile-only value prop — desktop has the left marketing panel */}
+        <p className="lg:hidden mt-3 mx-auto max-w-xs text-[11px] leading-relaxed text-slate-400 font-sans">
+          Predict Football &amp; Rugby scores. Join a league. Climb the leaderboard.
+        </p>
       </div>
 
       <div className="bg-slate-900/85 backdrop-blur-md rounded-2xl border border-slate-800 p-6 shadow-2xl relative">

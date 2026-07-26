@@ -27,11 +27,8 @@ import {
   type SeenFeatures,
 } from "../../lib/seenFeatures";
 
-/** Wallet chips: power-up id paired with its current (hardcoded) status. */
-const WALLET_CHIPS: { id: string; status: string }[] = [
-  { id: "urc-shield-bank", status: "1 Available" },
-  { id: "ucl-joker", status: "Arsenal" },
-];
+/** Power-up catalog ids shown in the launch-locked wallet teaser (no fake balances). */
+const WALLET_CHIP_IDS = ["urc-shield-bank", "ucl-joker"] as const;
 
 function getMatchStatusDisplay(match: Match) {
   if (match.status === "completed") {
@@ -185,14 +182,15 @@ export default function MatchPredictor({
 
               {/* Grid list of competitions with active/upcoming fixtures */}
               {filteredCompetitions.length === 0 ? (
-                <div className="rounded-2xl border border-slate-800/80 bg-slate-950/40 px-6 py-14 text-center">
+                <div className="rounded-2xl border border-slate-800/80 bg-slate-950/40 px-6 py-14 text-center space-y-3">
                   <p className="text-sm font-display font-semibold text-slate-200">
-                    No active fixtures available for this game-week.
+                    No fixtures open for this game-week yet
                   </p>
-                  <p className="mt-2 text-xs text-slate-500 font-sans max-w-sm mx-auto leading-relaxed">
-                    When live or upcoming matches are synced for{" "}
-                    {selectedSport === SportType.FOOTBALL ? "football" : "rugby"},
-                    their competitions will appear here automatically.
+                  <p className="text-xs text-slate-500 font-sans max-w-sm mx-auto leading-relaxed">
+                    Your leagues are unlocked — predictions will appear here
+                    when upcoming{" "}
+                    {selectedSport === SportType.FOOTBALL ? "football" : "rugby"}{" "}
+                    fixtures are synced. Check back closer to kick-off.
                   </p>
                 </div>
               ) : (
@@ -250,52 +248,30 @@ export default function MatchPredictor({
               {/* SPECIFIC COMPETITION FIXTURES PREDICTOR */}
               {selectedCompId && filteredCompetitions.length > 0 && (
                 <div className="mt-6 pt-5 border-t border-slate-800 space-y-4">
-                  {/* POWER-UP WALLET: inactive launch teaser (coming soon) */}
-                  <div className="flex flex-col gap-2.5 md:flex-row md:flex-wrap md:items-center rounded-xl border border-slate-800/70 bg-slate-950/30 px-4 py-3">
-                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500 shrink-0">
-                      Power-Up Wallet
-                    </span>
-
-                    <div className="grid grid-cols-2 gap-2 md:flex md:flex-row md:flex-wrap md:items-center md:gap-2.5">
-                      {WALLET_CHIPS.map((chip) => {
-                        const powerUp = getPowerUp(chip.id);
-                        if (!powerUp) return null;
-                        const Icon = powerUp.icon;
-                        return (
-                          <button
-                            key={chip.id}
-                            type="button"
-                            disabled
-                            aria-disabled="true"
-                            title={`${powerUp.name} — coming soon`}
-                            className="relative flex items-center justify-center md:justify-start gap-2 rounded-lg border border-slate-700 bg-slate-800 w-full md:w-auto p-2.5 md:px-3 md:py-1.5 text-left text-slate-500 cursor-not-allowed opacity-90"
-                          >
-                            <Icon className="relative z-10 h-5 w-5 md:h-4 md:w-4 text-slate-500" />
-                            <span className="hidden md:flex flex-col leading-tight relative z-10">
-                              <span className="text-[11px] font-bold font-display text-slate-400">
-                                {powerUp.name}
-                              </span>
-                              <span className="text-[9px] font-mono uppercase tracking-wide text-slate-600">
-                                Coming soon
-                              </span>
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <span className="hidden md:block md:ml-auto text-[9px] font-mono uppercase tracking-widest text-slate-600 shrink-0">
-                      Launch locked
-                    </span>
+                  {/* POWER-UP WALLET: slim coming-soon strip (not competing with prediction UI) */}
+                  <div
+                    className="flex items-center gap-2 rounded-lg border border-slate-800/60 bg-slate-950/40 px-3 py-1.5"
+                    title="Power-up chips launch soon"
+                  >
+                    <Sparkles className="h-3.5 w-3.5 text-slate-500 shrink-0" aria-hidden />
+                    <p className="min-w-0 flex-1 text-[10px] text-slate-500 font-sans leading-snug">
+                      <span className="font-semibold text-slate-400">Power-Ups</span>
+                      {" — "}
+                      {WALLET_CHIP_IDS.map((id) => getPowerUp(id)?.name)
+                        .filter(Boolean)
+                        .join(" · ")}
+                      {" · coming soon"}
+                    </p>
                   </div>
 
                   {activeMatches.length === 0 ? (
-                    <div className="rounded-xl border border-slate-800/70 bg-slate-950/30 px-5 py-10 text-center">
+                    <div className="rounded-xl border border-slate-800/70 bg-slate-950/30 px-5 py-10 text-center space-y-2">
                       <p className="text-sm font-display font-semibold text-slate-200">
-                        No active fixtures available for this game-week.
+                        No open fixtures in this competition
                       </p>
-                      <p className="mt-2 text-xs text-slate-500 font-sans">
-                        Check back once upcoming fixtures are synced for this competition.
+                      <p className="text-xs text-slate-500 font-sans">
+                        Pick another competition above, or check back when the
+                        next game-week is synced.
                       </p>
                     </div>
                   ) : (
@@ -412,7 +388,7 @@ export default function MatchPredictor({
                                         {liveAway ?? "–"}
                                       </span>
                                       <span className="text-[9px] font-mono uppercase tracking-widest text-slate-500">
-                                        As It Stands
+                                        As it stands
                                       </span>
                                     </>
                                   ) : (
@@ -434,7 +410,7 @@ export default function MatchPredictor({
                                     ) : isLive && isSubmitted ? (
                                       <div className="w-full sm:w-auto flex flex-col items-center gap-0.5 text-xs font-mono bg-amber-500/10 border border-amber-500/30 px-4 py-2 rounded-xl">
                                         <span className="text-[9px] uppercase tracking-widest text-amber-500/80">
-                                          As It Stands
+                                          Live standings
                                         </span>
                                         <span className="font-display font-black text-amber-300 text-sm">
                                           {asItStandsPoints > 0 ? `+${asItStandsPoints}` : asItStandsPoints} pts
@@ -451,16 +427,37 @@ export default function MatchPredictor({
                                 </div>
                               </div>
 
+                              {isMatchStarted && (
+                                <div className="mb-4 flex flex-col items-center gap-1 text-center">
+                                  <span className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/80 px-3 py-1 text-[10px] font-semibold font-mono uppercase tracking-wide text-slate-300">
+                                    {isSubmitted
+                                      ? "Prediction locked"
+                                      : "Predictions closed"}
+                                  </span>
+                                  <p className="text-[10px] text-slate-500 font-sans max-w-xs">
+                                    {isSubmitted
+                                      ? "Your locked guess is shown below — separate from the live score above."
+                                      : "Kick-off has passed. Score inputs are closed for this fixture."}
+                                  </p>
+                                </div>
+                              )}
+
                               <div className="flex flex-col md:flex-row items-center justify-center gap-6">
                               {/* Teams Scoring UI Rows */}
                               {match.sport === "football" ? (
                                 <div className="w-full flex items-start justify-center gap-3 sm:gap-4 max-w-xl mx-auto">
                                   {/* Home Team */}
                                   <div className="flex-1 min-w-0 flex flex-col items-center text-center">
-                                    <div className="flex items-center justify-center gap-1 bg-slate-950 px-1.5 py-1 rounded-xl border border-slate-800 focus-within:border-emerald-500/50 transition-all">
+                                    <div
+                                      className={`flex items-center justify-center gap-1 bg-slate-950 px-1.5 py-1 rounded-xl border transition-all ${
+                                        isLocked
+                                          ? "border-slate-700/80 opacity-90"
+                                          : "border-slate-800 focus-within:border-emerald-500/50"
+                                      }`}
+                                    >
+                                      {!isLocked && (
                                       <button
                                         type="button"
-                                        disabled={isLocked}
                                         onClick={() => {
                                           const val = Math.max(
                                             0,
@@ -472,12 +469,13 @@ export default function MatchPredictor({
                                             val.toString(),
                                           );
                                         }}
-                                        className="relative p-1 rounded-sm bg-slate-900 border border-slate-800 text-slate-400 hover:text-white disabled:opacity-50 transition-all flex items-center justify-center cursor-pointer overflow-hidden group select-none"
+                                        className="relative p-1 rounded-sm bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-all flex items-center justify-center cursor-pointer overflow-hidden group select-none"
                                       >
                                         <div className="absolute inset-[-100%] z-0 group-hover:animate-[spin_2s_linear_infinite] bg-[conic-gradient(from_90deg_at_50%_50%,#00000000_50%,#10b981_100%)] opacity-0 group-hover:opacity-100" />
                                         <div className="absolute inset-[1px] bg-slate-900 rounded-sm z-0" />
                                         <Minus className="w-2.5 h-2.5 relative z-10" />
                                       </button>
+                                      )}
 
                                       <input
                                         id={`pred-home-val-${match.id}`}
@@ -485,6 +483,7 @@ export default function MatchPredictor({
                                         min={0}
                                         max={99}
                                         disabled={isLocked}
+                                        readOnly={isLocked}
                                         value={savedPred.home}
                                         onChange={(e) =>
                                           onScoreChange(
@@ -493,12 +492,16 @@ export default function MatchPredictor({
                                             e.target.value,
                                           )
                                         }
-                                        className="w-8 text-center bg-transparent border-0 font-display font-black text-white text-base focus:ring-0 outline-hidden pointer-events-auto p-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                        className={`w-8 text-center bg-transparent border-0 font-display font-black text-white text-base focus:ring-0 outline-hidden p-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
+                                          isLocked
+                                            ? "pointer-events-none cursor-default"
+                                            : "pointer-events-auto"
+                                        }`}
                                       />
 
+                                      {!isLocked && (
                                       <button
                                         type="button"
-                                        disabled={isLocked}
                                         onClick={() => {
                                           const val = (savedPred.home || 0) + 1;
                                           onScoreChange(
@@ -507,12 +510,13 @@ export default function MatchPredictor({
                                             val.toString(),
                                           );
                                         }}
-                                        className="relative p-1 rounded-sm bg-slate-900 border border-slate-800 text-slate-400 hover:text-emerald-400 disabled:opacity-50 transition-all flex items-center justify-center cursor-pointer overflow-hidden group select-none"
+                                        className="relative p-1 rounded-sm bg-slate-900 border border-slate-800 text-slate-400 hover:text-emerald-400 transition-all flex items-center justify-center cursor-pointer overflow-hidden group select-none"
                                       >
                                         <div className="absolute inset-[-100%] z-0 group-hover:animate-[spin_2s_linear_infinite] bg-[conic-gradient(from_90deg_at_50%_50%,#00000000_50%,#10b981_100%)] opacity-0 group-hover:opacity-100" />
                                         <div className="absolute inset-[1px] bg-slate-900 rounded-sm z-0" />
                                         <Plus className="w-2.5 h-2.5 relative z-10" />
                                       </button>
+                                      )}
                                     </div>
                                     <h5
                                       className={`mt-2 font-extrabold font-display text-[11px] sm:text-sm tracking-tight truncate w-full max-w-full leading-snug px-0.5 ${
@@ -539,10 +543,16 @@ export default function MatchPredictor({
 
                                   {/* Away Team */}
                                   <div className="flex-1 min-w-0 flex flex-col items-center text-center">
-                                    <div className="flex items-center justify-center gap-1 bg-slate-950 px-1.5 py-1 rounded-xl border border-slate-800 focus-within:border-emerald-500/50 transition-all">
+                                    <div
+                                      className={`flex items-center justify-center gap-1 bg-slate-950 px-1.5 py-1 rounded-xl border transition-all ${
+                                        isLocked
+                                          ? "border-slate-700/80 opacity-90"
+                                          : "border-slate-800 focus-within:border-emerald-500/50"
+                                      }`}
+                                    >
+                                      {!isLocked && (
                                       <button
                                         type="button"
-                                        disabled={isLocked}
                                         onClick={() => {
                                           const val = Math.max(
                                             0,
@@ -554,12 +564,13 @@ export default function MatchPredictor({
                                             val.toString(),
                                           );
                                         }}
-                                        className="relative p-1 rounded-sm bg-slate-900 border border-slate-800 text-slate-400 hover:text-white disabled:opacity-50 transition-all flex items-center justify-center cursor-pointer overflow-hidden group select-none"
+                                        className="relative p-1 rounded-sm bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-all flex items-center justify-center cursor-pointer overflow-hidden group select-none"
                                       >
                                         <div className="absolute inset-[-100%] z-0 group-hover:animate-[spin_2s_linear_infinite] bg-[conic-gradient(from_90deg_at_50%_50%,#00000000_50%,#10b981_100%)] opacity-0 group-hover:opacity-100" />
                                         <div className="absolute inset-[1px] bg-slate-900 rounded-sm z-0" />
                                         <Minus className="w-2.5 h-2.5 relative z-10" />
                                       </button>
+                                      )}
 
                                       <input
                                         id={`pred-away-val-${match.id}`}
@@ -567,6 +578,7 @@ export default function MatchPredictor({
                                         min={0}
                                         max={99}
                                         disabled={isLocked}
+                                        readOnly={isLocked}
                                         value={savedPred.away}
                                         onChange={(e) =>
                                           onScoreChange(
@@ -575,12 +587,16 @@ export default function MatchPredictor({
                                             e.target.value,
                                           )
                                         }
-                                        className="w-8 text-center bg-transparent border-0 font-display font-black text-white text-base focus:ring-0 outline-hidden pointer-events-auto p-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                        className={`w-8 text-center bg-transparent border-0 font-display font-black text-white text-base focus:ring-0 outline-hidden p-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
+                                          isLocked
+                                            ? "pointer-events-none cursor-default"
+                                            : "pointer-events-auto"
+                                        }`}
                                       />
 
+                                      {!isLocked && (
                                       <button
                                         type="button"
-                                        disabled={isLocked}
                                         onClick={() => {
                                           const val = (savedPred.away || 0) + 1;
                                           onScoreChange(
@@ -589,12 +605,13 @@ export default function MatchPredictor({
                                             val.toString(),
                                           );
                                         }}
-                                        className="relative p-1 rounded-sm bg-slate-900 border border-slate-800 text-slate-400 hover:text-emerald-400 disabled:opacity-50 transition-all flex items-center justify-center cursor-pointer overflow-hidden group select-none"
+                                        className="relative p-1 rounded-sm bg-slate-900 border border-slate-800 text-slate-400 hover:text-emerald-400 transition-all flex items-center justify-center cursor-pointer overflow-hidden group select-none"
                                       >
                                         <div className="absolute inset-[-100%] z-0 group-hover:animate-[spin_2s_linear_infinite] bg-[conic-gradient(from_90deg_at_50%_50%,#00000000_50%,#10b981_100%)] opacity-0 group-hover:opacity-100" />
                                         <div className="absolute inset-[1px] bg-slate-900 rounded-sm z-0" />
                                         <Plus className="w-2.5 h-2.5 relative z-10" />
                                       </button>
+                                      )}
                                     </div>
                                     <h5
                                       className={`mt-2 font-extrabold font-display text-[11px] sm:text-sm tracking-tight truncate w-full max-w-full leading-snug px-0.5 ${
@@ -616,7 +633,11 @@ export default function MatchPredictor({
                                     {matchStatus.label}
                                   </span>
                                   {/* Winner Selection Segment */}
-                                  <div className="w-full grid grid-cols-3 gap-2">
+                                  <div
+                                    className={`w-full grid grid-cols-3 gap-2 ${
+                                      isLocked ? "pointer-events-none opacity-80" : ""
+                                    }`}
+                                  >
                                     <button
                                       type="button"
                                       disabled={isLocked}
@@ -632,7 +653,9 @@ export default function MatchPredictor({
                                           currentMargin.toString(),
                                         );
                                       }}
-                                      className={`px-1.5 py-2.5 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center transition-all cursor-pointer select-none min-w-0 ${
+                                      className={`px-1.5 py-2.5 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center transition-all select-none min-w-0 ${
+                                        isLocked ? "cursor-default" : "cursor-pointer"
+                                      } ${
                                         homeLeading
                                           ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300"
                                           : "bg-slate-950/20 border-slate-850 text-slate-500 hover:bg-slate-900/50 hover:text-slate-350"

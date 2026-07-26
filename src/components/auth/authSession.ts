@@ -46,11 +46,17 @@ export async function profileFromSession(
 
   const { data: row } = await supabase
     .from('profiles')
-    .select('*')
+    .select(
+      'id, first_name, surname, email, username, dob, phone, nationality, supported_team, preferred_sport, is_admin, is_profile_public, created_at, seen_features, selected_sports, favorite_f1_team, favorite_golfer, role, golf_mulligans_available',
+    )
     .eq('id', authUser.id)
     .single();
 
   if (row) {
+    const selectedSports = Array.isArray(row.selected_sports)
+      ? (row.selected_sports as UserProfile["selectedSports"])
+      : [];
+
     return {
       id: row.id,
       firstName: row.first_name || '',
@@ -58,15 +64,21 @@ export async function profileFromSession(
       email: row.email || authUser.email || loginEmail || '',
       phone: row.phone || '',
       dob: row.dob || '1990-01-01',
-      nickname: row.username || row.nickname || 'Contestant',
+      nickname: row.username || 'Contestant',
       createdAt: row.created_at || new Date().toISOString(),
       emailVerified: !!authUser.email_confirmed_at,
       emailConfirmedAt: authUser.email_confirmed_at || null,
       isAdmin: row.is_admin || false,
       agreedToTerms: true,
-      nationality: row.nationality || 'Global',
-      supportedTeam: row.supported_team || 'Unknown',
+      // Preserve null/empty so needsOnboarding() can gate OAuth users.
+      nationality: row.nationality || undefined,
+      supportedTeam: row.supported_team || undefined,
       preferredSport: (row.preferred_sport as SportType) || undefined,
+      selectedSports,
+      favoriteF1Team: row.favorite_f1_team ?? null,
+      favoriteGolfer: row.favorite_golfer ?? null,
+      role: row.role ?? null,
+      golfMulligansAvailable: row.golf_mulligans_available ?? null,
       isProfilePublic: row.is_profile_public ?? undefined,
       seenFeatures: parseSeenFeatures(row.seen_features),
     };

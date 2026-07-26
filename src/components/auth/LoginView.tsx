@@ -7,6 +7,7 @@ import { motion } from 'motion/react';
 import { User, KeyRound, Eye, EyeOff, ArrowRight } from 'lucide-react';
 import { UserProfile } from '../../types';
 import AuthCard, { AuthError, AuthSuccess } from './AuthCard';
+import OAuthButtons from './OAuthButtons';
 import { performLogin } from './authSession';
 
 export interface LoginViewProps {
@@ -52,19 +53,34 @@ export default function LoginView({
 
   return (
     <AuthCard onLogoClick={onLogoClick}>
-      <div className="flex border-b border-slate-800 mb-6 pb-1">
-        <span className="flex-1 pb-3 text-sm font-semibold font-display tracking-wide uppercase text-white relative">
-          Login
-          <motion.div layoutId="authTabId" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500" />
-        </span>
+      <div className="flex border-b border-slate-800 mb-2 pb-1">
+        <div className="flex-1 flex justify-center">
+          <span className="relative inline-block pb-3 text-sm font-semibold font-display tracking-wide uppercase text-white text-center">
+            Login
+            <motion.div
+              layoutId="authTabId"
+              className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500"
+            />
+          </span>
+        </div>
         <button
           type="button"
           onClick={onCreateAccount}
-          className="flex-1 pb-3 text-sm font-semibold font-display tracking-wide uppercase text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+          className="flex-1 flex justify-center pb-3 text-sm font-semibold font-display tracking-wide uppercase text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
         >
-          Create Account
+          <span className="relative inline-block text-center">Create Account</span>
         </button>
       </div>
+      <p className="mb-5 text-[11px] text-slate-500 font-sans text-center">
+        New to PitchSide?{" "}
+        <button
+          type="button"
+          onClick={onCreateAccount}
+          className="text-blue-400 hover:text-blue-300 font-semibold cursor-pointer"
+        >
+          Create an account
+        </button>
+      </p>
 
       {successMessage && <AuthSuccess message={successMessage} />}
       {error && <AuthError message={error} />}
@@ -94,19 +110,13 @@ export default function LoginView({
           </div>
         </div>
 
-        <div>
-          <div className="flex justify-between items-center mb-1.5">
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono">
-              Password
-            </label>
-            <button
-              type="button"
-              onClick={onForgotPassword}
-              className="text-[10px] text-blue-400 hover:text-blue-300 hover:underline cursor-pointer font-semibold font-mono uppercase tracking-wide"
-            >
-              Forgot Password?
-            </button>
-          </div>
+        <div className="relative">
+          <label
+            htmlFor="login-password-input"
+            className="block text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono mb-1.5 pr-28"
+          >
+            Password
+          </label>
           <div className="relative">
             <KeyRound className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
             <input
@@ -127,6 +137,14 @@ export default function LoginView({
               {masked ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4 text-white" />}
             </button>
           </div>
+          {/* After password in DOM (correct Tab order); visually top-right of the field group */}
+          <button
+            type="button"
+            onClick={onForgotPassword}
+            className="absolute right-0 top-0 text-[10px] text-blue-400 hover:text-blue-300 hover:underline cursor-pointer font-semibold font-mono uppercase tracking-wide"
+          >
+            Forgot Password?
+          </button>
         </div>
 
         <button
@@ -142,6 +160,8 @@ export default function LoginView({
           <div className="absolute inset-0 -translate-x-[150%] bg-linear-to-r from-transparent via-white/40 to-transparent group-hover:animate-[shimmer_0.75s_ease-in-out_1]" />
         </button>
       </motion.form>
+
+      <OAuthButtons onError={setError} />
     </AuthCard>
   );
 }

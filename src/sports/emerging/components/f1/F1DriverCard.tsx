@@ -52,7 +52,12 @@ export default function F1DriverCard({
           : 'border-slate-800 bg-slate-900/70 hover:border-slate-600'
       } ${dimmed ? 'opacity-45' : ''} ${className}`}
     >
-      <F1HelmetIcon colorHex={driver.teamColorHex} className="h-9 w-9 shrink-0" />
+      <F1HelmetIcon
+        constructorId={driver.constructorId}
+        colorHex={driver.teamColorHex}
+        title={driver.constructorName ?? undefined}
+        className="h-11 w-11 sm:h-12 sm:w-12 shrink-0"
+      />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-slate-100 truncate">
@@ -67,7 +72,9 @@ export default function F1DriverCard({
           >
             {driver.permanentNumber ?? '—'}
           </span>
-          <span className="truncate">{driver.constructorName ?? '—'}</span>
+          <span className="min-w-0 whitespace-normal break-words">
+            {driver.constructorName ?? '—'}
+          </span>
         </div>
       </div>
     </div>

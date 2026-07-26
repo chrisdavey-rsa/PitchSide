@@ -19,6 +19,14 @@ export interface UserProfile {
   phone?: string;
   supportedTeam?: string;
   preferredSport?: SportType;
+  /** From profiles.selected_sports — empty means onboarding required. */
+  selectedSports?: Array<"football" | "rugby" | "golf" | "formula1">;
+  favoriteF1Team?: string | null;
+  favoriteGolfer?: string | null;
+  /** profiles.role — 'admin' | 'player' when present. */
+  role?: string | null;
+  /** profiles.golf_mulligans_available */
+  golfMulligansAvailable?: number | null;
   password?: string;
   isProfilePublic?: boolean;
   suspendedUntil?: string;

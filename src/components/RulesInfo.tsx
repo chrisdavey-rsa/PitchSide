@@ -287,7 +287,9 @@ export default function RulesInfo({ user, onClose }: RulesInfoProps) {
                   <h4 className={`text-sm font-bold font-display ${powerUp.theme.accentText}`}>
                     {powerUp.name}
                   </h4>
-                  <p className="text-xs text-slate-400 truncate">{powerUp.tagline}</p>
+                  <p className="text-xs text-slate-400 whitespace-normal break-words leading-snug">
+                    {powerUp.tagline}
+                  </p>
                 </div>
                 <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-slate-400 group-hover:translate-x-0.5 transition-all shrink-0" />
               </button>
@@ -336,11 +338,10 @@ export default function RulesInfo({ user, onClose }: RulesInfoProps) {
           <h4 className="text-base font-bold font-display text-white">Where You Compete</h4>
         </div>
         <p className="text-sm text-slate-300 leading-relaxed">
-          Open <span className="text-white font-semibold">Leagues</span> from the top navigation. Use the
-          submenu to <span className="text-white font-semibold">List</span> your leagues,{' '}
-          <span className="text-white font-semibold">Join</span> one with a code and password,{' '}
-          <span className="text-white font-semibold">View</span> all public leagues, or{' '}
-          <span className="text-white font-semibold">Create</span> your own private competition. You must
+          Open <span className="text-white font-semibold">Leagues</span> from the main menu. Use{' '}
+          <span className="text-white font-semibold">View</span>,{' '}
+          <span className="text-white font-semibold">Join</span> (code + password), or{' '}
+          <span className="text-white font-semibold">Create</span> to get into a competition. You must
           be in at least one league before the Match Predictor unlocks.
         </p>
       </div>

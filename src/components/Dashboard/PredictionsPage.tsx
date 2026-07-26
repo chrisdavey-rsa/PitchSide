@@ -1,6 +1,8 @@
 import React, { useEffect } from "react";
+import { Users } from "lucide-react";
 import { SportType, Competition, Match, UserProfile } from "../../types";
 import MatchPredictor from "./MatchPredictor";
+import OfflineDraftBanner from "../OfflineDraftBanner";
 import type { PredictionEntry } from "../../supabase";
 import type { SeenFeatureKey, SeenFeatures } from "../../lib/seenFeatures";
 import {
@@ -39,6 +41,11 @@ interface PredictionsPageProps {
   ) => void;
   onSubmitPrediction: (matchId: string) => void;
   onOpenLeagues: () => void;
+  /** Offline drafting banner (core sports only). */
+  isOffline?: boolean;
+  hasOfflineDraft?: boolean;
+  onApplyOfflineDraft?: () => void | Promise<void>;
+  applyingOfflineDraft?: boolean;
 }
 
 /**
@@ -67,6 +74,10 @@ export default function PredictionsPage({
   onRugbyPredictionChange,
   onSubmitPrediction,
   onOpenLeagues,
+  isOffline = false,
+  hasOfflineDraft = false,
+  onApplyOfflineDraft,
+  applyingOfflineDraft = false,
 }: PredictionsPageProps) {
   const userRole = useUserRole(user.id, user.isAdmin);
   const showEmerging = isEmergingSport(activeSport);
@@ -80,20 +91,24 @@ export default function PredictionsPage({
 
   if (!isUserInAnyLeague && !showEmerging) {
     return (
-      <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-8 text-center space-y-4">
+      <div className="rounded-3xl border border-emerald-500/25 bg-slate-900/60 p-8 text-center space-y-4">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-500/30 bg-emerald-500/10">
+          <Users className="h-6 w-6 text-emerald-400" aria-hidden />
+        </div>
         <h2 className="text-lg font-display font-extrabold text-white">
-          Join a league to predict
+          Join a league to unlock predictions
         </h2>
         <p className="text-xs text-slate-400 font-sans max-w-sm mx-auto leading-relaxed">
-          You need to be in at least one league before the Match Predictor
-          unlocks. Create a private league or join with a code.
+          You must be in at least one league before the Match Predictor unlocks.
+          Create a private league or join with a code — this is not a fixtures
+          outage.
         </p>
         <button
           type="button"
           onClick={onOpenLeagues}
           className="inline-flex items-center justify-center px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold font-display cursor-pointer transition-colors"
         >
-          Open Leagues
+          Browse Leagues — Join or Create
         </button>
       </div>
     );
@@ -135,26 +150,34 @@ export default function PredictionsPage({
             userRole={userRole}
             className="w-full shrink-0"
           />
+
+          {!showEmerging && (
+            <OfflineDraftBanner
+              isOffline={isOffline}
+              hasDraft={hasOfflineDraft}
+              onApplyAndSubmit={onApplyOfflineDraft}
+              applying={applyingOfflineDraft}
+            />
+          )}
         </div>
       </div>
 
       {showEmerging ? (
         <EmergingSportWorkspace sport={activeSport} userId={user.id} />
       ) : !isUserInAnyLeague ? (
-        <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-8 text-center space-y-4">
+        <div className="rounded-3xl border border-emerald-500/25 bg-slate-900/60 p-8 text-center space-y-4">
           <h2 className="text-lg font-display font-extrabold text-white">
-            Join a league to predict
+            Join a league to unlock predictions
           </h2>
           <p className="text-xs text-slate-400 font-sans max-w-sm mx-auto leading-relaxed">
-            You need to be in at least one league before the Match Predictor
-            unlocks.
+            You must be in at least one league before the Match Predictor unlocks.
           </p>
           <button
             type="button"
             onClick={onOpenLeagues}
             className="inline-flex items-center justify-center px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold font-display cursor-pointer transition-colors"
           >
-            Open Leagues
+            Browse Leagues — Join or Create
           </button>
         </div>
       ) : (

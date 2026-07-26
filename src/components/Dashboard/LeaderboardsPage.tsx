@@ -313,7 +313,7 @@ export default function LeaderboardsPage({
                     : "text-slate-500 hover:text-slate-300 hover:bg-slate-900"
                 }`}
               >
-                <SportIcon sport={tab.id} colored className="h-4 w-4" />
+                <SportIcon sport={tab.id} colored className="h-5 w-5" />
                 {tab.label}
               </button>
             );
@@ -407,8 +407,15 @@ export default function LeaderboardsPage({
             Points
             <ArrowUpDown className="w-3 h-3 opacity-60" />
             {sortKey === "points" && (
-              <span className="text-emerald-400">
-                {sortDir === "desc" ? "Hi" : "Lo"}
+              <span
+                className="text-emerald-400 text-[10px] font-mono"
+                title={
+                  sortDir === "desc"
+                    ? "Sorted high to low"
+                    : "Sorted low to high"
+                }
+              >
+                {sortDir === "desc" ? "High→Low" : "Low→High"}
               </span>
             )}
           </button>

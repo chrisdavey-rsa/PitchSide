@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { Trophy, ChevronRight, Target, Loader2, ChevronDown } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Match, SportType, UserProfile } from "../../types";
-import { dbFetchMatches } from "../../supabase";
+import { dbFetchMatches, STANDINGS_COMPLETED_HORIZON_DAYS } from "../../supabase";
 import {
   useLeaderboardQuery,
   useLeagueMembersQuery,
@@ -81,9 +81,12 @@ export default function LeagueHubStandings({
     useLeagueMembersQuery(leagueId);
 
   const { data: completedMatches = [], isLoading: matchesLoading } = useQuery({
-    queryKey: ["completedMatches", "leagueStandings"],
+    queryKey: ["completedMatches", "leagueStandings", STANDINGS_COMPLETED_HORIZON_DAYS],
     queryFn: () =>
-      dbFetchMatches({ horizonDays: null, status: "completed" }),
+      dbFetchMatches({
+        horizonDays: STANDINGS_COMPLETED_HORIZON_DAYS,
+        status: "completed",
+      }),
     staleTime: 60_000,
     enabled: !isGlobal,
   });
@@ -327,7 +330,7 @@ export default function LeagueHubStandings({
                   : "text-slate-500 hover:text-slate-300 hover:bg-slate-900"
               }`}
             >
-              <SportIcon sport={tab.id} colored className="h-4 w-4" />
+              <SportIcon sport={tab.id} colored className="h-5 w-5" />
               {tab.label}
             </button>
           );

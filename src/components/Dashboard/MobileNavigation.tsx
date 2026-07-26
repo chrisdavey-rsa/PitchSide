@@ -78,7 +78,7 @@ export default function MobileNavigation({
             }`}
           />
           <span className="text-[9px] font-medium font-sans truncate w-full text-center">
-            Boards
+            Leaderboards
           </span>
         </button>
 

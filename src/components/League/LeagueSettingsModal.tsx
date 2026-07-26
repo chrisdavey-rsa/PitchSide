@@ -85,7 +85,9 @@ export default function LeagueSettingsModal({
               <h2 className="text-sm font-extrabold font-display text-white truncate">
                 League Settings
               </h2>
-              <p className="text-[10px] font-mono text-slate-500 truncate">{league.name}</p>
+              <p className="text-[10px] font-mono text-slate-500 whitespace-normal break-words">
+                {league.name}
+              </p>
             </div>
           </div>
           <button

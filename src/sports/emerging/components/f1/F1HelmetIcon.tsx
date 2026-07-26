@@ -1,48 +1,84 @@
 /**
- * Side-profile F1 helmet glyph tinted with constructor colour.
+ * F1 helmet icon — local public-folder .png photos via <img>, with chip fallback.
+ * Always prefers HELMET_MAP by constructor id; ignores remote helmet URLs.
  */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { HELMET_MAP } from '../../f1HelmetAssets';
+
+type ConstructorLike = { id?: string | null } | null | undefined;
 
 type Props = {
+  /** Constructor id (mclaren, racing_bulls, …). */
+  constructorId?: string | null;
+  /** Snake-case variant from DB-shaped objects. */
+  constructor_id?: string | null;
+  /** Nested constructor object with an `id` field. */
+  constructor?: ConstructorLike;
+  /**
+   * Ignored — remote/DB helmet URLs must not override local HELMET_MAP assets.
+   * Kept optional so call sites can still pass the prop without breaking.
+   */
+  imageUrl?: string | null;
+  /** Accent colour for the load-failure fallback chip. */
   colorHex?: string | null;
   className?: string;
   title?: string;
+  /** Override lazy loading for above-the-fold / drag overlay icons. */
+  loading?: 'lazy' | 'eager';
 };
 
 export default function F1HelmetIcon({
+  constructorId,
+  constructor_id,
+  constructor,
   colorHex = '#94a3b8',
-  className = 'h-8 w-8',
+  className = 'h-6 w-6 sm:h-8 sm:w-8',
   title,
+  loading = 'lazy',
 }: Props) {
-  const fill = colorHex || '#94a3b8';
+  const rawId = constructorId || constructor_id || constructor?.id || '';
+  const safeId = rawId.toLowerCase().trim();
+  const finalId = safeId === 'rb' ? 'racing_bulls' : safeId;
+  const imagePath = HELMET_MAP[finalId];
+  // Always use local map — never remote helmet_image_url / helmetImageUrl.
+  const photoSrc = imagePath ? encodeURI(imagePath) : null;
+
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    setHasError(false);
+  }, [finalId]);
+
+  if (photoSrc && !hasError) {
+    return (
+      <img
+        src={photoSrc}
+        alt={title || ''}
+        title={title || undefined}
+        aria-hidden={title ? undefined : true}
+        draggable={false}
+        loading={loading}
+        decoding="async"
+        onError={() => setHasError(true)}
+        className={`object-contain object-center shrink-0 select-none ${className}`}
+      />
+    );
+  }
+
+  // Legacy colored chip fallback when mapping is missing or the asset fails.
+  const accent = colorHex || '#94a3b8';
   return (
-    <svg
-      viewBox="0 0 64 64"
-      className={className}
+    <span
+      title={title || undefined}
       aria-hidden={title ? undefined : true}
-      role={title ? 'img' : undefined}
+      className={`inline-flex items-center justify-center rounded-md border border-slate-700 bg-slate-950 shrink-0 ${className}`}
+      style={{ boxShadow: `inset 0 0 0 2px ${accent}55` }}
     >
-      {title ? <title>{title}</title> : null}
-      <path
-        d="M10 34c2-14 14-24 28-24 12 0 22 8 24 20 1 6-2 12-8 15H18c-5-2-9-6-8-11z"
-        fill={fill}
-        opacity="0.95"
+      <span
+        className="block h-2 w-2 rounded-full"
+        style={{ backgroundColor: accent }}
       />
-      <path
-        d="M18 42h28c2 0 4 2 4 4v2c0 2-2 4-4 4H18c-2 0-4-2-4-4v-2c0-2 2-4 4-4z"
-        fill={fill}
-      />
-      <path
-        d="M22 28c6-2 14-2 20 0 1 3-1 6-4 7H26c-3-1-5-4-4-7z"
-        fill="#0f172a"
-        opacity="0.85"
-      />
-      <path
-        d="M12 36h8l2 8H14l-2-8z"
-        fill="#0f172a"
-        opacity="0.35"
-      />
-    </svg>
+    </span>
   );
 }

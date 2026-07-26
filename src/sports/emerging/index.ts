@@ -10,12 +10,21 @@ export type {
   UserRole,
   F1Constructor,
   F1Driver,
+  F1Prediction,
   GolfPlayer,
+  GolfPrediction,
   F1GridMode,
   EmergingProfileSlice,
 } from './types';
 export { EMERGING_SPORT_META, gridSlotsForMode } from './types';
 export { SportIcon, SPORT_ICON_SRC, SPORT_ICON_SRC_MUTED } from './sportIcons';
+export {
+  HELMET_MAP,
+  F1_CONSTRUCTOR_DISPLAY_NAME,
+  helmetSrcForConstructor,
+  displayConstructorName,
+  normalizeConstructorId,
+} from './f1HelmetAssets';
 
 export {
   useEmergingProfile,
@@ -24,16 +33,12 @@ export {
   useF1DriversQuery,
   useGolfPlayersQuery,
   useGolfMulliganWallet,
-  saveEmergingPreferences,
-  requestEmergingSportNotify,
   emergingQueryKeys,
 } from './hooks/useEmergingSports';
 
 export { default as EmergingSportNav } from './components/EmergingSportNav';
 export { default as SportSelectorBanner } from './components/SportSelectorBanner';
-export { default as EmergingSportOnboarding } from './components/EmergingSportOnboarding';
 export { default as EmergingSearchCombobox } from './components/EmergingSearchCombobox';
-export { default as NewSportsAnnouncementModal } from './components/NewSportsAnnouncementModal';
 export { default as EmergingSportWorkspace } from './components/EmergingSportWorkspace';
 export { default as F1GridPredictor } from './components/f1/F1GridPredictor';
 export { default as F1DriverCard } from './components/f1/F1DriverCard';

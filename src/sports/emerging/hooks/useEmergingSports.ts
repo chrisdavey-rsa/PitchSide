@@ -6,6 +6,10 @@ import { useCallback, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../../supabase';
 import { normalizeRole, roleFromIsAdmin } from '../featureFlags';
+import {
+  displayConstructorName,
+  helmetSrcForConstructor,
+} from '../f1HelmetAssets';
 import type {
   EmergingProfileSlice,
   F1Constructor,
@@ -33,7 +37,7 @@ const FALLBACK_CONSTRUCTORS: F1Constructor[] = [
   { id: 'alpine', name: 'Alpine', nationality: 'French', countryCode: 'fr', teamColorHex: '#0093CC' },
   { id: 'haas', name: 'Haas', nationality: 'American', countryCode: 'us', teamColorHex: '#B6BABD' },
   { id: 'racing_bulls', name: 'Racing Bulls', nationality: 'Italian', countryCode: 'it', teamColorHex: '#6692FF' },
-  { id: 'sauber', name: 'Kick Sauber', nationality: 'Swiss', countryCode: 'ch', teamColorHex: '#52E252' },
+  { id: 'audi', name: 'Audi', nationality: 'German', countryCode: 'de', teamColorHex: '#52E252' },
   { id: 'cadillac', name: 'Cadillac', nationality: 'American', countryCode: 'us', teamColorHex: '#FFFFFF' },
 ];
 
@@ -43,7 +47,9 @@ const FALLBACK_DRIVERS: F1Driver[] = [
   { id: 'leclerc', name: 'Charles Leclerc', permanentNumber: 16, constructorId: 'ferrari', nationality: 'Monegasque', countryCode: 'mc', helmetImageUrl: null, teamColorHex: '#E8002D', constructorName: 'Ferrari' },
   { id: 'hamilton', name: 'Lewis Hamilton', permanentNumber: 44, constructorId: 'ferrari', nationality: 'British', countryCode: 'gb', helmetImageUrl: null, teamColorHex: '#E8002D', constructorName: 'Ferrari' },
   { id: 'verstappen', name: 'Max Verstappen', permanentNumber: 1, constructorId: 'red_bull', nationality: 'Dutch', countryCode: 'nl', helmetImageUrl: null, teamColorHex: '#3671C6', constructorName: 'Red Bull Racing' },
-  { id: 'lawson', name: 'Liam Lawson', permanentNumber: 30, constructorId: 'red_bull', nationality: 'New Zealander', countryCode: 'nz', helmetImageUrl: null, teamColorHex: '#3671C6', constructorName: 'Red Bull Racing' },
+  { id: 'hadjar', name: 'Isack Hadjar', permanentNumber: 6, constructorId: 'red_bull', nationality: 'French', countryCode: 'fr', helmetImageUrl: null, teamColorHex: '#3671C6', constructorName: 'Red Bull Racing' },
+  { id: 'lawson', name: 'Liam Lawson', permanentNumber: 30, constructorId: 'racing_bulls', nationality: 'New Zealander', countryCode: 'nz', helmetImageUrl: null, teamColorHex: '#6692FF', constructorName: 'Racing Bulls' },
+  { id: 'lindblad', name: 'Arvid Lindblad', permanentNumber: 41, constructorId: 'racing_bulls', nationality: 'British', countryCode: 'gb', helmetImageUrl: null, teamColorHex: '#6692FF', constructorName: 'Racing Bulls' },
   { id: 'russell', name: 'George Russell', permanentNumber: 63, constructorId: 'mercedes', nationality: 'British', countryCode: 'gb', helmetImageUrl: null, teamColorHex: '#27F4D2', constructorName: 'Mercedes' },
   { id: 'antonelli', name: 'Andrea Kimi Antonelli', permanentNumber: 12, constructorId: 'mercedes', nationality: 'Italian', countryCode: 'it', helmetImageUrl: null, teamColorHex: '#27F4D2', constructorName: 'Mercedes' },
   { id: 'albon', name: 'Alexander Albon', permanentNumber: 23, constructorId: 'williams', nationality: 'Thai', countryCode: 'th', helmetImageUrl: null, teamColorHex: '#64C4FF', constructorName: 'Williams' },
@@ -54,12 +60,10 @@ const FALLBACK_DRIVERS: F1Driver[] = [
   { id: 'colapinto', name: 'Franco Colapinto', permanentNumber: 43, constructorId: 'alpine', nationality: 'Argentine', countryCode: 'ar', helmetImageUrl: null, teamColorHex: '#0093CC', constructorName: 'Alpine' },
   { id: 'ocon', name: 'Esteban Ocon', permanentNumber: 31, constructorId: 'haas', nationality: 'French', countryCode: 'fr', helmetImageUrl: null, teamColorHex: '#B6BABD', constructorName: 'Haas' },
   { id: 'bearman', name: 'Oliver Bearman', permanentNumber: 87, constructorId: 'haas', nationality: 'British', countryCode: 'gb', helmetImageUrl: null, teamColorHex: '#B6BABD', constructorName: 'Haas' },
-  { id: 'hadjar', name: 'Isack Hadjar', permanentNumber: 6, constructorId: 'racing_bulls', nationality: 'French', countryCode: 'fr', helmetImageUrl: null, teamColorHex: '#6692FF', constructorName: 'Racing Bulls' },
-  { id: 'lindblad', name: 'Arvid Lindblad', permanentNumber: 41, constructorId: 'racing_bulls', nationality: 'British', countryCode: 'gb', helmetImageUrl: null, teamColorHex: '#6692FF', constructorName: 'Racing Bulls' },
-  { id: 'hulkenberg', name: 'Nico Hulkenberg', permanentNumber: 27, constructorId: 'sauber', nationality: 'German', countryCode: 'de', helmetImageUrl: null, teamColorHex: '#52E252', constructorName: 'Kick Sauber' },
-  { id: 'bortoleto', name: 'Gabriel Bortoleto', permanentNumber: 5, constructorId: 'sauber', nationality: 'Brazilian', countryCode: 'br', helmetImageUrl: null, teamColorHex: '#52E252', constructorName: 'Kick Sauber' },
+  { id: 'hulkenberg', name: 'Nico Hulkenberg', permanentNumber: 27, constructorId: 'audi', nationality: 'German', countryCode: 'de', helmetImageUrl: null, teamColorHex: '#52E252', constructorName: 'Audi' },
+  { id: 'bortoleto', name: 'Gabriel Bortoleto', permanentNumber: 5, constructorId: 'audi', nationality: 'Brazilian', countryCode: 'br', helmetImageUrl: null, teamColorHex: '#52E252', constructorName: 'Audi' },
+  { id: 'perez', name: 'Sergio Perez', permanentNumber: 11, constructorId: 'cadillac', nationality: 'Mexican', countryCode: 'mx', helmetImageUrl: null, teamColorHex: '#FFFFFF', constructorName: 'Cadillac' },
   { id: 'bottas', name: 'Valtteri Bottas', permanentNumber: 77, constructorId: 'cadillac', nationality: 'Finnish', countryCode: 'fi', helmetImageUrl: null, teamColorHex: '#FFFFFF', constructorName: 'Cadillac' },
-  { id: 'drugovich', name: 'Felipe Drugovich', permanentNumber: 11, constructorId: 'cadillac', nationality: 'Brazilian', countryCode: 'br', helmetImageUrl: null, teamColorHex: '#FFFFFF', constructorName: 'Cadillac' },
 ];
 
 const FALLBACK_GOLFERS: GolfPlayer[] = [
@@ -69,6 +73,9 @@ const FALLBACK_GOLFERS: GolfPlayer[] = [
   { id: 'schauffele', name: 'Xander Schauffele', nationality: 'American', countryCode: 'us', pgaWorldRanking: 4, profileImageUrl: null },
   { id: 'homa', name: 'Max Homa', nationality: 'American', countryCode: 'us', pgaWorldRanking: 12, profileImageUrl: null },
 ];
+
+/** Never surface these as full-time 2026 grid drivers. */
+const OUTDATED_F1_DRIVER_IDS = new Set(['doohan', 'tsunoda', 'drugovich']);
 
 
 function mapConstructor(row: Record<string, unknown>): F1Constructor {
@@ -95,9 +102,12 @@ function mapDriver(
     constructorId,
     nationality: (row.nationality as string) ?? null,
     countryCode: (row.country_code as string) ?? null,
-    helmetImageUrl: (row.helmet_image_url as string) ?? null,
+    helmetImageUrl:
+      (row.helmet_image_url as string) ||
+      helmetSrcForConstructor(constructorId) ||
+      null,
     teamColorHex: ctor?.teamColorHex ?? null,
-    constructorName: ctor?.name ?? null,
+    constructorName: displayConstructorName(constructorId, ctor?.name ?? null),
   };
 }
 
@@ -179,10 +189,10 @@ export function useF1ConstructorsQuery() {
   return useQuery({
     queryKey: emergingQueryKeys.f1Constructors,
     queryFn: async (): Promise<F1Constructor[]> => {
-      if (!supabase) return [];
+      if (!supabase) return FALLBACK_CONSTRUCTORS;
       const { data, error } = await supabase
         .from('f1_constructors')
-        .select('*')
+        .select('id, name, nationality, country_code, team_color_hex')
         .order('name');
       if (error) throw error;
       const rows = (data || []).map((r) => mapConstructor(r as Record<string, unknown>));
@@ -197,19 +207,21 @@ export function useF1DriversQuery() {
   return useQuery({
     queryKey: emergingQueryKeys.f1Drivers,
     queryFn: async (): Promise<F1Driver[]> => {
-      if (!supabase) return [];
+      if (!supabase) return FALLBACK_DRIVERS;
       const { data, error } = await supabase
         .from('f1_drivers')
-        .select('*')
+        .select(
+          'id, name, permanent_number, constructor_id, nationality, country_code, helmet_image_url',
+        )
         .order('name')
         .range(0, 199);
       if (error) throw error;
       const byId = new Map(
         (constructorsQuery.data || []).map((c) => [c.id, c] as const),
       );
-      const mapped = (data || []).map((r) =>
-        mapDriver(r as Record<string, unknown>, byId),
-      );
+      const mapped = (data || [])
+        .map((r) => mapDriver(r as Record<string, unknown>, byId))
+        .filter((d) => !OUTDATED_F1_DRIVER_IDS.has(d.id));
       return mapped.length > 0 ? mapped : FALLBACK_DRIVERS;
     },
     enabled: constructorsQuery.isSuccess || constructorsQuery.isError,
@@ -221,10 +233,12 @@ export function useGolfPlayersQuery() {
   return useQuery({
     queryKey: emergingQueryKeys.golfPlayers,
     queryFn: async (): Promise<GolfPlayer[]> => {
-      if (!supabase) return [];
+      if (!supabase) return FALLBACK_GOLFERS;
       const { data, error } = await supabase
         .from('golf_players')
-        .select('*')
+        .select(
+          'id, name, nationality, country_code, pga_world_ranking, profile_image_url',
+        )
         .order('pga_world_ranking', { ascending: true, nullsFirst: false });
       if (error) throw error;
       const rows = (data || []).map((r) => mapGolfer(r as Record<string, unknown>));
@@ -232,43 +246,6 @@ export function useGolfPlayersQuery() {
     },
     staleTime: 60 * 60_000,
   });
-}
-
-export async function saveEmergingPreferences(input: {
-  userId: string;
-  selectedSports: SportKey[];
-  favoriteF1Team?: string | null;
-  favoriteGolfer?: string | null;
-}): Promise<void> {
-  if (!supabase) throw new Error('Database not connected.');
-  const { error } = await supabase
-    .from('profiles')
-    .update({
-      selected_sports: input.selectedSports,
-      favorite_f1_team: input.favoriteF1Team ?? null,
-      favorite_golfer: input.favoriteGolfer ?? null,
-    })
-    .eq('id', input.userId);
-  if (error) throw error;
-}
-
-export async function requestEmergingSportNotify(
-  userId: string,
-  sportKey: 'golf' | 'formula1',
-): Promise<void> {
-  if (!supabase) return;
-  // Lightweight interest flag inside seen_features / selected_sports metadata.
-  const { data } = await supabase
-    .from('profiles')
-    .select('seen_features')
-    .eq('id', userId)
-    .maybeSingle();
-  const seen =
-    data?.seen_features && typeof data.seen_features === 'object'
-      ? { ...(data.seen_features as Record<string, boolean>) }
-      : {};
-  seen[`notify_${sportKey}`] = true;
-  await supabase.from('profiles').update({ seen_features: seen }).eq('id', userId);
 }
 
 export function useUserRole(

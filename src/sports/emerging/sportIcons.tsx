@@ -4,6 +4,9 @@
  *
  * Colour variants (`*-colour.png`) are used for live / unlocked sports.
  * Base assets are used when a sport is greyscale / inactive.
+ *
+ * Assets are photo-realistic with black studio backgrounds — keep display
+ * boxes relatively large (h-6+) so the subject stays readable on dark UI.
  */
 
 import type { SportKey } from './types';
@@ -32,7 +35,7 @@ export type SportIconProps = {
 
 export function SportIcon({
   sport,
-  className = 'h-5 w-5',
+  className = 'h-7 w-7',
   alt,
   colored = true,
 }: SportIconProps) {
@@ -46,7 +49,7 @@ export function SportIcon({
       src={src}
       alt={alt ?? ''}
       aria-hidden={alt ? undefined : true}
-      className={`object-contain shrink-0 ${className}`}
+      className={`object-contain object-center shrink-0 select-none ${className}`}
       draggable={false}
     />
   );

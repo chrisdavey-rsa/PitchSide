@@ -165,9 +165,10 @@ function ensureChannel(queryClient: QueryClient) {
 
 function releaseChannel() {
   if (!supabase || !channel) return;
-  void supabase.removeChannel(channel);
+  const ch = channel;
   channel = null;
   boundClient = null;
+  void supabase.removeChannel(ch);
 }
 
 /**
