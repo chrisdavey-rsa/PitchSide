@@ -79,6 +79,7 @@ export default function CompleteProfile({ user, onComplete }: Props) {
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [availableHint, setAvailableHint] = useState<
     "idle" | "checking" | "ok" | "taken"
   >("idle");
@@ -122,11 +123,42 @@ export default function CompleteProfile({ user, onComplete }: Props) {
   const surnameReady = !requireSurname || Boolean(surname.trim());
   const canSubmit =
     !saving &&
+    !signingOut &&
     usernameReady &&
     surnameReady &&
     acceptedTerms &&
     ageConfirmed &&
     availableHint !== "taken";
+
+  const handleCancelAndSignOut = async () => {
+    if (saving || signingOut) return;
+    setSigningOut(true);
+    setError("");
+    setSaving(false);
+    setUsername("");
+    setSurname("");
+    setAcceptedTerms(false);
+    setAgeConfirmed(false);
+    setAvailableHint("idle");
+    try {
+      localStorage.removeItem("pitchside_logged_in");
+    } catch {
+      /* ignore */
+    }
+    try {
+      if (!supabase) {
+        setError("Could not sign out. Please refresh the page.");
+        setSigningOut(false);
+        return;
+      }
+      await supabase.auth.signOut();
+      // App's SIGNED_OUT handler clears session and returns to Login.
+    } catch (err) {
+      console.warn("[CompleteProfile] signOut failed:", err);
+      setError("Could not sign out. Please try again.");
+      setSigningOut(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -362,6 +394,15 @@ export default function CompleteProfile({ user, onComplete }: Props) {
             className="group relative w-full overflow-hidden bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed active:translate-y-px transition-all text-slate-950 font-semibold font-display tracking-wide rounded-lg py-2.5 text-xs uppercase flex items-center justify-center gap-1.5 cursor-pointer shadow-[0_4px_12px_rgba(16,185,129,0.35)]"
           >
             {saving ? "Saving…" : "Continue"}
+          </button>
+
+          <button
+            type="button"
+            disabled={saving || signingOut}
+            onClick={() => void handleCancelAndSignOut()}
+            className="mt-1 w-full text-center text-xs font-sans text-slate-500 hover:text-slate-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer py-1"
+          >
+            {signingOut ? "Signing out…" : "Cancel and return to login"}
           </button>
         </motion.form>
       </AuthCard>
