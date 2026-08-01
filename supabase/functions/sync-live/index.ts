@@ -7,7 +7,7 @@
 // kickoff window — exits gracefully without consuming API quota.
 // ============================================================================
 
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   ApiSportsClient,
   DAILY_BUDGET_CAP,

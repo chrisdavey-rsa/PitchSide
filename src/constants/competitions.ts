@@ -219,7 +219,7 @@ export const FILTER_NATIONS: readonly FilterNation[] = [
   },
   {
     id: "europe",
-    label: "Europe / UEFA",
+    label: "Europe/UEFA",
     flagCode: "eu",
     competitionIds: [
       "f-ucl",

@@ -12,7 +12,7 @@
 //   { "sport": "football" | "rugby", "date": "YYYY-MM-DD" (optional anchor) }
 // ============================================================================
 
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   ApiSportsClient,
   DAILY_BUDGET_CAP,

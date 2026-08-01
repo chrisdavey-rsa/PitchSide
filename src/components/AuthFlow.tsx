@@ -215,10 +215,9 @@ export default function AuthFlow({
             <button
               type="button"
               onClick={onTakeTour}
-              className="group relative mb-4 w-full overflow-hidden bg-emerald-500 hover:bg-emerald-600 active:translate-y-px transition-all text-slate-950 font-semibold font-display tracking-wide rounded-lg py-2.5 text-xs uppercase flex items-center justify-center gap-1.5 cursor-pointer shadow-[0_4px_12px_rgba(16,185,129,0.35)]"
+              className="mb-4 w-full text-center text-[11px] font-mono font-semibold uppercase tracking-wider text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
             >
-              <span className="relative z-10">Take a Tour</span>
-              <div className="absolute inset-0 -translate-x-[150%] bg-linear-to-r from-transparent via-white/40 to-transparent group-hover:animate-[shimmer_0.75s_ease-in-out_1]" />
+              Take a Tour
             </button>
           )}
           <div className="flex border-b border-slate-800 mb-6 pb-1">

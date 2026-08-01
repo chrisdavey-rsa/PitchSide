@@ -24,15 +24,20 @@ import {
   History,
 } from "lucide-react";
 import { SportType, Competition, Match } from "../../types";
-import { getCompetitionTitle } from "../../constants/competitions";
+import {
+  getCompetitionTitle,
+  matchPassesNationFilter,
+} from "../../constants/competitions";
 import CompetitionFlag from "../predictions/CompetitionFlag";
 import {
-  CardCompetitionMeta,
+  CARD_CORNER_META_CLASS,
   CardKickoffTime,
+  CompetitionSubHeader,
   SportColorStrip,
+  TEAM_NAME_CLASS,
+  formatTeamName,
 } from "../predictions/MatchCard";
 import { usePersistedCompetitionFilter } from "../predictions/CompetitionFilterRail";
-import { matchPassesNationFilter } from "../../constants/competitions";
 import { settlePredictionWithPowerUp } from "../../utils";
 import LockGuessButton from "./LockGuessButton";
 import PowerUpPerimeterBeam from "./PowerUpPerimeterBeam";
@@ -134,41 +139,25 @@ function dateGroupKey(matchDate: string): string {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
+/** e.g. "Saturday, 1 August 2026" (uppercased in the feed header). */
 function dateGroupLabel(matchDate: string): string {
-  return new Date(matchDate).toLocaleDateString(undefined, {
+  return new Date(matchDate).toLocaleDateString("en-GB", {
     weekday: "long",
-    year: "numeric",
-    month: "long",
     day: "numeric",
+    month: "long",
+    year: "numeric",
   });
-}
-
-/** Same clock minute → one kick-off time group under a date. */
-function timeGroupKey(matchDate: string): string {
-  const d = new Date(matchDate);
-  return `${d.getHours()}:${d.getMinutes()}`;
-}
-
-function timeGroupLabel(matchDate: string): string {
-  return new Date(matchDate).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function sportGroupKey(match: Match): string {
-  return String(match.sport);
 }
 
 function sportGroupLabel(match: Match): string {
   return String(match.sport) === "rugby" ? "Rugby" : "Football";
 }
 
-function compGroupKey(match: Match): string {
+function competitionGroupKey(match: Match): string {
   return match.competitionId || match.competitionName || "unknown";
 }
 
-function compGroupLabel(match: Match): string {
+function competitionGroupLabel(match: Match): string {
   return getCompetitionTitle(match.competitionId, match.competitionName);
 }
 
@@ -343,12 +332,25 @@ export default function MatchPredictor({
       upcoming.push(m);
     }
 
-    // Strict chronological order by kick-off (date headers only in the feed).
+    // Date → competition → kick-off (supports date + competition sub-headers).
     upcoming.sort((a, b) => {
+      const dayA = dateGroupKey(a.matchDate);
+      const dayB = dateGroupKey(b.matchDate);
+      if (dayA !== dayB) {
+        return (
+          new Date(a.matchDate).getTime() - new Date(b.matchDate).getTime()
+        );
+      }
+      const compCmp = competitionGroupLabel(a).localeCompare(
+        competitionGroupLabel(b),
+      );
+      if (compCmp !== 0) return compCmp;
       const tDiff =
         new Date(a.matchDate).getTime() - new Date(b.matchDate).getTime();
       if (tDiff !== 0) return tDiff;
-      return a.homeTeam.localeCompare(b.homeTeam);
+      return formatTeamName(a.homeTeam).localeCompare(
+        formatTeamName(b.homeTeam),
+      );
     });
 
     history.sort(
@@ -720,12 +722,12 @@ export default function MatchPredictor({
                                           </>
                                         ) : null}
                                       </p>
-                                      <p className="text-xs font-display font-bold text-slate-200 truncate">
-                                        {match.homeTeam}{" "}
+                                      <p className="text-xs font-display font-bold text-slate-200 whitespace-normal leading-tight">
+                                        {formatTeamName(match.homeTeam)}{" "}
                                         <span className="text-slate-500 font-mono">
                                           {finalHome ?? "–"}–{finalAway ?? "–"}
                                         </span>{" "}
-                                        {match.awayTeam}
+                                        {formatTeamName(match.awayTeam)}
                                       </p>
                                     </div>
                                     <div className="text-[10px] font-mono text-slate-400 sm:text-right">
@@ -775,6 +777,7 @@ export default function MatchPredictor({
                         const match = filteredUpcomingMatches[index];
                         if (!match) return null;
                         const dayKey = dateGroupKey(match.matchDate);
+                        const compKey = competitionGroupKey(match);
                         const prevMatch =
                           index > 0
                             ? filteredUpcomingMatches[index - 1]
@@ -782,7 +785,12 @@ export default function MatchPredictor({
                         const prevDayKey = prevMatch
                           ? dateGroupKey(prevMatch.matchDate)
                           : null;
+                        const prevCompKey = prevMatch
+                          ? competitionGroupKey(prevMatch)
+                          : null;
                         const showDateHeader = dayKey !== prevDayKey;
+                        const showCompetitionHeader =
+                          showDateHeader || compKey !== prevCompKey;
 
                         const savedPred = predictions[match.id] || {
                           home: 0,
@@ -872,7 +880,7 @@ export default function MatchPredictor({
                             className="w-full"
                             submitted={isSubmitted}
                             onClick={() => {
-                              const fixtureLabel = `${match.homeTeam} v ${match.awayTeam}`;
+                              const fixtureLabel = `${formatTeamName(match.homeTeam)} v ${formatTeamName(match.awayTeam)}`;
                               const powerupId =
                                 armedInstanceByMatch[match.id] ?? null;
                               if (powerupId) {
@@ -923,10 +931,26 @@ export default function MatchPredictor({
                             }}
                           >
                             {showDateHeader && (
-                              <div className="text-center mt-8 mb-4 first:mt-2">
+                              <div
+                                className={`text-center mb-3 ${
+                                  index === 0 ? "mt-2" : "mt-8"
+                                }`}
+                              >
                                 <span className="inline-block text-slate-200 text-[11px] font-semibold px-3 py-1 uppercase tracking-wider font-mono">
                                   {dateGroupLabel(match.matchDate)}
                                 </span>
+                              </div>
+                            )}
+                            {showCompetitionHeader && (
+                              <div
+                                className={`mb-2 ${
+                                  showDateHeader ? "mt-1" : "mt-5"
+                                }`}
+                              >
+                                <CompetitionSubHeader
+                                  competitionId={match.competitionId}
+                                  competitionName={match.competitionName}
+                                />
                               </div>
                             )}
                             <div
@@ -968,7 +992,7 @@ export default function MatchPredictor({
                                     } as React.CSSProperties)
                                   : undefined
                               }
-                              className={`relative overflow-hidden pl-4 pr-2.5 py-2.5 sm:pl-5 sm:pr-4 sm:py-3 rounded-xl border transition-all w-full ${
+                              className={`relative overflow-hidden pl-4 pr-2.5 pt-2.5 pb-5 sm:pl-5 sm:pr-4 sm:pt-3 sm:pb-5 rounded-xl border transition-all w-full ${
                                 hasPowerUpAssigned ? "powerup-assigned-ring " : ""
                               }${
                                 isLive
@@ -996,33 +1020,30 @@ export default function MatchPredictor({
 
                               <SportColorStrip sport={String(match.sport)} />
 
-                              <div className="relative mb-2 min-h-[1.25rem]">
-                                <CardCompetitionMeta
-                                  competitionId={match.competitionId}
-                                  competitionName={match.competitionName}
-                                  className="min-w-0 max-w-[70%]"
-                                />
-                                {!isMatchStarted ? (
-                                  <span
-                                    className={`absolute right-0 top-0 shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[8px] font-bold font-mono uppercase tracking-wider border ${
-                                      pickState === "locked"
-                                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                                        : pickState === "saved"
-                                          ? "border-sky-500/40 bg-sky-500/10 text-sky-300"
-                                          : "border-rose-500/40 bg-rose-500/10 text-rose-300"
-                                    }`}
-                                  >
-                                    {pickState === "locked" && (
-                                      <LockIcon className="h-2.5 w-2.5" />
-                                    )}
-                                    {pickState === "locked"
-                                      ? "Locked"
-                                      : pickState === "saved"
-                                        ? "Saved"
-                                        : "Unpicked"}
-                                  </span>
-                                ) : null}
+                              {/* Bottom-corner meta: kick-off left, status right — shared size. */}
+                              <div className="absolute bottom-2 left-3 z-[1] pointer-events-none flex items-center">
+                                <CardKickoffTime matchDate={match.matchDate} />
                               </div>
+                              {!isMatchStarted ? (
+                                <span
+                                  className={`absolute bottom-2 right-3 z-[2] inline-flex items-center gap-1 rounded-full px-2 py-0.5 border ${CARD_CORNER_META_CLASS} ${
+                                    pickState === "locked"
+                                      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                                      : pickState === "saved"
+                                        ? "border-sky-500/40 bg-sky-500/10 text-sky-300"
+                                        : "border-rose-500/40 bg-rose-500/10 text-rose-300"
+                                  }`}
+                                >
+                                  {pickState === "locked" && (
+                                    <LockIcon className="h-2.5 w-2.5" />
+                                  )}
+                                  {pickState === "locked"
+                                    ? "Locked"
+                                    : pickState === "saved"
+                                      ? "Saved"
+                                      : "Unpicked"}
+                                </span>
+                              ) : null}
 
                               {/* HIGH STAKES TAG: premium gold/neon badge with a subtle pulse */}
                               {match.matchTag && (
@@ -1066,12 +1087,8 @@ export default function MatchPredictor({
                                 </div>
                               )}
 
+                              {/* Prediction shell: full-width 3-col Home | VS | Away stays dead-centred. */}
                               <div className="relative w-full">
-                              {/* Kick-off is out of flow so VS / TO BE PLAYED stay dead-centred. */}
-                              <div className="absolute left-0 top-2 z-[1] pointer-events-none">
-                                <CardKickoffTime matchDate={match.matchDate} />
-                              </div>
-                              {/* Scoreline: strict 3-col grid, full card width, centred */}
                               {match.sport === "football" ? (
                                 <div className="w-full grid grid-cols-3 items-start gap-2 sm:gap-3 min-w-0">
                                   {/* Home Team */}
@@ -1147,7 +1164,7 @@ export default function MatchPredictor({
                                       )}
                                     </div>
                                     <h5
-                                      className={`mt-1 font-extrabold font-display text-[11px] sm:text-sm tracking-tight truncate w-full max-w-full leading-snug px-0.5 ${
+                                      className={`mt-1 ${TEAM_NAME_CLASS} ${
                                         showActiveGreen && homeLeading
                                           ? "text-emerald-400"
                                           : showActiveGreen && isDrawPick
@@ -1156,7 +1173,7 @@ export default function MatchPredictor({
                                       }`}
                                       title={match.homeTeam}
                                     >
-                                      {match.homeTeam}
+                                      {formatTeamName(match.homeTeam)}
                                     </h5>
                                   </div>
 
@@ -1245,7 +1262,7 @@ export default function MatchPredictor({
                                       )}
                                     </div>
                                     <h5
-                                      className={`mt-1 font-extrabold font-display text-[11px] sm:text-sm tracking-tight truncate w-full max-w-full leading-snug px-0.5 ${
+                                      className={`mt-1 ${TEAM_NAME_CLASS} ${
                                         showActiveGreen && awayLeading
                                           ? "text-emerald-400"
                                           : showActiveGreen && isDrawPick
@@ -1254,13 +1271,13 @@ export default function MatchPredictor({
                                       }`}
                                       title={match.awayTeam}
                                     >
-                                      {match.awayTeam}
+                                      {formatTeamName(match.awayTeam)}
                                     </h5>
                                   </div>
                                 </div>
                               ) : (
-                                <div className="w-full max-w-xl mx-auto min-w-0 space-y-2">
-                                  {/* Same 3-column shell as football: home | status/vs/lock | away */}
+                                <div className="w-full min-w-0 space-y-2">
+                                  {/* Same full-width 3-col shell as football so VS stays dead-centred. */}
                                   <div
                                     className={`w-full grid grid-cols-3 items-start gap-2 sm:gap-3 ${
                                       isLocked ? "opacity-90" : ""
@@ -1293,7 +1310,7 @@ export default function MatchPredictor({
                                         }`}
                                       >
                                         <span
-                                          className={`font-extrabold font-display text-[11px] sm:text-sm tracking-tight truncate w-full leading-snug px-0.5 ${
+                                          className={`${TEAM_NAME_CLASS} ${
                                             homeLeading
                                               ? "text-emerald-400"
                                               : showActiveGreen && isDrawPick
@@ -1302,7 +1319,7 @@ export default function MatchPredictor({
                                           }`}
                                           title={match.homeTeam}
                                         >
-                                          {match.homeTeam}
+                                          {formatTeamName(match.homeTeam)}
                                         </span>
                                       </button>
                                     </div>
@@ -1371,7 +1388,7 @@ export default function MatchPredictor({
                                         }`}
                                       >
                                         <span
-                                          className={`font-extrabold font-display text-[11px] sm:text-sm tracking-tight truncate w-full leading-snug px-0.5 ${
+                                          className={`${TEAM_NAME_CLASS} ${
                                             awayLeading
                                               ? "text-emerald-400"
                                               : showActiveGreen && isDrawPick
@@ -1380,7 +1397,7 @@ export default function MatchPredictor({
                                           }`}
                                           title={match.awayTeam}
                                         >
-                                          {match.awayTeam}
+                                          {formatTeamName(match.awayTeam)}
                                         </span>
                                       </button>
                                     </div>
@@ -1396,8 +1413,8 @@ export default function MatchPredictor({
                                         <span className="font-display font-black text-emerald-400 text-xs sm:text-sm">
                                           {(savedPred.home || 0) >
                                           (savedPred.away || 0)
-                                            ? match.homeTeam
-                                            : match.awayTeam}{" "}
+                                            ? formatTeamName(match.homeTeam)
+                                            : formatTeamName(match.awayTeam)}{" "}
                                           by{" "}
                                           {Math.abs(
                                             (savedPred.home || 0) -

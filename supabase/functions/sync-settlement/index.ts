@@ -14,7 +14,7 @@
 //   SUPABASE_SERVICE_ROLE_KEY    — service role key (auto-injected on deploy)
 // ============================================================================
 
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   ApiSportsClient,
   DAILY_BUDGET_CAP,

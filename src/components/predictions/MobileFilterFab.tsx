@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Globe } from "lucide-react";
+import { SlidersHorizontal } from "lucide-react";
 import CompetitionFilterRail, {
   type NationFilterOption,
 } from "./CompetitionFilterRail";
@@ -12,7 +12,7 @@ type Props = {
 
 /**
  * Mobile-only floating nation filter (above bottom nav).
- * Globe FAB expands a vertical stack of consolidated national flags.
+ * Sliders FAB expands a vertical stack of consolidated national flags.
  */
 export default function MobileFilterFab({
   options,
@@ -37,7 +37,7 @@ export default function MobileFilterFab({
       {isOpen ? (
         <button
           type="button"
-          aria-label="Close nation filter"
+          aria-label="Close filters"
           className="fixed inset-0 z-40 cursor-default bg-transparent"
           onClick={() => setIsOpen(false)}
         />
@@ -58,12 +58,12 @@ export default function MobileFilterFab({
 
         <button
           type="button"
-          aria-label={isOpen ? "Close nation filter" : "Open nation filter"}
+          aria-label={isOpen ? "Close filters" : "Open filters"}
           aria-expanded={isOpen}
           onClick={() => setIsOpen((o) => !o)}
           className="relative flex h-12 w-12 items-center justify-center rounded-full border-2 border-emerald-400/70 bg-slate-950 text-emerald-300 shadow-[0_0_18px_rgba(52,211,153,0.35)] cursor-pointer"
         >
-          <Globe className="h-5 w-5" />
+          <SlidersHorizontal className="h-5 w-5" aria-hidden />
           {!isOpen && activeCount > 0 ? (
             <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-500 px-1 text-[9px] font-mono font-bold text-slate-950">
               {activeCount}
