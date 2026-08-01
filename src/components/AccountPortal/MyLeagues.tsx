@@ -247,7 +247,10 @@ export const MyLeagues: React.FC<MyLeaguesProps> = ({
                           Code: <span className="text-emerald-400">{l.id}</span>
                         </span>
                         <span className="text-[10px] text-slate-500 font-mono uppercase block mt-0.5">
-                          Members: {l.members?.length ?? 0}
+                          Members:{" "}
+                          {(l.members?.length ?? 0) >= 100
+                            ? l.members?.length
+                            : "Active"}
                         </span>
                       </div>
                       <div className="text-emerald-400 opacity-0 group-hover:opacity-100">

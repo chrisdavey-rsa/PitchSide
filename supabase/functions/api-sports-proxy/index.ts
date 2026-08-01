@@ -41,7 +41,7 @@ function jsonResponse(
 }
 
 function resolveApiKey(): string | undefined {
-  return Deno.env.get("API_SPORTS_KEY") ?? Deno.env.get("API-SPORTS_KEY");
+  return Deno.env.get("API_SPORTS_KEY") || undefined;
 }
 
 function normalizePath(rawPath: string): string | null {
@@ -138,7 +138,7 @@ Deno.serve(async (req: Request) => {
     return jsonResponse(
       {
         error:
-          "Missing API sports key secret. Set API_SPORTS_KEY (or API-SPORTS_KEY).",
+          "Missing API sports key secret. Set API_SPORTS_KEY.",
       },
       500,
     );

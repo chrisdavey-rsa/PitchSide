@@ -33,6 +33,7 @@ interface AuthFlowProps {
   onAddNewUser: (user: UserProfile) => void;
   onSwitchToLogin: () => void;
   onLogoClick?: () => void;
+  onTakeTour?: () => void;
 }
 
 const LABEL =
@@ -64,8 +65,10 @@ export default function AuthFlow({
   onOpenRules,
   onSwitchToLogin,
   onLogoClick,
+  onTakeTour,
 }: AuthFlowProps) {
   const [mode, setMode] = useState<'signup' | 'awaiting_email_confirmation'>('signup');
+  const [showParentalGate, setShowParentalGate] = useState(false);
 
   const [fullName, setFullName] = useState('');
   const [nickname, setNickname] = useState('');
@@ -116,11 +119,12 @@ export default function AuthFlow({
       return;
     }
     if (!ageConfirmed) {
-      setErrorMessage('You must confirm you are 16 or older.');
+      setShowParentalGate(true);
+      setErrorMessage('');
       return;
     }
     if (!agreedToTerms) {
-      setErrorMessage('You must accept the Terms of Service.');
+      setErrorMessage('You must agree to the Terms of Service and Privacy Policy.');
       return;
     }
 
@@ -148,7 +152,9 @@ export default function AuthFlow({
               username: nickname.trim(),
               phone: phone.trim() || null,
               nationality: selectedNationality,
-              age_confirmed_16: true,
+              age_confirmed_13: true,
+              terms_accepted: true,
+              agreed_to_terms: true,
               dob: null,
               supported_team: supportedTeam.trim(),
               preferred_sport: preferredSport,
@@ -204,6 +210,17 @@ export default function AuthFlow({
         <div className="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-blue-500 via-green-500 to-red-500 rounded-t-2xl" />
 
         {mode === 'signup' && (
+          <>
+          {onTakeTour && (
+            <button
+              type="button"
+              onClick={onTakeTour}
+              className="group relative mb-4 w-full overflow-hidden bg-emerald-500 hover:bg-emerald-600 active:translate-y-px transition-all text-slate-950 font-semibold font-display tracking-wide rounded-lg py-2.5 text-xs uppercase flex items-center justify-center gap-1.5 cursor-pointer shadow-[0_4px_12px_rgba(16,185,129,0.35)]"
+            >
+              <span className="relative z-10">Take a Tour</span>
+              <div className="absolute inset-0 -translate-x-[150%] bg-linear-to-r from-transparent via-white/40 to-transparent group-hover:animate-[shimmer_0.75s_ease-in-out_1]" />
+            </button>
+          )}
           <div className="flex border-b border-slate-800 mb-6 pb-1">
             <button
               type="button"
@@ -222,6 +239,7 @@ export default function AuthFlow({
               </span>
             </div>
           </div>
+          </>
         )}
 
         {errorMessage && (
@@ -622,30 +640,60 @@ export default function AuthFlow({
                     id="signup-age-checkbox"
                     type="checkbox"
                     checked={ageConfirmed}
-                    onChange={(e) => setAgeConfirmed(e.target.checked)}
-                    className="mt-0.5 accent-blue-500 rounded-xs bg-slate-950 border-slate-800"
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setAgeConfirmed(checked);
+                      if (!checked) setShowParentalGate(true);
+                    }}
+                    className="mt-0.5 accent-emerald-500 rounded-xs bg-slate-950 border-slate-800"
                   />
                   <span className="text-xs text-slate-400 leading-normal">
-                    I&apos;m 16 or older
+                    I confirm that I am 13 years of age or older
                   </span>
                 </label>
+                {showParentalGate && !ageConfirmed && (
+                  <div className="rounded-xl border border-amber-500/30 bg-amber-950/30 px-3 py-2.5 text-[11px] text-amber-100/90 font-sans leading-relaxed">
+                    If you are under 13, please ask a parent or guardian for permission.
+                    They can email{" "}
+                    <a
+                      href="mailto:admin@pitchside.pro"
+                      className="text-emerald-400 underline font-semibold"
+                    >
+                      admin@pitchside.pro
+                    </a>{" "}
+                    to confirm they are happy for you to play.
+                  </div>
+                )}
                 <label className="flex items-start gap-2.5 cursor-pointer select-none">
                   <input
                     id="signup-terms-checkbox"
                     type="checkbox"
                     checked={agreedToTerms}
                     onChange={(e) => setAgreedToTerms(e.target.checked)}
-                    className="mt-0.5 accent-blue-500 rounded-xs bg-slate-950 border-slate-800"
+                    className="mt-0.5 accent-emerald-500 rounded-xs bg-slate-950 border-slate-800"
                   />
                   <span className="text-xs text-slate-400 leading-normal">
-                    I accept the{' '}
-                    <button
-                      type="button"
-                      onClick={onOpenRules}
-                      className="text-slate-200 underline hover:text-white cursor-pointer"
+                    I agree to the{" "}
+                    <a
+                      href="/terms"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-emerald-400 underline hover:text-emerald-300"
+                      onClick={(e) => e.stopPropagation()}
                     >
                       Terms of Service
-                    </button>
+                    </a>{" "}
+                    and{" "}
+                    <a
+                      href="/privacy"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-emerald-400 underline hover:text-emerald-300"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Privacy Policy
+                    </a>
+                    .
                   </span>
                 </label>
               </div>
@@ -653,7 +701,8 @@ export default function AuthFlow({
               <button
                 id="signup-submit-btn"
                 type="submit"
-                className="w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold font-display tracking-wide rounded-lg py-2.5 text-xs uppercase flex items-center justify-center gap-1.5 cursor-pointer transition-transform shadow-[0_4px_12px_rgba(59,130,246,0.3)]"
+                disabled={!agreedToTerms}
+                className="w-full bg-blue-500 hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold font-display tracking-wide rounded-lg py-2.5 text-xs uppercase flex items-center justify-center gap-1.5 cursor-pointer transition-transform shadow-[0_4px_12px_rgba(59,130,246,0.3)]"
               >
                 Create account <ArrowRight className="w-4 h-4" />
               </button>

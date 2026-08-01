@@ -45,7 +45,6 @@ const SLUG_BY_SPORT_AND_API: Record<string, string> = {
   "football:40": "f-championship",
   "football:179": "f-spfl",
   "football:45": "f-facup",
-  "football:48": "f-eflcup",
   "football:2": "f-ucl",
   "football:3": "f-uel",
   "football:1": "f-worldcup",

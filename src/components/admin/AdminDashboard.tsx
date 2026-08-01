@@ -12,6 +12,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { supabase } from '../../supabase';
+import ApiStatusWidget from './ApiStatusWidget';
 
 interface AdminDashboardProps {
   onNavigate: (tab: 'players' | 'fixtures' | 'predictions', filter?: 'upcoming' | 'completed' | 'all') => void;
@@ -95,6 +96,8 @@ export default function AdminDashboard({ onNavigate }: AdminDashboardProps) {
 
   return (
     <div className="space-y-6">
+      <ApiStatusWidget />
+
       {/* Live metrics (wired) */}
       <div>
         <h4 className="text-xs font-bold text-slate-300 font-mono uppercase tracking-wider flex items-center gap-1.5 mb-1">

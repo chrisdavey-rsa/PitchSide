@@ -108,18 +108,6 @@ export default function TopNavigation({
             <span>Leagues</span>
           </motion.button>
 
-          {user.isAdmin && (
-            <button
-              id="nav-admin-toggle-btn"
-              type="button"
-              onClick={onOpenAdmin}
-              className="text-xs text-white bg-purple-600 hover:bg-purple-700 active:translate-y-[0.5px] border border-purple-500 py-1.5 px-3 rounded-lg flex items-center gap-1.5 font-semibold transition-all shadow-[0_4px_12px_rgba(147,51,234,0.3)] cursor-pointer"
-            >
-              <Lock className="w-3.5 h-3.5 text-white" />
-              <span>Admin</span>
-            </button>
-          )}
-
           <button
             ref={accountRef}
             id="nav-account-btn"
@@ -140,6 +128,18 @@ export default function TopNavigation({
             <HelpCircle className="w-4 h-4 text-blue-400" />
             <span>Rules</span>
           </button>
+
+          {user.isAdmin && (
+            <button
+              id="nav-admin-toggle-btn"
+              type="button"
+              onClick={onOpenAdmin}
+              className="text-xs text-white bg-purple-600 hover:bg-purple-700 active:translate-y-[0.5px] border border-purple-500 py-1.5 px-3 rounded-lg flex items-center gap-1.5 font-semibold transition-all shadow-[0_4px_12px_rgba(147,51,234,0.3)] cursor-pointer"
+            >
+              <Lock className="w-3.5 h-3.5 text-white" />
+              <span>Admin</span>
+            </button>
+          )}
 
           <button
             id="nav-logout-btn"

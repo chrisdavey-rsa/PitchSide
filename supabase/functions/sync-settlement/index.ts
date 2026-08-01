@@ -9,7 +9,7 @@
 //   { "sport": "football" | "rugby", "date": "YYYY-MM-DD" (optional) }
 //
 // Required secrets (Deno.env):
-//   API_SPORTS_KEY               — your API-Sports key
+//   API_SPORTS_KEY               — API-Sports key (no legacy fallbacks)
 //   SUPABASE_URL                 — project URL (auto-injected on deploy)
 //   SUPABASE_SERVICE_ROLE_KEY    — service role key (auto-injected on deploy)
 // ============================================================================
@@ -18,8 +18,11 @@ import { createClient } from "@supabase/supabase-js";
 import {
   ApiSportsClient,
   DAILY_BUDGET_CAP,
+  UpstreamAuthError,
+  getApiSportsKey,
   type Sport as SharedSport,
 } from "../_shared/apiSportsClient.ts";
+import { FOOTBALL_API_IDS } from "../_shared/footballLeagues.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -40,9 +43,9 @@ const RUGBY_FINISHED = new Set([
 
 type Sport = "football" | "rugby";
 
-/** ONLY these league IDs are settled (must match seed-full / sync-schedule). */
+/** ONLY these league IDs are settled (must match sync-schedule catalog). */
 const LEAGUE_CATALOG: Record<Sport, ReadonlySet<number>> = {
-  football: new Set([39, 40, 179, 45, 2, 3, 1, 48, 52]),
+  football: FOOTBALL_API_IDS,
   rugby: new Set([13, 16, 22, 14, 15, 26, 19, 10]),
 };
 
@@ -53,6 +56,7 @@ interface FinalScores {
 
 interface SettledMatch {
   id: string;
+  external_fixture_id: number | null;
   actual_home_score: number;
   actual_away_score: number;
 }
@@ -90,10 +94,11 @@ function isFinished(sport: Sport, item: any): boolean {
  */
 function extractFootballFinalScores(item: any): FinalScores | null {
   const fixture = item.fixture ?? item;
-  const statusShort = String(fixture.status?.short ?? item.status?.short ?? "")
-    .toUpperCase();
+  const statusShort = String(fixture.status?.short ?? "").toUpperCase();
   const score = item.score ?? fixture.score ?? {};
+  const goals = item.goals ?? {};
 
+  // AET/PEN: regulation+ET totals live on score.extratime when present.
   if (statusShort === "PEN" || statusShort === "AET") {
     const extra = score.extratime;
     if (extra?.home != null && extra?.away != null) {
@@ -101,14 +106,14 @@ function extractFootballFinalScores(item: any): FinalScores | null {
     }
   }
 
+  // Verified mapping: goals.home / goals.away
+  if (goals.home != null && goals.away != null) {
+    return { home: Number(goals.home), away: Number(goals.away) };
+  }
+
   const fulltime = score.fulltime;
   if (fulltime?.home != null && fulltime?.away != null) {
     return { home: Number(fulltime.home), away: Number(fulltime.away) };
-  }
-
-  const goals = item.goals ?? fixture.goals;
-  if (goals?.home != null && goals?.away != null) {
-    return { home: Number(goals.home), away: Number(goals.away) };
   }
 
   return null;
@@ -269,6 +274,7 @@ function normalizeCompletedMatch(sport: Sport, item: any): SettledMatch | null {
 
   return {
     id: `${sport}-${apiId}`,
+    external_fixture_id: Number.isFinite(Number(apiId)) ? Number(apiId) : null,
     actual_home_score: scores.home,
     actual_away_score: scores.away,
   };
@@ -282,7 +288,7 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: "Method not allowed. Use POST." }, 405);
   }
 
-  const apiKey = Deno.env.get("API_SPORTS_KEY");
+  const apiKey = getApiSportsKey();
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
@@ -319,6 +325,7 @@ Deno.serve(async (req: Request) => {
     auth: { persistSession: false },
   });
 
+  try {
   // Skip API call when nothing in DB could need grading.
   const nowIso = new Date().toISOString();
   const { count: liveCount } = await supabase
@@ -446,6 +453,7 @@ Deno.serve(async (req: Request) => {
       .from("matches")
       .update({
         status: "completed",
+        external_fixture_id: match.external_fixture_id,
         actual_home_score: match.actual_home_score,
         actual_away_score: match.actual_away_score,
         provisional_home_score: null,
@@ -584,4 +592,17 @@ Deno.serve(async (req: Request) => {
     budget: DAILY_BUDGET_CAP,
     ...(errors.length > 0 ? { warnings: errors } : {}),
   });
+  } catch (err) {
+    if (err instanceof UpstreamAuthError) {
+      return jsonResponse(
+        {
+          error: "Upstream API-Sports authentication failure",
+          status: err.status,
+          caller: err.caller,
+        },
+        err.status,
+      );
+    }
+    throw err;
+  }
 });

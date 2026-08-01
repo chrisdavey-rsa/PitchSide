@@ -3,7 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { AnimatePresence } from "motion/react";
 import {
   ShieldAlert,
@@ -11,13 +19,38 @@ import {
   Minus,
   Users,
   Sparkles,
+  Lock as LockIcon,
+  ChevronDown,
+  History,
 } from "lucide-react";
 import { SportType, Competition, Match } from "../../types";
+import { getCompetitionTitle } from "../../constants/competitions";
+import CompetitionFlag from "../predictions/CompetitionFlag";
+import {
+  CardCompetitionMeta,
+  CardKickoffTime,
+  SportColorStrip,
+} from "../predictions/MatchCard";
+import { usePersistedCompetitionFilter } from "../predictions/CompetitionFilterRail";
+import { matchPassesNationFilter } from "../../constants/competitions";
 import { settlePredictionWithPowerUp } from "../../utils";
 import LockGuessButton from "./LockGuessButton";
+import PowerUpPerimeterBeam from "./PowerUpPerimeterBeam";
 import SportIntroModal from "../onboarding/SportIntroModal";
 import PowerUpSelector from "../predictions/PowerUpSelector";
+import StickyActionPill from "../predictions/StickyActionPill";
 import PowerUpLockConfirmModal from "../predictions/PowerUpLockConfirmModal";
+import LockConfirmModal from "../predictions/LockConfirmModal";
+import { useScrollObserver } from "../../hooks/useScrollObserver";
+import { shouldSkipLockConfirm } from "../../lib/lockConfirmPrefs";
+import {
+  dbEnsureBaselinePowerups,
+  dbFetchMatchConsensus,
+  dbFetchUserPowerups,
+  type MatchConsensus,
+  type PredictionEntry,
+} from "../../supabase";
+import type { FeedSportFilter } from "../predictions/PredictionsFeedFilter";
 import {
   POWER_UP_IDS,
   buildSeasonWallet,
@@ -25,11 +58,16 @@ import {
   type PowerUpId,
   type UserPowerUpInstance,
 } from "../../constants/powerups";
-import type { PredictionEntry } from "../../supabase";
-import {
-  dbEnsureBaselinePowerups,
-  dbFetchUserPowerups,
-} from "../../supabase";
+
+/** Perimeter accent colours matching each Power-Up chip. */
+const POWERUP_RING_COLOR: Record<PowerUpId, string> = {
+  double_bubble: "#38bdf8",
+  safety_net: "#34d399",
+  sniper: "#fb7185",
+  banker: "#cbd5e1",
+  pitchside_master: "#fcd34d",
+};
+
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useOverlayHistory } from "../../hooks/useOverlayHistory";
 import { useBodyScrollLock } from "../../hooks/useBodyScrollLock";
@@ -39,6 +77,8 @@ import {
   type SeenFeatureKey,
   type SeenFeatures,
 } from "../../lib/seenFeatures";
+
+const CONSENSUS_THRESHOLD = 20;
 
 function getMatchStatusDisplay(match: Match) {
   if (match.status === "completed") {
@@ -80,27 +120,56 @@ interface MatchPredictorProps {
   onSubmitPrediction: (matchId: string, powerupInstanceId?: string | null) => void;
   /** Needed to load / consume season power-up inventory. */
   userId?: string;
+  /** Skip competition picker — show continuous multi-sport feed. */
+  unifiedFeed?: boolean;
+  feedSportFilter?: FeedSportFilter;
+  /** Controlled competition filter (rail rendered by PredictionsPage). */
+  competitionFilterIds?: string[];
+  onCompetitionFilterIdsChange?: (ids: string[]) => void;
 }
 
-/** Kickoff key: same calendar day + clock minute → one visual group. */
-function kickoffGroupKey(matchDate: string): string {
+/** Calendar day key for date headers. */
+function dateGroupKey(matchDate: string): string {
   const d = new Date(matchDate);
-  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}T${d.getHours()}:${d.getMinutes()}`;
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
-function kickoffGroupLabel(matchDate: string): string {
-  const d = new Date(matchDate);
-  const datePart = d.toLocaleDateString(undefined, {
+function dateGroupLabel(matchDate: string): string {
+  return new Date(matchDate).toLocaleDateString(undefined, {
     weekday: "long",
     year: "numeric",
     month: "long",
     day: "numeric",
   });
-  const timePart = d.toLocaleTimeString([], {
+}
+
+/** Same clock minute → one kick-off time group under a date. */
+function timeGroupKey(matchDate: string): string {
+  const d = new Date(matchDate);
+  return `${d.getHours()}:${d.getMinutes()}`;
+}
+
+function timeGroupLabel(matchDate: string): string {
+  return new Date(matchDate).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
   });
-  return `${datePart} · ${timePart}`;
+}
+
+function sportGroupKey(match: Match): string {
+  return String(match.sport);
+}
+
+function sportGroupLabel(match: Match): string {
+  return String(match.sport) === "rugby" ? "Rugby" : "Football";
+}
+
+function compGroupKey(match: Match): string {
+  return match.competitionId || match.competitionName || "unknown";
+}
+
+function compGroupLabel(match: Match): string {
+  return getCompetitionTitle(match.competitionId, match.competitionName);
 }
 
 export default function MatchPredictor({
@@ -120,6 +189,10 @@ export default function MatchPredictor({
   onRugbyPredictionChange,
   onSubmitPrediction,
   userId,
+  unifiedFeed = false,
+  feedSportFilter = "all",
+  competitionFilterIds: competitionFilterIdsProp,
+  onCompetitionFilterIdsChange,
 }: MatchPredictorProps) {
   const queryClient = useQueryClient();
   // Just-in-time onboarding: first open of Football / Rugby (profiles.seen_features).
@@ -240,6 +313,94 @@ export default function MatchPredictor({
     fixtureLabel: string;
   } | null>(null);
 
+  const [plainLockConfirm, setPlainLockConfirm] = useState<{
+    matchId: string;
+    fixtureLabel: string;
+  } | null>(null);
+
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  const { historyMatches, upcomingMatches } = useMemo(() => {
+    const now = Date.now();
+    const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+    const history: Match[] = [];
+    const upcoming: Match[] = [];
+
+    for (const m of sortedActiveMatches) {
+      const t = new Date(m.matchDate).getTime();
+      if (m.status === "completed") {
+        if (t >= weekAgo) history.push(m);
+        continue;
+      }
+      if (m.status === "live") {
+        upcoming.push(m);
+        continue;
+      }
+      if (t < now) {
+        if (t >= weekAgo) history.push(m);
+        continue;
+      }
+      upcoming.push(m);
+    }
+
+    // Strict chronological order by kick-off (date headers only in the feed).
+    upcoming.sort((a, b) => {
+      const tDiff =
+        new Date(a.matchDate).getTime() - new Date(b.matchDate).getTime();
+      if (tDiff !== 0) return tDiff;
+      return a.homeTeam.localeCompare(b.homeTeam);
+    });
+
+    history.sort(
+      (a, b) =>
+        new Date(b.matchDate).getTime() - new Date(a.matchDate).getTime(),
+    );
+
+    return { historyMatches: history, upcomingMatches: upcoming };
+  }, [sortedActiveMatches]);
+
+  const [compFilterIdsInternal] = usePersistedCompetitionFilter();
+  const nationFilterIds = competitionFilterIdsProp ?? compFilterIdsInternal;
+  const filteredUpcomingMatches = useMemo(() => {
+    if (nationFilterIds.length === 0) return upcomingMatches;
+    return upcomingMatches.filter((m) =>
+      matchPassesNationFilter(m.competitionId, nationFilterIds),
+    );
+  }, [upcomingMatches, nationFilterIds]);
+
+  const feedListRef = useRef<HTMLDivElement | null>(null);
+  const [feedScrollMargin, setFeedScrollMargin] = useState(0);
+  useLayoutEffect(() => {
+    if (feedListRef.current) {
+      setFeedScrollMargin(feedListRef.current.offsetTop);
+    }
+  }, [filteredUpcomingMatches.length, historyOpen, historyMatches.length]);
+
+  const feedVirtualizer = useWindowVirtualizer({
+    count: filteredUpcomingMatches.length,
+    estimateSize: () => 360,
+    overscan: 12,
+    scrollMargin: feedScrollMargin,
+  });
+
+  const { data: consensusByMatch = {} } = useQuery({
+    queryKey: [
+      "matchConsensus",
+      sortedActiveMatches.map((m) => m.id).join(","),
+    ],
+    enabled: sortedActiveMatches.length > 0,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const entries = await Promise.all(
+        sortedActiveMatches.slice(0, 40).map(async (m) => {
+          const c = await dbFetchMatchConsensus(m.id);
+          return [m.id, c] as const;
+        }),
+      );
+      return Object.fromEntries(entries) as Record<string, MatchConsensus>;
+    },
+  });
+
   const assignedPowerUpIds = useMemo(() => {
     const ids: PowerUpId[] = [];
     for (const instanceId of Object.values(armedInstanceByMatch)) {
@@ -248,6 +409,39 @@ export default function MatchPredictor({
     }
     return ids;
   }, [armedInstanceByMatch, wallet]);
+
+  /** Sentinel for sticky pill — competitions + main Power-Ups bar. */
+  const [topControlsEl, setTopControlsEl] = useState<HTMLElement | null>(null);
+  const isScrolledPastTop = useScrollObserver(topControlsEl);
+
+  const handlePowerUpSelect = useCallback(
+    (powerUpId: PowerUpId) => {
+      if (!hasOpenFixtures) return;
+      const instance = wallet.find(
+        (w) =>
+          w.powerUpId === powerUpId &&
+          w.status === "available" &&
+          w.unlocked,
+      );
+      if (!instance) return;
+
+      const assignedMatchId = Object.entries(armedInstanceByMatch).find(
+        ([, iid]) => iid === instance.instanceId,
+      )?.[0];
+      if (assignedMatchId) {
+        setArmedInstanceByMatch((prev) => {
+          const next = { ...prev };
+          delete next[assignedMatchId];
+          return next;
+        });
+        setAssigningPowerUpId(null);
+        return;
+      }
+
+      setAssigningPowerUpId((cur) => (cur === powerUpId ? null : powerUpId));
+    },
+    [armedInstanceByMatch, hasOpenFixtures, wallet],
+  );
 
   const assignPowerUpToMatch = useCallback(
     (matchId: string) => {
@@ -289,11 +483,26 @@ export default function MatchPredictor({
         )}
       </AnimatePresence>
 
-          {selectedSport && (
+      {selectedSport && (unifiedFeed || selectedCompId) && (
+        <StickyActionPill
+          visible={isScrolledPastTop}
+          sportType={powerUpSport}
+          instances={wallet}
+          assigningPowerUpId={assigningPowerUpId}
+          assignedPowerUpIds={assignedPowerUpIds}
+          hasOpenFixtures={hasOpenFixtures}
+          onSelectPowerUp={handlePowerUpSelect}
+        />
+      )}
+
+      {selectedSport && (
             <div
               id="tour-match-predictor"
-              className="bg-slate-900/60 rounded-3xl border border-slate-800 shadow-xl p-4 sm:p-6 w-full"
+              className="bg-slate-900/60 rounded-3xl border border-slate-800 shadow-xl p-4 sm:p-6 w-full overflow-visible"
             >
+              <div ref={setTopControlsEl}>
+              {!unifiedFeed && (
+                <>
               {/* Leagues filtering tab */}
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-800/80 pb-5 mb-5">
                 <div>
@@ -318,7 +527,6 @@ export default function MatchPredictor({
                 </div>
               </div>
 
-              {/* Grid list of competitions with active/upcoming fixtures */}
               {filteredCompetitions.length === 0 ? (
                 <div className="rounded-2xl border border-slate-800/80 bg-slate-950/40 px-6 py-14 text-center space-y-3">
                   <p className="text-sm font-display font-semibold text-slate-200">
@@ -375,54 +583,38 @@ export default function MatchPredictor({
               </div>
               )}
 
-              {/* Prompt when comps exist but none selected yet */}
               {filteredCompetitions.length > 0 && !selectedCompId && (
                 <div className="text-center py-10 text-slate-500 font-sans text-xs">
                   Select one of the competitions above to load action items
                   and configure score predictions.
                 </div>
               )}
+                </>
+              )}
 
-              {/* SPECIFIC COMPETITION FIXTURES PREDICTOR */}
-              {selectedCompId && filteredCompetitions.length > 0 && (
-                <div className="mt-6 pt-5 border-t border-slate-800 space-y-4">
+              {(unifiedFeed || (selectedCompId && filteredCompetitions.length > 0)) && (
+                <div className={unifiedFeed ? "" : "mt-6 pt-5 border-t border-slate-800"}>
                   <PowerUpSelector
                     sportType={powerUpSport}
                     instances={wallet}
                     assigningPowerUpId={assigningPowerUpId}
                     assignedPowerUpIds={assignedPowerUpIds}
                     hasOpenFixtures={hasOpenFixtures}
-                    onSelect={(powerUpId) => {
-                      if (!hasOpenFixtures) return;
-                      const instance = wallet.find(
-                        (w) =>
-                          w.powerUpId === powerUpId &&
-                          w.status === "available" &&
-                          w.unlocked,
-                      );
-                      if (!instance) return;
-
-                      // If already assigned, clear assignment and exit.
-                      const assignedMatchId = Object.entries(
-                        armedInstanceByMatch,
-                      ).find(([, iid]) => iid === instance.instanceId)?.[0];
-                      if (assignedMatchId) {
-                        setArmedInstanceByMatch((prev) => {
-                          const next = { ...prev };
-                          delete next[assignedMatchId];
-                          return next;
-                        });
-                        setAssigningPowerUpId(null);
-                        return;
-                      }
-
-                      // Toggle assigning mode for this chip.
-                      setAssigningPowerUpId((cur) =>
-                        cur === powerUpId ? null : powerUpId,
-                      );
-                    }}
+                    onSelect={handlePowerUpSelect}
                   />
+                  {unifiedFeed && feedSportFilter === "all" && (
+                    <p className="mt-1.5 text-[9px] text-slate-600 font-mono px-0.5">
+                      Power-Ups shown for{" "}
+                      {selectedSport === SportType.RUGBY ? "Rugby" : "Football"}{" "}
+                      — filter by sport to switch the chip wallet.
+                    </p>
+                  )}
+                </div>
+              )}
+              </div>
 
+              {(unifiedFeed || (selectedCompId && filteredCompetitions.length > 0)) && (
+                <div className="mt-4 space-y-4">
                   {isAssigningPowerUp && (
                     <div
                       role="status"
@@ -441,27 +633,156 @@ export default function MatchPredictor({
                     </div>
                   )}
 
-                  {activeMatches.length === 0 ? (
+                  {upcomingMatches.length === 0 && historyMatches.length === 0 ? (
                     <div className="rounded-xl border border-slate-800/70 bg-slate-950/30 px-5 py-10 text-center space-y-2">
                       <p className="text-sm font-display font-semibold text-slate-200">
-                        No open fixtures in this competition
+                        {unifiedFeed
+                          ? "No fixtures match these filters"
+                          : "No open fixtures in this competition"}
                       </p>
                       <p className="text-xs text-slate-500 font-sans">
-                        Pick another competition above, or check back when the
-                        next game-week is synced.
+                        {unifiedFeed
+                          ? "Try All sports, or turn off “Only show unmade picks”."
+                          : "Pick another competition above, or check back when the next game-week is synced."}
                       </p>
                     </div>
                   ) : (
-                    <div className="space-y-4 w-full">
-                      {sortedActiveMatches.map((match, index) => {
-                        const matchDate = new Date(match.matchDate);
-                        const timeKey = matchDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                        const groupKey = kickoffGroupKey(match.matchDate);
-                        const prevMatch = index > 0 ? sortedActiveMatches[index - 1] : null;
-                        const prevGroupKey = prevMatch
-                          ? kickoffGroupKey(prevMatch.matchDate)
+                    <div className="space-y-3 w-full overflow-visible">
+                      {historyMatches.length > 0 && (
+                        <div className="rounded-xl border border-slate-800 bg-slate-950/50 overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => setHistoryOpen((o) => !o)}
+                            className="w-full flex items-center justify-between gap-2 px-3.5 py-3 text-left cursor-pointer hover:bg-slate-900/60 transition-colors"
+                          >
+                            <span className="inline-flex items-center gap-2 text-[11px] font-mono font-bold uppercase tracking-wider text-slate-300">
+                              <History className="h-3.5 w-3.5 text-slate-500" />
+                              Game History
+                              <span className="text-slate-600 normal-case tracking-normal font-sans font-normal">
+                                ({historyMatches.length})
+                              </span>
+                            </span>
+                            <ChevronDown
+                              className={`h-4 w-4 text-slate-500 transition-transform ${
+                                historyOpen ? "rotate-180" : ""
+                              }`}
+                            />
+                          </button>
+                          {historyOpen && (
+                            <div className="border-t border-slate-800/80 divide-y divide-slate-800/60">
+                              {historyMatches.map((match) => {
+                                const pred = predictions[match.id];
+                                const finalHome =
+                                  match.homeScore ?? match.provisionalHomeScore;
+                                const finalAway =
+                                  match.awayScore ?? match.provisionalAwayScore;
+                                const historyPowerUp =
+                                  pred?.appliedPowerupId
+                                    ? wallet.find(
+                                        (w) =>
+                                          w.instanceId === pred.appliedPowerupId,
+                                      )?.powerUpId
+                                    : undefined;
+                                const points =
+                                  pred?.submitted &&
+                                  finalHome != null &&
+                                  finalAway != null
+                                    ? settlePredictionWithPowerUp(
+                                        match.sport,
+                                        pred.home,
+                                        pred.away,
+                                        finalHome,
+                                        finalAway,
+                                        historyPowerUp ?? null,
+                                      ).earnedPoints
+                                    : pred?.provisionalPoints;
+                                return (
+                                  <div
+                                    key={match.id}
+                                    className="px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3"
+                                  >
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-[9px] font-mono text-slate-500 uppercase tracking-wider">
+                                        {dateGroupLabel(match.matchDate)} ·{" "}
+                                        {sportGroupLabel(match)}
+                                        {match.competitionId ||
+                                        match.competitionName ? (
+                                          <>
+                                            {" · "}
+                                            <CompetitionFlag
+                                              competitionId={match.competitionId}
+                                              competitionName={
+                                                match.competitionName
+                                              }
+                                              className="inline-flex"
+                                              titleClassName="uppercase tracking-wider"
+                                            />
+                                          </>
+                                        ) : null}
+                                      </p>
+                                      <p className="text-xs font-display font-bold text-slate-200 truncate">
+                                        {match.homeTeam}{" "}
+                                        <span className="text-slate-500 font-mono">
+                                          {finalHome ?? "–"}–{finalAway ?? "–"}
+                                        </span>{" "}
+                                        {match.awayTeam}
+                                      </p>
+                                    </div>
+                                    <div className="text-[10px] font-mono text-slate-400 sm:text-right">
+                                      {pred?.submitted ? (
+                                        <span>
+                                          Your pick {pred.home}–{pred.away}
+                                          {points != null && (
+                                            <span className="ml-2 text-emerald-400 font-bold">
+                                              {points > 0 ? `+${points}` : points}{" "}
+                                              pts
+                                            </span>
+                                          )}
+                                        </span>
+                                      ) : (
+                                        <span className="text-slate-600">No pick</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {filteredUpcomingMatches.length === 0 &&
+                      upcomingMatches.length > 0 ? (
+                        <div className="rounded-xl border border-slate-800/70 bg-slate-950/30 px-5 py-8 text-center space-y-2">
+                          <p className="text-sm font-display font-semibold text-slate-200">
+                            No fixtures for the selected competitions
+                          </p>
+                          <p className="text-xs text-slate-500 font-sans">
+                            Clear the left filter or pick All to see every league.
+                          </p>
+                        </div>
+                      ) : null}
+
+                      <div
+                        ref={feedListRef}
+                        className="relative w-full"
+                        style={{
+                          height: `${feedVirtualizer.getTotalSize()}px`,
+                        }}
+                      >
+                      {feedVirtualizer.getVirtualItems().map((virtualRow) => {
+                        const index = virtualRow.index;
+                        const match = filteredUpcomingMatches[index];
+                        if (!match) return null;
+                        const dayKey = dateGroupKey(match.matchDate);
+                        const prevMatch =
+                          index > 0
+                            ? filteredUpcomingMatches[index - 1]
+                            : null;
+                        const prevDayKey = prevMatch
+                          ? dateGroupKey(prevMatch.matchDate)
                           : null;
-                        const showKickoffHeader = groupKey !== prevGroupKey;
+                        const showDateHeader = dayKey !== prevDayKey;
 
                         const savedPred = predictions[match.id] || {
                           home: 0,
@@ -515,16 +836,96 @@ export default function MatchPredictor({
                             : savedPred.provisionalPoints ?? 0;
 
                         const matchStatus = getMatchStatusDisplay(match);
-                        const hasPowerUpAssigned = Boolean(
-                          armedInstanceByMatch[match.id],
-                        );
+                        const assignedInstanceId =
+                          armedInstanceByMatch[match.id] ?? null;
+                        const assignedChip = assignedInstanceId
+                          ? wallet.find((w) => w.instanceId === assignedInstanceId)
+                          : undefined;
+                        const assignedPowerUpId = assignedChip?.powerUpId ?? null;
+                        const hasPowerUpAssigned = Boolean(assignedPowerUpId);
+                        const ringColor = assignedPowerUpId
+                          ? POWERUP_RING_COLOR[assignedPowerUpId]
+                          : undefined;
+
+                        const lockControl = !isEmailVerified ? (
+                          <div
+                            className="w-full h-6 sm:h-9 bg-slate-800 text-slate-500 font-bold font-display uppercase text-[9px] sm:text-[10px] rounded-md sm:rounded-lg flex items-center justify-center gap-1 opacity-50 cursor-not-allowed"
+                            title="Please verify your email to submit predictions."
+                          >
+                            <ShieldAlert className="w-3 h-3 sm:w-3.5 sm:h-3.5" /> Verify
+                          </div>
+                        ) : isLive && isSubmitted ? (
+                          <div className="w-full h-6 sm:h-9 flex flex-col items-center justify-center text-[10px] sm:text-xs font-mono bg-amber-500/10 border border-amber-500/30 rounded-md sm:rounded-lg">
+                            <span className="text-[7px] sm:text-[8px] uppercase tracking-widest text-amber-500/80 leading-none">
+                              Live
+                            </span>
+                            <span className="font-display font-black text-amber-300 text-[10px] sm:text-xs leading-none">
+                              {asItStandsPoints > 0
+                                ? `+${asItStandsPoints}`
+                                : asItStandsPoints}{" "}
+                              pts
+                            </span>
+                          </div>
+                        ) : !isMatchStarted || isSubmitted ? (
+                          <LockGuessButton
+                            id={`submit-pred-btn-${match.id}`}
+                            className="w-full"
+                            submitted={isSubmitted}
+                            onClick={() => {
+                              const fixtureLabel = `${match.homeTeam} v ${match.awayTeam}`;
+                              const powerupId =
+                                armedInstanceByMatch[match.id] ?? null;
+                              if (powerupId) {
+                                const chip = wallet.find(
+                                  (w) => w.instanceId === powerupId,
+                                );
+                                if (chip) {
+                                  setPendingLock({
+                                    matchId: match.id,
+                                    powerupInstanceId: powerupId,
+                                    powerUpId: chip.powerUpId,
+                                    fixtureLabel,
+                                  });
+                                  return;
+                                }
+                              }
+                              if (shouldSkipLockConfirm()) {
+                                onSubmitPrediction(match.id, null);
+                                return;
+                              }
+                              setPlainLockConfirm({
+                                matchId: match.id,
+                                fixtureLabel,
+                              });
+                            }}
+                          />
+                        ) : null;
+
+                        const pickState: "unpicked" | "saved" | "locked" =
+                          isSubmitted
+                            ? "locked"
+                            : hasPick
+                              ? "saved"
+                              : "unpicked";
+                        const consensus = consensusByMatch[match.id];
 
                         return (
-                          <React.Fragment key={match.id}>
-                            {showKickoffHeader && (
-                              <div className="text-center pt-4 pb-2">
-                                <span className="inline-block text-slate-300 text-[11px] font-semibold px-4 py-1.5 uppercase tracking-wider font-mono">
-                                  {kickoffGroupLabel(match.matchDate)}
+                          <div
+                            key={match.id}
+                            data-index={virtualRow.index}
+                            ref={feedVirtualizer.measureElement}
+                            className="absolute top-0 left-0 w-full pb-3"
+                            style={{
+                              transform: `translateY(${
+                                virtualRow.start -
+                                feedVirtualizer.options.scrollMargin
+                              }px)`,
+                            }}
+                          >
+                            {showDateHeader && (
+                              <div className="text-center mt-8 mb-4 first:mt-2">
+                                <span className="inline-block text-slate-200 text-[11px] font-semibold px-3 py-1 uppercase tracking-wider font-mono">
+                                  {dateGroupLabel(match.matchDate)}
                                 </span>
                               </div>
                             )}
@@ -560,7 +961,14 @@ export default function MatchPredictor({
                                   assignPowerUpToMatch(match.id);
                                 }
                               }}
-                              className={`relative p-4 sm:p-5 rounded-2xl border transition-all w-full ${
+                              style={
+                                hasPowerUpAssigned && ringColor
+                                  ? ({
+                                      "--powerup-ring-color": ringColor,
+                                    } as React.CSSProperties)
+                                  : undefined
+                              }
+                              className={`relative overflow-hidden pl-4 pr-2.5 py-2.5 sm:pl-5 sm:pr-4 sm:py-3 rounded-xl border transition-all w-full ${
                                 hasPowerUpAssigned ? "powerup-assigned-ring " : ""
                               }${
                                 isLive
@@ -568,7 +976,11 @@ export default function MatchPredictor({
                                   : isAssigningPowerUp && !isLocked
                                   ? "border-violet-500/60 bg-slate-900 ring-1 ring-violet-400/40 cursor-pointer"
                                   : hasPowerUpAssigned
-                                  ? "border-violet-500/40 bg-slate-900"
+                                  ? "bg-slate-900"
+                                  : pickState === "saved"
+                                  ? "border-sky-500/50 bg-slate-900 shadow-[0_0_16px_rgba(14,165,233,0.1)]"
+                                  : pickState === "unpicked" && !isMatchStarted
+                                  ? "border-rose-500/35 bg-slate-900/50"
                                   : showActiveGreen
                                   ? "border-emerald-500 bg-slate-900 shadow-[0_0_20px_rgba(16,185,129,0.12)]"
                                   : match.matchTag
@@ -578,129 +990,92 @@ export default function MatchPredictor({
                                   : "bg-slate-900/40 border-slate-800/40"
                               }`}
                             >
-                              {hasPowerUpAssigned && !isLocked && (
-                                <div className="absolute -top-2.5 right-4 z-10">
-                                  <span className="inline-flex items-center rounded-full border border-violet-400/60 bg-violet-500/15 px-2 py-0.5 text-[9px] font-mono font-bold uppercase tracking-widest text-violet-200">
-                                    Boost armed
-                                  </span>
-                                </div>
+                              {hasPowerUpAssigned && ringColor && (
+                                <PowerUpPerimeterBeam color={ringColor} />
                               )}
+
+                              <SportColorStrip sport={String(match.sport)} />
+
+                              <div className="relative mb-2 min-h-[1.25rem]">
+                                <CardCompetitionMeta
+                                  competitionId={match.competitionId}
+                                  competitionName={match.competitionName}
+                                  className="min-w-0 max-w-[70%]"
+                                />
+                                {!isMatchStarted ? (
+                                  <span
+                                    className={`absolute right-0 top-0 shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[8px] font-bold font-mono uppercase tracking-wider border ${
+                                      pickState === "locked"
+                                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                                        : pickState === "saved"
+                                          ? "border-sky-500/40 bg-sky-500/10 text-sky-300"
+                                          : "border-rose-500/40 bg-rose-500/10 text-rose-300"
+                                    }`}
+                                  >
+                                    {pickState === "locked" && (
+                                      <LockIcon className="h-2.5 w-2.5" />
+                                    )}
+                                    {pickState === "locked"
+                                      ? "Locked"
+                                      : pickState === "saved"
+                                        ? "Saved"
+                                        : "Unpicked"}
+                                  </span>
+                                ) : null}
+                              </div>
+
                               {/* HIGH STAKES TAG: premium gold/neon badge with a subtle pulse */}
                               {match.matchTag && (
-                                <div className="absolute -top-2.5 left-4 z-10">
-                                  <span className="relative inline-flex items-center gap-1 rounded-full border border-amber-400/60 bg-slate-950/90 px-2.5 py-0.5 text-[9px] font-bold font-mono uppercase tracking-widest text-amber-300">
+                                <div className="absolute -top-2 left-4 z-10">
+                                  <span className="relative inline-flex items-center gap-1 rounded-full border border-amber-400/60 bg-slate-950/90 px-2 py-0.5 text-[8px] font-bold font-mono uppercase tracking-widest text-amber-300">
                                     <Sparkles className="relative h-2.5 w-2.5" />
                                     <span className="relative">{match.matchTag}</span>
                                   </span>
                                 </div>
                               )}
 
-                              {/* Top Row: Live clock / kickoff time + Action Button */}
-                              <div className="flex justify-between items-center mb-6">
-                                <div className="flex-1 hidden md:block"></div>
-                                
-                                <div className="flex-1 flex flex-col items-center justify-center text-center gap-1.5">
-                                  {match.roundName && (
-                                    <span className="text-[9px] font-mono uppercase tracking-widest text-slate-500">
-                                      {match.roundName}
+                              {isLive && (
+                                <div className="mb-2 flex flex-wrap items-center justify-center gap-2 text-center">
+                                  <span className="inline-flex items-center gap-1.5 bg-rose-500/10 border border-rose-500/40 text-rose-300 text-[9px] font-mono font-bold px-2.5 py-0.5 rounded-full uppercase tracking-widest">
+                                    <span className="relative flex h-1.5 w-1.5">
+                                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-60" />
+                                      <span className="relative inline-flex h-1.5 w-1.5 animate-pulse rounded-full bg-rose-500" />
                                     </span>
-                                  )}
-                                  {isLive ? (
-                                    <>
-                                      <span className="inline-flex items-center gap-1.5 bg-rose-500/10 border border-rose-500/40 text-rose-300 text-[10px] font-mono font-bold px-3 py-0.5 rounded-full uppercase tracking-widest">
-                                        <span className="relative flex h-2 w-2">
-                                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-60" />
-                                          <span className="relative inline-flex h-2 w-2 animate-pulse rounded-full bg-rose-500" />
-                                        </span>
-                                        Live
-                                        {match.matchMinute && (
-                                          <span className="text-rose-200/90">{match.matchMinute}</span>
-                                        )}
+                                    Live
+                                    {match.matchMinute && (
+                                      <span className="text-rose-200/90">
+                                        {match.matchMinute}
                                       </span>
-                                      <span className="font-display font-black text-2xl tracking-widest text-white tabular-nums">
-                                        {liveHome ?? "–"}
-                                        <span className="mx-1.5 text-slate-500">–</span>
-                                        {liveAway ?? "–"}
-                                      </span>
-                                      <span className="text-[9px] font-mono uppercase tracking-widest text-slate-500">
-                                        As it stands
-                                      </span>
-                                    </>
-                                  ) : (
-                                    <span className="inline-block bg-slate-900 border border-slate-700 text-slate-400 text-[10px] font-mono px-3 py-0.5 rounded-full">
-                                      {timeKey}
-                                    </span>
-                                  )}
+                                    )}
+                                  </span>
+                                  <span className="font-display font-black text-lg tracking-widest text-white tabular-nums">
+                                    {liveHome ?? "–"}
+                                    <span className="mx-1 text-slate-500">–</span>
+                                    {liveAway ?? "–"}
+                                  </span>
                                 </div>
-                                
-                                <div className="flex-1 flex justify-end">
-                                  <div className="w-full sm:w-auto flex flex-col sm:flex-row items-center gap-2.5">
-                                    {!isEmailVerified ? (
-                                      <div
-                                        className="w-full sm:w-auto bg-slate-800 text-slate-500 font-bold font-display uppercase text-xs px-5 py-3 rounded-xl flex items-center justify-center gap-1 shadow-md opacity-50 cursor-not-allowed"
-                                        title="Please verify your email to submit predictions."
-                                      >
-                                        <ShieldAlert className="w-3.5 h-3.5" /> VERIFY EMAIL TO PLAY
-                                      </div>
-                                    ) : isLive && isSubmitted ? (
-                                      <div className="w-full sm:w-auto flex flex-col items-center gap-0.5 text-xs font-mono bg-amber-500/10 border border-amber-500/30 px-4 py-2 rounded-xl">
-                                        <span className="text-[9px] uppercase tracking-widest text-amber-500/80">
-                                          Live standings
-                                        </span>
-                                        <span className="font-display font-black text-amber-300 text-sm">
-                                          {asItStandsPoints > 0 ? `+${asItStandsPoints}` : asItStandsPoints} pts
-                                        </span>
-                                      </div>
-                                    ) : !isMatchStarted || isSubmitted ? (
-                                      <LockGuessButton
-                                        id={`submit-pred-btn-${match.id}`}
-                                        submitted={isSubmitted}
-                                        onClick={() => {
-                                          const powerupId =
-                                            armedInstanceByMatch[match.id] ?? null;
-                                          if (powerupId) {
-                                            const chip = wallet.find(
-                                              (w) => w.instanceId === powerupId,
-                                            );
-                                            if (chip) {
-                                              setPendingLock({
-                                                matchId: match.id,
-                                                powerupInstanceId: powerupId,
-                                                powerUpId: chip.powerUpId,
-                                                fixtureLabel: `${match.homeTeam} v ${match.awayTeam}`,
-                                              });
-                                              return;
-                                            }
-                                          }
-                                          onSubmitPrediction(match.id, null);
-                                        }}
-                                      />
-                                    ) : null}
-                                  </div>
-                                </div>
-                              </div>
+                              )}
 
-                              {isMatchStarted && (
-                                <div className="mb-4 flex flex-col items-center gap-1 text-center">
-                                  <span className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/80 px-3 py-1 text-[10px] font-semibold font-mono uppercase tracking-wide text-slate-300">
+                              {isMatchStarted && !isLive && (
+                                <div className="mb-2 flex justify-center">
+                                  <span className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/80 px-2.5 py-0.5 text-[9px] font-semibold font-mono uppercase tracking-wide text-slate-300">
                                     {isSubmitted
                                       ? "Prediction locked"
                                       : "Predictions closed"}
                                   </span>
-                                  <p className="text-[10px] text-slate-500 font-sans max-w-xs">
-                                    {isSubmitted
-                                      ? "Your locked guess is shown below — separate from the live score above."
-                                      : "Kick-off has passed. Score inputs are closed for this fixture."}
-                                  </p>
                                 </div>
                               )}
 
-                              <div className="flex flex-col md:flex-row items-center justify-center gap-6">
-                              {/* Teams Scoring UI Rows */}
+                              <div className="relative w-full">
+                              {/* Kick-off is out of flow so VS / TO BE PLAYED stay dead-centred. */}
+                              <div className="absolute left-0 top-2 z-[1] pointer-events-none">
+                                <CardKickoffTime matchDate={match.matchDate} />
+                              </div>
+                              {/* Scoreline: strict 3-col grid, full card width, centred */}
                               {match.sport === "football" ? (
-                                <div className="w-full flex items-start justify-center gap-3 sm:gap-4 max-w-xl mx-auto">
+                                <div className="w-full grid grid-cols-3 items-start gap-2 sm:gap-3 min-w-0">
                                   {/* Home Team */}
-                                  <div className="flex-1 min-w-0 flex flex-col items-center text-center">
+                                  <div className="min-w-0 flex flex-col items-center text-center">
                                     <div
                                       className={`flex items-center justify-center gap-1 bg-slate-950 px-1.5 py-1 rounded-xl border transition-all ${
                                         isLocked
@@ -772,7 +1147,7 @@ export default function MatchPredictor({
                                       )}
                                     </div>
                                     <h5
-                                      className={`mt-2 font-extrabold font-display text-[11px] sm:text-sm tracking-tight truncate w-full max-w-full leading-snug px-0.5 ${
+                                      className={`mt-1 font-extrabold font-display text-[11px] sm:text-sm tracking-tight truncate w-full max-w-full leading-snug px-0.5 ${
                                         showActiveGreen && homeLeading
                                           ? "text-emerald-400"
                                           : showActiveGreen && isDrawPick
@@ -785,17 +1160,20 @@ export default function MatchPredictor({
                                     </h5>
                                   </div>
 
-                                  <div className="shrink-0 flex flex-col items-center justify-center text-center gap-1 px-1 pt-2">
-                                    <span className={matchStatus.className}>
+                                  <div className="min-w-0 flex flex-col items-center justify-center text-center gap-1 px-1 pt-2">
+                                    <span
+                                      className={`${matchStatus.className} whitespace-nowrap`}
+                                    >
                                       {matchStatus.label}
                                     </span>
                                     <span className="font-mono font-bold text-slate-600 text-[10px] uppercase tracking-widest">
                                       vs
                                     </span>
+                                    {lockControl}
                                   </div>
 
                                   {/* Away Team */}
-                                  <div className="flex-1 min-w-0 flex flex-col items-center text-center">
+                                  <div className="min-w-0 flex flex-col items-center text-center">
                                     <div
                                       className={`flex items-center justify-center gap-1 bg-slate-950 px-1.5 py-1 rounded-xl border transition-all ${
                                         isLocked
@@ -867,7 +1245,7 @@ export default function MatchPredictor({
                                       )}
                                     </div>
                                     <h5
-                                      className={`mt-2 font-extrabold font-display text-[11px] sm:text-sm tracking-tight truncate w-full max-w-full leading-snug px-0.5 ${
+                                      className={`mt-1 font-extrabold font-display text-[11px] sm:text-sm tracking-tight truncate w-full max-w-full leading-snug px-0.5 ${
                                         showActiveGreen && awayLeading
                                           ? "text-emerald-400"
                                           : showActiveGreen && isDrawPick
@@ -881,123 +1259,161 @@ export default function MatchPredictor({
                                   </div>
                                 </div>
                               ) : (
-                                <div className="flex-1 w-full flex flex-col items-center gap-3 bg-slate-950/40 p-3 sm:p-4 border border-slate-850/60 rounded-2xl relative">
-                                  <span className={matchStatus.className}>
-                                    {matchStatus.label}
-                                  </span>
-                                  {/* Winner Selection Segment */}
+                                <div className="w-full max-w-xl mx-auto min-w-0 space-y-2">
+                                  {/* Same 3-column shell as football: home | status/vs/lock | away */}
                                   <div
-                                    className={`w-full grid grid-cols-3 gap-2 ${
-                                      isLocked ? "pointer-events-none opacity-80" : ""
+                                    className={`w-full grid grid-cols-3 items-start gap-2 sm:gap-3 ${
+                                      isLocked ? "opacity-90" : ""
                                     }`}
                                   >
-                                    <button
-                                      type="button"
-                                      disabled={isLocked}
-                                      onClick={() => {
-                                        const currentMargin =
-                                          Math.abs(
-                                            (savedPred.home || 0) -
-                                              (savedPred.away || 0),
-                                          ) || 1;
-                                        onRugbyPredictionChange(
-                                          match.id,
-                                          "home",
-                                          currentMargin.toString(),
-                                        );
-                                      }}
-                                      className={`px-1.5 py-2.5 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center transition-all select-none min-w-0 ${
-                                        isLocked ? "cursor-default" : "cursor-pointer"
-                                      } ${
-                                        homeLeading
-                                          ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300"
-                                          : "bg-slate-950/20 border-slate-850 text-slate-500 hover:bg-slate-900/50 hover:text-slate-350"
-                                      }`}
-                                    >
-                                      <span
-                                        className={`font-display font-black text-center truncate w-full text-[11px] sm:text-xs ${
-                                          homeLeading ? "text-emerald-400" : ""
+                                    <div className="min-w-0 flex flex-col items-center text-center">
+                                      <button
+                                        type="button"
+                                        disabled={isLocked}
+                                        onClick={() => {
+                                          const currentMargin =
+                                            Math.abs(
+                                              (savedPred.home || 0) -
+                                                (savedPred.away || 0),
+                                            ) || 1;
+                                          onRugbyPredictionChange(
+                                            match.id,
+                                            "home",
+                                            currentMargin.toString(),
+                                          );
+                                        }}
+                                        className={`w-full flex items-center justify-center bg-slate-950 px-1.5 py-1 rounded-xl border transition-all select-none min-w-0 ${
+                                          isLocked
+                                            ? "cursor-default border-slate-700/80"
+                                            : "cursor-pointer"
+                                        } ${
+                                          homeLeading
+                                            ? "border-emerald-500/40 bg-emerald-500/10"
+                                            : "border-slate-800 hover:border-emerald-500/40"
                                         }`}
-                                        title={match.homeTeam}
                                       >
-                                        {match.homeTeam}
-                                      </span>
-                                    </button>
+                                        <span
+                                          className={`font-extrabold font-display text-[11px] sm:text-sm tracking-tight truncate w-full leading-snug px-0.5 ${
+                                            homeLeading
+                                              ? "text-emerald-400"
+                                              : showActiveGreen && isDrawPick
+                                                ? "text-emerald-300/80"
+                                                : "text-white"
+                                          }`}
+                                          title={match.homeTeam}
+                                        >
+                                          {match.homeTeam}
+                                        </span>
+                                      </button>
+                                    </div>
 
-                                    <button
-                                      type="button"
-                                      disabled={isLocked}
-                                      onClick={() => {
-                                        onRugbyPredictionChange(
-                                          match.id,
-                                          "draw",
-                                          "0",
-                                        );
-                                      }}
-                                      className={`px-1.5 py-2.5 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center transition-all cursor-pointer select-none min-w-0 ${
-                                        isDrawPick ||
-                                        ((savedPred.home || 0) ===
-                                          (savedPred.away || 0) &&
-                                          hasPick)
-                                          ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300"
-                                          : "bg-slate-950/20 border-slate-850 text-slate-500 hover:bg-slate-900/50 hover:text-slate-350"
-                                      }`}
-                                    >
+                                    <div className="min-w-0 flex flex-col items-center justify-center text-center gap-1 px-1 pt-2">
                                       <span
-                                        className={`font-display font-black text-center w-full text-[11px] sm:text-xs ${
-                                          isDrawPick ? "text-emerald-400" : ""
+                                        className={`${matchStatus.className} whitespace-nowrap`}
+                                      >
+                                        {matchStatus.label}
+                                      </span>
+                                      <span className="font-mono font-bold text-slate-600 text-[10px] uppercase tracking-widest">
+                                        vs
+                                      </span>
+                                      <button
+                                        type="button"
+                                        disabled={isLocked}
+                                        onClick={() => {
+                                          onRugbyPredictionChange(
+                                            match.id,
+                                            "draw",
+                                            "0",
+                                          );
+                                        }}
+                                        className={`w-full h-6 sm:h-9 rounded-md sm:rounded-lg border text-[9px] sm:text-[10px] font-bold font-display uppercase tracking-wide transition-all select-none ${
+                                          isLocked
+                                            ? "cursor-default"
+                                            : "cursor-pointer"
+                                        } ${
+                                          isDrawPick ||
+                                          ((savedPred.home || 0) ===
+                                            (savedPred.away || 0) &&
+                                            hasPick)
+                                            ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300"
+                                            : "bg-slate-950/60 border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
                                         }`}
                                       >
                                         Draw
-                                      </span>
-                                    </button>
+                                      </button>
+                                      {lockControl}
+                                    </div>
 
-                                    <button
-                                      type="button"
-                                      disabled={isLocked}
-                                      onClick={() => {
-                                        const currentMargin =
-                                          Math.abs(
-                                            (savedPred.home || 0) -
-                                              (savedPred.away || 0),
-                                          ) || 1;
-                                        onRugbyPredictionChange(
-                                          match.id,
-                                          "away",
-                                          currentMargin.toString(),
-                                        );
-                                      }}
-                                      className={`px-1.5 py-2.5 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center transition-all cursor-pointer select-none min-w-0 ${
-                                        awayLeading
-                                          ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300"
-                                          : "bg-slate-950/20 border-slate-850 text-slate-500 hover:bg-slate-900/50 hover:text-slate-350"
-                                      }`}
-                                    >
-                                      <span
-                                        className={`font-display font-black text-center truncate w-full text-[11px] sm:text-xs ${
-                                          awayLeading ? "text-emerald-400" : ""
+                                    <div className="min-w-0 flex flex-col items-center text-center">
+                                      <button
+                                        type="button"
+                                        disabled={isLocked}
+                                        onClick={() => {
+                                          const currentMargin =
+                                            Math.abs(
+                                              (savedPred.home || 0) -
+                                                (savedPred.away || 0),
+                                            ) || 1;
+                                          onRugbyPredictionChange(
+                                            match.id,
+                                            "away",
+                                            currentMargin.toString(),
+                                          );
+                                        }}
+                                        className={`w-full flex items-center justify-center bg-slate-950 px-1.5 py-1 rounded-xl border transition-all select-none min-w-0 ${
+                                          isLocked
+                                            ? "cursor-default border-slate-700/80"
+                                            : "cursor-pointer"
+                                        } ${
+                                          awayLeading
+                                            ? "border-emerald-500/40 bg-emerald-500/10"
+                                            : "border-slate-800 hover:border-emerald-500/40"
                                         }`}
-                                        title={match.awayTeam}
                                       >
-                                        {match.awayTeam}
-                                      </span>
-                                    </button>
+                                        <span
+                                          className={`font-extrabold font-display text-[11px] sm:text-sm tracking-tight truncate w-full leading-snug px-0.5 ${
+                                            awayLeading
+                                              ? "text-emerald-400"
+                                              : showActiveGreen && isDrawPick
+                                                ? "text-emerald-300/80"
+                                                : "text-white"
+                                          }`}
+                                          title={match.awayTeam}
+                                        >
+                                          {match.awayTeam}
+                                        </span>
+                                      </button>
+                                    </div>
                                   </div>
 
-                                  {/* Margin Dropdown / Text Representation */}
+                                  {/* Margin — compact, same pattern as before */}
                                   {(savedPred.home || 0) !== (savedPred.away || 0) ? (
                                     isSubmitted ? (
-                                      <div className="flex flex-col items-center text-center mt-2 w-full bg-slate-900/50 py-3 px-4 rounded-xl border border-emerald-500/20">
-                                        <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400 mb-1 select-none">
+                                      <div className="flex flex-col items-center text-center w-full bg-slate-900/50 py-2 px-3 rounded-xl border border-emerald-500/20">
+                                        <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-slate-400 mb-0.5 select-none">
                                           Your Prediction
                                         </span>
-                                        <span className="font-display font-black text-emerald-400 text-sm">
-                                          {(savedPred.home || 0) > (savedPred.away || 0) ? match.homeTeam : match.awayTeam} by {Math.abs((savedPred.home || 0) - (savedPred.away || 0))} {(Math.abs((savedPred.home || 0) - (savedPred.away || 0)) === 1 ? 'Point' : 'Points')}
+                                        <span className="font-display font-black text-emerald-400 text-xs sm:text-sm">
+                                          {(savedPred.home || 0) >
+                                          (savedPred.away || 0)
+                                            ? match.homeTeam
+                                            : match.awayTeam}{" "}
+                                          by{" "}
+                                          {Math.abs(
+                                            (savedPred.home || 0) -
+                                              (savedPred.away || 0),
+                                          )}{" "}
+                                          {Math.abs(
+                                            (savedPred.home || 0) -
+                                              (savedPred.away || 0),
+                                          ) === 1
+                                            ? "Point"
+                                            : "Points"}
                                         </span>
                                       </div>
                                     ) : (
-                                      <div className="flex flex-col items-center text-center mt-2 w-full">
-                                        <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-emerald-405 mb-1.5 select-none">
+                                      <div className="flex flex-col items-center text-center w-full">
+                                        <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-emerald-400/80 mb-1 select-none">
                                           Winning Margin (Points)
                                         </span>
                                         <select
@@ -1018,7 +1434,7 @@ export default function MatchPredictor({
                                               e.target.value,
                                             );
                                           }}
-                                          className="w-full max-w-[200px] text-center bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl py-2 px-3 font-display font-bold text-white text-sm outline-hidden"
+                                          className="w-full max-w-[200px] text-center bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl py-1.5 px-3 font-display font-bold text-white text-sm outline-hidden"
                                         >
                                           {Array.from(
                                             { length: 100 },
@@ -1034,11 +1450,11 @@ export default function MatchPredictor({
                                     )
                                   ) : (
                                     isSubmitted && (
-                                      <div className="flex flex-col items-center text-center mt-2 w-full bg-slate-900/50 py-3 px-4 rounded-xl border border-emerald-500/20">
-                                        <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400 mb-1 select-none">
+                                      <div className="flex flex-col items-center text-center w-full bg-slate-900/50 py-2 px-3 rounded-xl border border-emerald-500/20">
+                                        <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-slate-400 mb-0.5 select-none">
                                           Your Prediction
                                         </span>
-                                        <span className="font-display font-black text-emerald-400 text-sm">
+                                        <span className="font-display font-black text-emerald-400 text-xs sm:text-sm">
                                           Draw
                                         </span>
                                       </div>
@@ -1046,34 +1462,73 @@ export default function MatchPredictor({
                                   )}
                                 </div>
                               )}
-                            </div>
+                              </div>
 
-                            {/* ANTICIPATION MECHANIC: consensus stays hidden until the guess is locked */}
+                            {/* Consensus: only after lock, and only with ≥20 submitted picks */}
                             {isSubmitted && (
-                              <div
-                                className="mt-5 border-t border-slate-800/60 pt-4 overflow-hidden"
-                              >
+                              <div className="mt-2.5 border-t border-slate-800/60 pt-2 overflow-hidden">
                                 <div className="flex items-center justify-center gap-1.5">
                                   <Users className="h-3.5 w-3.5 text-slate-600" />
-                                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
+                                  <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-slate-500">
                                     Community Consensus
                                   </span>
                                 </div>
-                                <p className="mt-1 text-center text-xs italic text-slate-600">
-                                  Consensus revealing soon…
-                                </p>
+                                {consensus &&
+                                consensus.total >= CONSENSUS_THRESHOLD ? (
+                                  <div className="mt-1.5 space-y-1">
+                                    <div className="flex h-2 overflow-hidden rounded-full bg-slate-800">
+                                      <div
+                                        className="bg-blue-500"
+                                        style={{
+                                          width: `${(consensus.home / consensus.total) * 100}%`,
+                                        }}
+                                      />
+                                      <div
+                                        className="bg-slate-500"
+                                        style={{
+                                          width: `${(consensus.draw / consensus.total) * 100}%`,
+                                        }}
+                                      />
+                                      <div
+                                        className="bg-rose-500"
+                                        style={{
+                                          width: `${(consensus.away / consensus.total) * 100}%`,
+                                        }}
+                                      />
+                                    </div>
+                                    <p className="text-center text-[10px] font-mono text-slate-400">
+                                      {Math.round(
+                                        (consensus.home / consensus.total) * 100,
+                                      )}
+                                      % Home ·{" "}
+                                      {Math.round(
+                                        (consensus.draw / consensus.total) * 100,
+                                      )}
+                                      % Draw ·{" "}
+                                      {Math.round(
+                                        (consensus.away / consensus.total) * 100,
+                                      )}
+                                      % Away
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <p className="mt-0.5 text-center text-[11px] text-slate-500 font-sans">
+                                    Be among the first to predict this match
+                                  </p>
+                                )}
                               </div>
                             )}
                             </div>
-                          </React.Fragment>
+                          </div>
                         );
                       })}
+                      </div>
                     </div>
                   )}
                 </div>
               )}
             </div>
-          )}
+      )}
 
       {pendingLock && (
         <PowerUpLockConfirmModal
@@ -1093,6 +1548,19 @@ export default function MatchPredictor({
             void queryClient.invalidateQueries({
               queryKey: ["userPowerups", userId, powerUpSport],
             });
+          }}
+        />
+      )}
+
+      {plainLockConfirm && (
+        <LockConfirmModal
+          open
+          fixtureLabel={plainLockConfirm.fixtureLabel}
+          onCancel={() => setPlainLockConfirm(null)}
+          onConfirm={() => {
+            const { matchId } = plainLockConfirm;
+            setPlainLockConfirm(null);
+            onSubmitPrediction(matchId, null);
           }}
         />
       )}

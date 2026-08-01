@@ -5,7 +5,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { UserProfile, Prediction, League, SportType, Match, ActiveCompetition } from "./types";
-import { ALL_COMPETITIONS } from "./data";
+import { getCompetitionTitle } from "./data";
 import { GLOBAL_LEAGUE_ID } from "./lib/leaguesConfig";
 import {
   parseSeenFeatures,
@@ -62,11 +62,11 @@ export async function testSupabaseConnection(): Promise<{ ok: boolean; error?: s
 
 /** Columns needed to hydrate UserProfile from profiles (no SELECT *). */
 const PROFILE_LIST_COLUMNS =
-  "id, first_name, surname, email, username, dob, phone, nationality, supported_team, preferred_sport, is_admin, is_verified, is_profile_public, created_at, seen_features, selected_sports, favorite_f1_team, favorite_golfer, role, golf_mulligans_available";
+  "id, first_name, surname, email, username, dob, phone, nationality, supported_team, preferred_sport, is_admin, is_verified, is_profile_public, created_at, seen_features, selected_sports, favorite_f1_team, favorite_golfer, role, golf_mulligans_available, age_confirmed_13, terms_accepted_at, privacy_accepted_at";
 
 /** Match columns used by mapMatchRow — keep in sync with Match domain model. */
 const MATCH_LIST_COLUMNS =
-  "id, competition_id, competition_name, sport, home_team, away_team, actual_home_score, actual_away_score, kickoff_time, status, match_tag, round_name, venue_name, odds_home_win, odds_draw, odds_away_win, base_multiplier, provisional_home_score, provisional_away_score, match_minute, is_visible";
+  "id, external_fixture_id, competition_id, competition_name, sport, home_team, away_team, actual_home_score, actual_away_score, kickoff_time, status, match_tag, round_name, venue_name, odds_home_win, odds_draw, odds_away_win, base_multiplier, provisional_home_score, provisional_away_score, match_minute, is_visible";
 
 const PREDICTION_USER_COLUMNS =
   "match_id, predicted_home_score, predicted_away_score, submitted, created_at, provisional_points, points_won, sport, applied_powerup_id";
@@ -109,6 +109,9 @@ export async function dbFetchPlayers(): Promise<UserProfile[]> {
     role?: string | null;
     golf_mulligans_available?: number | null;
     is_profile_public?: boolean | null;
+    age_confirmed_13?: boolean | null;
+    terms_accepted_at?: string | null;
+    privacy_accepted_at?: string | null;
   };
 
   const activeData = data.filter(
@@ -132,7 +135,7 @@ export async function dbFetchPlayers(): Promise<UserProfile[]> {
     createdAt: d.created_at || new Date().toISOString(),
     emailVerified: d.is_verified ?? false,
     isAdmin: Boolean(d.is_admin),
-    agreedToTerms: true,
+    agreedToTerms: Boolean(d.terms_accepted_at),
     nationality: d.nationality || "United Kingdom",
     supportedTeam: d.supported_team || "None",
     preferredSport: d.preferred_sport as SportType | undefined,
@@ -246,6 +249,33 @@ export type PredictionEntry = {
   /** Attached power-up instance id (consumed at lock). */
   appliedPowerupId?: string | null;
 };
+
+export type MatchConsensus = {
+  total: number;
+  home: number;
+  draw: number;
+  away: number;
+};
+
+/** Aggregate submitted picks for a fixture (threshold UI uses total >= 20). */
+export async function dbFetchMatchConsensus(
+  matchId: string,
+): Promise<MatchConsensus> {
+  if (!supabase) return { total: 0, home: 0, draw: 0, away: 0 };
+  const { data, error } = await supabase.rpc("get_match_prediction_consensus", {
+    p_match_id: matchId,
+  });
+  if (error || !data || typeof data !== "object") {
+    return { total: 0, home: 0, draw: 0, away: 0 };
+  }
+  const row = data as Record<string, unknown>;
+  return {
+    total: Number(row.total) || 0,
+    home: Number(row.home) || 0,
+    draw: Number(row.draw) || 0,
+    away: Number(row.away) || 0,
+  };
+}
 
 export async function dbFetchPredictions(
   userId: string,
@@ -413,19 +443,53 @@ export async function dbLockPrediction(
 ): Promise<{ applied_powerup_id: string | null; consumed: boolean }> {
   if (!supabase) throw new Error("Database not connected.");
 
-  const { data, error } = await supabase.rpc("pitchside_lock_prediction", {
+  // Column is `match_id` (fixture id). Validate before hitting PostgREST/RPC.
+  if (!userId?.trim()) throw new Error("Missing user_id — cannot lock prediction.");
+  if (!matchId?.trim()) {
+    throw new Error("Missing fixture_id / match_id — cannot lock prediction.");
+  }
+  if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) {
+    throw new Error("Invalid home_score / away_score — cannot lock prediction.");
+  }
+
+  const payload = {
     p_user_id: userId,
     p_match_id: matchId,
     p_sport: sport,
-    p_competition_id: compId,
-    p_home: homeScore,
-    p_away: awayScore,
+    p_competition_id: compId || "unknown",
+    p_home: Math.max(0, Math.trunc(homeScore)),
+    p_away: Math.max(0, Math.trunc(awayScore)),
     p_powerup_id: powerupId ?? null,
+  };
+
+  console.info("[dbLockPrediction] upsert lock", {
+    user_id: payload.p_user_id,
+    fixture_id: payload.p_match_id,
+    home_score: payload.p_home,
+    away_score: payload.p_away,
+    sport: payload.p_sport,
+    competition_id: payload.p_competition_id,
+    powerup_id: payload.p_powerup_id,
   });
 
+  const { data, error } = await supabase.rpc(
+    "pitchside_lock_prediction",
+    payload,
+  );
+
   if (error) {
+    console.error("[dbLockPrediction] RPC failed", {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+      payload,
+    });
     if (/event locked|predictions can no longer be submitted/i.test(error.message || "")) {
       throw new Error(PREDICTION_EVENT_LOCKED_MESSAGE);
+    }
+    if (/row-level security|rls|not authorised|permission denied/i.test(error.message || "")) {
+      throw new Error(`Prediction blocked (RLS / auth): ${error.message}`);
     }
     throw error;
   }
@@ -496,12 +560,8 @@ function resolveCompetitionName(
   competitionId: string | null | undefined,
   storedName?: string | null,
 ): string {
-  const trimmed = storedName?.trim();
-  if (trimmed) return trimmed;
-  if (!competitionId) return "Unknown Competition";
-  const catalog = ALL_COMPETITIONS.find((c) => c.id === competitionId);
-  if (catalog) return catalog.name;
-  return `Competition ${competitionId}`;
+  // Prefer canonical dictionary over raw API provider strings.
+  return getCompetitionTitle(competitionId, storedName);
 }
 
 function isWithinMatchHorizon(
@@ -512,8 +572,8 @@ function isWithinMatchHorizon(
   if (match.status === "live") return true;
   const kickoff = new Date(match.matchDate).getTime();
   if (Number.isNaN(kickoff)) return false;
-  // Small past buffer so just-kicked-off fixtures remain visible.
-  const start = now.getTime() - 3 * 60 * 60 * 1000;
+  // Recent completed + upcoming inside the forward horizon.
+  const start = now.getTime() - 7 * 24 * 60 * 60 * 1000;
   const end = now.getTime() + horizonDays * 24 * 60 * 60 * 1000;
   return kickoff >= start && kickoff <= end;
 }
@@ -531,7 +591,10 @@ export function mapMatchRow(d: Record<string, unknown>): Match {
   return {
     id: String(d.id),
     competitionId: String(d.competition_id ?? ""),
-    competitionName: (d.competition_name as string) || undefined,
+    competitionName: getCompetitionTitle(
+      d.competition_id as string | undefined,
+      d.competition_name as string | null | undefined,
+    ),
     sport: d.sport as SportType,
     homeTeam: String(d.home_team ?? ""),
     awayTeam: String(d.away_team ?? ""),
@@ -603,7 +666,9 @@ export async function dbFetchMatches(
   }
 
   const now = new Date();
-  const start = new Date(now.getTime() - 3 * 60 * 60 * 1000).toISOString();
+  // Include recently completed fixtures (7d) so the unified predictions feed
+  // can show upcoming + recent in one scrollable list.
+  const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const end = new Date(
     now.getTime() + horizonDays * 24 * 60 * 60 * 1000,
   ).toISOString();
@@ -672,21 +737,35 @@ export async function dbFetchActiveCompetitions(
 
 export async function dbSaveMatch(match: Match): Promise<void> {
   if (!supabase) throw new Error("Database not connected.");
-  const { error } = await supabase.from("matches").upsert({
+
+  const payload = {
     id: match.id,
     competition_id: match.competitionId,
     competition_name: match.competitionName || null,
     sport: match.sport,
     home_team: match.homeTeam,
     away_team: match.awayTeam,
-    actual_home_score: match.homeScore,
-    actual_away_score: match.awayScore,
+    actual_home_score: match.homeScore ?? null,
+    actual_away_score: match.awayScore ?? null,
     kickoff_time: match.matchDate,
     status: match.status,
     is_visible: match.isVisible !== false,
     updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabase.from("matches").upsert(payload, {
+    onConflict: "id",
   });
-  if (error) throw error;
+
+  if (error) {
+    const parts = [
+      error.message,
+      error.details,
+      error.hint,
+      error.code ? `code ${error.code}` : null,
+    ].filter(Boolean);
+    throw new Error(parts.join(" — ") || "Database rejected the fixture write.");
+  }
 }
 
 /** Instantly toggle whether a fixture is shown in player-facing feeds. */
@@ -1145,7 +1224,7 @@ export async function dbFetchLeagueMembers(leagueId: string): Promise<UserProfil
         createdAt: String(p.created_at || new Date().toISOString()),
         emailVerified: Boolean(p.is_verified),
         isAdmin: Boolean(p.is_admin),
-        agreedToTerms: true,
+        agreedToTerms: Boolean(p.terms_accepted_at),
         nationality: String(p.nationality || ""),
         isProfilePublic: (p.is_profile_public as boolean | undefined) ?? true,
         supportedTeam: String(p.supported_team || ""),

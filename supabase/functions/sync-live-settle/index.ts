@@ -16,19 +16,27 @@
 // Invoke (POST or GET — Cron-friendly). Optional JSON body ignored.
 //
 // Required secrets:
-//   API_SPORTS_KEY (or API-SPORTS_KEY)
+//   API_SPORTS_KEY
 //   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY (auto-injected on hosted)
 // Optional:
 //   API_SPORTS_MIN_INTERVAL_MS (default 7000)
+//   API_SPORTS_DAILY_BUDGET (default 7000)
 // ============================================================================
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
   ApiSportsClient,
   DAILY_BUDGET_CAP,
+  UpstreamAuthError,
+  getApiSportsKey,
   utcDay,
   type Sport,
 } from "../_shared/apiSportsClient.ts";
+import {
+  FOOTBALL_API_IDS,
+  FOOTBALL_LEAGUES,
+  FOOTBALL_SLUG_BY_API,
+} from "../_shared/footballLeagues.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -39,20 +47,12 @@ const CORS_HEADERS = {
 
 /** ONLY these API-Sports league IDs are monitored / settled. */
 const LEAGUE_CATALOG: Record<Sport, readonly number[]> = {
-  football: [39, 40, 179, 45, 2, 3, 1, 48, 52],
+  football: FOOTBALL_LEAGUES.map((l) => l.apiId),
   rugby: [13, 16, 22, 14, 15, 26, 19, 10],
 };
 
 const SLUG_BY_SPORT_AND_API: Record<string, string> = {
-  "football:39": "f-epl",
-  "football:40": "f-championship",
-  "football:179": "f-spfl",
-  "football:45": "f-facup",
-  "football:48": "f-eflcup",
-  "football:2": "f-ucl",
-  "football:3": "f-uel",
-  "football:1": "f-worldcup",
-  "football:52": "f-shield",
+  ...FOOTBALL_SLUG_BY_API,
   "rugby:13": "r-top14",
   "rugby:16": "r-prem",
   "rugby:26": "r-urc",
@@ -64,15 +64,16 @@ const SLUG_BY_SPORT_AND_API: Record<string, string> = {
 };
 
 const CATALOG_SETS: Record<Sport, ReadonlySet<number>> = {
-  football: new Set(LEAGUE_CATALOG.football),
+  football: FOOTBALL_API_IDS,
   rugby: new Set(LEAGUE_CATALOG.rugby),
 };
 
-const CATALOG_COMPETITION_IDS: string[] = (
-  Object.entries(LEAGUE_CATALOG) as [Sport, readonly number[]][]
-).flatMap(([sport, ids]) =>
-  ids.map((id) => SLUG_BY_SPORT_AND_API[`${sport}:${id}`] || `${sport}-${id}`),
-);
+const CATALOG_COMPETITION_IDS: string[] = [
+  ...FOOTBALL_LEAGUES.map((l) => l.slug),
+  ...LEAGUE_CATALOG.rugby.map(
+    (id) => SLUG_BY_SPORT_AND_API[`rugby:${id}`] || `rugby-${id}`,
+  ),
+];
 
 /** Kickoff lookback for still-`upcoming` rows that should already be underway. */
 const ACTIVE_KICKOFF_LOOKBACK_MS = 3 * 60 * 60 * 1000;
@@ -164,15 +165,11 @@ function isLiveStatus(item: any): boolean {
 function extractLiveScores(
   item: any,
 ): { home: number | null; away: number | null } {
-  const fixture = item.fixture ?? item;
+  // Football (verified): goals.home / goals.away. Rugby uses scores.*.
   const goals = item.goals ?? item.scores ?? {};
-  const home =
-    goals.home ?? item.scores?.home ?? fixture.score?.fulltime?.home ?? null;
-  const away =
-    goals.away ?? item.scores?.away ?? fixture.score?.fulltime?.away ?? null;
   return {
-    home: home != null ? Number(home) : null,
-    away: away != null ? Number(away) : null,
+    home: goals.home != null ? Number(goals.home) : null,
+    away: goals.away != null ? Number(goals.away) : null,
   };
 }
 
@@ -182,6 +179,7 @@ function extractFootballFinalScores(
   const fixture = item.fixture ?? item;
   const short = statusShort(item);
   const score = item.score ?? fixture.score ?? {};
+  const goals = item.goals ?? {};
 
   if (short === "PEN" || short === "AET") {
     const extra = score.extratime;
@@ -190,14 +188,13 @@ function extractFootballFinalScores(
     }
   }
 
+  if (goals.home != null && goals.away != null) {
+    return { home: Number(goals.home), away: Number(goals.away) };
+  }
+
   const fulltime = score.fulltime;
   if (fulltime?.home != null && fulltime?.away != null) {
     return { home: Number(fulltime.home), away: Number(fulltime.away) };
-  }
-
-  const goals = item.goals ?? fixture.goals;
-  if (goals?.home != null && goals?.away != null) {
-    return { home: Number(goals.home), away: Number(goals.away) };
   }
   return null;
 }
@@ -502,6 +499,9 @@ async function processSport(
   const result = await client.get(sport, apiPath, params, label);
 
   if (!result.ok) {
+    if (result.reason === "auth_failure") {
+      throw new UpstreamAuthError(result.status ?? 401, "sync-live-settle");
+    }
     if (result.reason === "budget_exhausted") {
       console.warn(
         `[sync-live-settle] Budget exhausted for ${sport} — skipping (calls_made=${result.callsMadeToday}/${DAILY_BUDGET_CAP})`,
@@ -554,10 +554,14 @@ async function processSport(
         continue;
       }
 
+      const externalFixtureId = Number.isFinite(Number(apiId))
+        ? Number(apiId)
+        : null;
       const { error } = await supabase
         .from("matches")
         .update({
           status: "completed",
+          external_fixture_id: externalFixtureId,
           actual_home_score: scores.home,
           actual_away_score: scores.away,
           provisional_home_score: null,
@@ -594,10 +598,14 @@ async function processSport(
 
     if (isLiveStatus(item)) {
       const scores = extractLiveScores(item);
+      const externalFixtureId = Number.isFinite(Number(apiId))
+        ? Number(apiId)
+        : null;
       const { error } = await supabase
         .from("matches")
         .update({
           status: "live",
+          external_fixture_id: externalFixtureId,
           provisional_home_score: scores.home,
           provisional_away_score: scores.away,
           match_minute: formatMatchMinute(item),
@@ -635,8 +643,7 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: "Method not allowed. Use GET or POST." }, 405);
   }
 
-  const apiKey = Deno.env.get("API_SPORTS_KEY") ??
-    Deno.env.get("API-SPORTS_KEY");
+  const apiKey = getApiSportsKey();
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const minIntervalRaw = Deno.env.get("API_SPORTS_MIN_INTERVAL_MS") ?? "7000";
@@ -736,6 +743,19 @@ Deno.serve(async (req: Request) => {
       planBlocked: client.stats.planBlocked,
     });
   } catch (err) {
+    if (err instanceof UpstreamAuthError) {
+      console.error(
+        `[sync-live-settle] CRITICAL: Upstream API-Sports authentication failure (HTTP ${err.status})`,
+      );
+      return jsonResponse(
+        {
+          error: "Upstream API-Sports authentication failure",
+          status: err.status,
+          caller: err.caller,
+        },
+        err.status,
+      );
+    }
     const message = err instanceof Error ? err.message : String(err);
     console.error("[sync-live-settle] Fatal:", message);
     return jsonResponse({ error: "sync-live-settle failed", detail: message }, 500);

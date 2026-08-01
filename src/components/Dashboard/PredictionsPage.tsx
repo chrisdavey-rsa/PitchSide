@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Users } from "lucide-react";
 import { SportType, Competition, Match, UserProfile } from "../../types";
 import MatchPredictor from "./MatchPredictor";
@@ -6,6 +6,14 @@ import OfflineDraftBanner from "../OfflineDraftBanner";
 import HowToPredictStepper, {
   type HowToPredictSport,
 } from "../predictions/HowToPredictStepper";
+import PredictionsFeedFilter, {
+  type FeedSportFilter,
+} from "../predictions/PredictionsFeedFilter";
+import CompetitionFilterRail, {
+  useCompetitionFilterOptions,
+  usePersistedCompetitionFilter,
+} from "../predictions/CompetitionFilterRail";
+import MobileFilterFab from "../predictions/MobileFilterFab";
 import type { PredictionEntry } from "../../supabase";
 import {
   SeenFeature,
@@ -13,39 +21,25 @@ import {
   type SeenFeatureKey,
   type SeenFeatures,
 } from "../../lib/seenFeatures";
-import {
-  EmergingSportWorkspace,
-  SportSelectorBanner,
-  isEmergingSport,
-  useUserRole,
-  type SportKey,
-} from "../../sports/emerging";
 
-function howToPredictFeatureKey(sport: SportKey): SeenFeatureKey {
-  switch (sport) {
-    case "rugby":
-      return SeenFeature.HowToPredictRugby;
-    case "formula1":
-      return SeenFeature.HowToPredictFormula1;
-    case "golf":
-      return SeenFeature.HowToPredictGolf;
-    default:
-      return SeenFeature.HowToPredictFootball;
-  }
+function howToPredictFeatureKey(
+  filter: FeedSportFilter,
+): SeenFeatureKey {
+  return filter === "rugby"
+    ? SeenFeature.HowToPredictRugby
+    : SeenFeature.HowToPredictFootball;
 }
 
-function toHowToPredictSport(sport: SportKey): HowToPredictSport {
-  if (sport === "rugby" || sport === "formula1" || sport === "golf") return sport;
-  return "football";
+function toHowToPredictSport(filter: FeedSportFilter): HowToPredictSport {
+  return filter === "rugby" ? "rugby" : "football";
 }
 
 interface PredictionsPageProps {
   user: UserProfile;
   isUserInAnyLeague: boolean;
-  /** Unified workspace sport (football | rugby | golf | formula1). */
-  activeSport: SportKey;
-  setActiveSport: (sport: SportKey) => void;
-  /** Core sport used by MatchPredictor / match filters (football | rugby). */
+  /** Kept for Dashboard leaderboard sync; feed uses local filter. */
+  activeSport: string;
+  setActiveSport: (sport: "football" | "rugby" | "golf" | "formula1") => void;
   selectedSport: SportType | null;
   setSelectedSport: (sport: SportType | null) => void;
   selectedCompId: string | null;
@@ -67,7 +61,6 @@ interface PredictionsPageProps {
   ) => void;
   onSubmitPrediction: (matchId: string, powerupInstanceId?: string | null) => void;
   onOpenLeagues: () => void;
-  /** Offline drafting banner (core sports only). */
   isOffline?: boolean;
   hasOfflineDraft?: boolean;
   onApplyOfflineDraft?: () => void | Promise<void>;
@@ -75,21 +68,18 @@ interface PredictionsPageProps {
 }
 
 /**
- * Dedicated Predictions shell (center mobile tab / desktop Predictions view).
- * Sport Selector Banner + dynamic workspace (core MatchPredictor or emerging views).
+ * Predictions shell — fixed flag rail (viewport) + flush main column
+ * aligned with the Dashboard "Hello" banner (same max-w parent).
  */
 export default function PredictionsPage({
   user,
   isUserInAnyLeague,
-  activeSport,
   setActiveSport,
   selectedSport,
   setSelectedSport,
   selectedCompId,
   setSelectedCompId,
   allMatches,
-  sortedActiveMatches,
-  activeMatches,
   filteredCompetitions,
   selectedCompetition,
   predictions,
@@ -105,102 +95,138 @@ export default function PredictionsPage({
   onApplyOfflineDraft,
   applyingOfflineDraft = false,
 }: PredictionsPageProps) {
-  const userRole = useUserRole(user.id, user.isAdmin);
-  const showEmerging = isEmergingSport(activeSport);
+  const [sportFilter, setSportFilter] = useState<FeedSportFilter>("all");
+  const [onlyUnmade, setOnlyUnmade] = useState(false);
 
-  // Ensure a core sport is always available for MatchPredictor when returning from F1/Golf.
   useEffect(() => {
-    if (!selectedSport) {
+    if (sportFilter === "football") {
+      setSelectedSport(SportType.FOOTBALL);
+      setActiveSport("football");
+    } else if (sportFilter === "rugby") {
+      setSelectedSport(SportType.RUGBY);
+      setActiveSport("rugby");
+    } else if (!selectedSport) {
       setSelectedSport(user.preferredSport ?? SportType.FOOTBALL);
     }
-  }, [selectedSport, setSelectedSport, user.preferredSport]);
+  }, [
+    sportFilter,
+    setSelectedSport,
+    setActiveSport,
+    selectedSport,
+    user.preferredSport,
+  ]);
+
+  const feedMatches = useMemo(() => {
+    const now = Date.now();
+    let list = allMatches.filter((m) => {
+      const sport = String(m.sport);
+      if (sportFilter === "football") return sport === "football";
+      if (sportFilter === "rugby") return sport === "rugby";
+      return sport === "football" || sport === "rugby";
+    });
+
+    if (onlyUnmade) {
+      list = list.filter((m) => {
+        const submitted = predictions[m.id]?.submitted;
+        const started =
+          m.status === "live" ||
+          m.status === "completed" ||
+          new Date(m.matchDate).getTime() <= now;
+        return !submitted && !started;
+      });
+    }
+
+    return [...list].sort((a, b) => {
+      const t = new Date(a.matchDate).getTime() - new Date(b.matchDate).getTime();
+      if (t !== 0) return t;
+      return a.homeTeam.localeCompare(b.homeTeam);
+    });
+  }, [allMatches, sportFilter, onlyUnmade, predictions]);
+
+  const predictorSport =
+    sportFilter === "rugby"
+      ? SportType.RUGBY
+      : sportFilter === "football"
+        ? SportType.FOOTBALL
+        : selectedSport ?? user.preferredSport ?? SportType.FOOTBALL;
+
+  const [compFilterIds, setCompFilterIds] = usePersistedCompetitionFilter();
+  const competitionFilterOptions = useCompetitionFilterOptions(feedMatches);
 
   return (
-    <div className="space-y-4 w-full">
-      {/*
-        On F1, keep the title + sport banner at the same 2/3 width as Football/Rugby
-        predictions (matching lg:col-span-2 of the dashboard grid), while the F1
-        workspace below spans the full dashboard width (nav / welcome header).
-      */}
-      <div
-        className={
-          activeSport === "formula1"
-            ? "w-full grid grid-cols-1 lg:grid-cols-3 gap-6"
-            : "w-full"
-        }
+    <>
+      {/* Viewport-fixed nation filter — outside scroll / overflow containers. */}
+      <aside
+        className="fixed left-4 xl:left-8 top-32 flex flex-col gap-2 z-50 hidden md:flex"
+        aria-label="Nation filter"
       >
-        <div
-          className={
-            activeSport === "formula1" ? "lg:col-span-2 space-y-4" : "space-y-4"
-          }
-        >
-          <div className="px-0.5">
-            <h1 className="text-xl font-display font-extrabold text-white tracking-tight">
-              Predictions
-            </h1>
-            <p className="text-xs text-slate-500 font-sans mt-1 min-h-4">
-              {showEmerging
-                ? "Admin preview — emerging sports workspace."
-                : "Lock in your scores before kick-off."}
-            </p>
-          </div>
+        <CompetitionFilterRail
+          options={competitionFilterOptions}
+          selectedIds={compFilterIds}
+          onChange={setCompFilterIds}
+        />
+      </aside>
 
-          <SportSelectorBanner
-            activeSport={activeSport}
-            onSelectSport={setActiveSport}
-            userRole={userRole}
-            className="w-full shrink-0"
-          />
-
-          {!isUserInAnyLeague && !showEmerging && (
-            <div className="rounded-2xl border border-emerald-500/20 bg-emerald-950/20 px-4 py-3.5 space-y-2">
-              <p className="text-xs text-slate-300 font-sans leading-relaxed">
-                You are active in the Global Leaderboard. Select a sport above to
-                start predicting. Want to compete directly with friends? Create or
-                join a Private League from the navigation menu.
-              </p>
-              <button
-                type="button"
-                onClick={onOpenLeagues}
-                className="inline-flex items-center gap-1.5 text-[10px] font-bold font-display uppercase tracking-wide text-emerald-400 hover:text-emerald-300 cursor-pointer"
-              >
-                <Users className="h-3.5 w-3.5" />
-                Browse Private Leagues
-              </button>
-            </div>
-          )}
-
-          {!showEmerging && (
-            <OfflineDraftBanner
-              isOffline={isOffline}
-              hasDraft={hasOfflineDraft}
-              onApplyAndSubmit={onApplyOfflineDraft}
-              applying={applyingOfflineDraft}
-            />
-          )}
-
-          {!hasSeenFeature(seenFeatures, howToPredictFeatureKey(activeSport)) && (
-            <HowToPredictStepper
-              sport={toHowToPredictSport(activeSport)}
-              dismissible
-              onDismiss={() => {
-                void onFeatureSeen(howToPredictFeatureKey(activeSport));
-              }}
-            />
-          )}
+      {/* Main Predictions column — flush with Hello banner (same max-w parent). */}
+      <div className="w-full flex flex-col space-y-4">
+        <div>
+          <h1 className="text-xl font-display font-extrabold text-white tracking-tight">
+            Predictions
+          </h1>
+          <p className="text-xs text-slate-500 font-sans mt-1 min-h-4">
+            Upcoming and recent fixtures across your sports.
+          </p>
         </div>
-      </div>
 
-      {showEmerging ? (
-        <EmergingSportWorkspace sport={activeSport} userId={user.id} />
-      ) : (
+        <PredictionsFeedFilter
+          sportFilter={sportFilter}
+          onSportFilterChange={setSportFilter}
+          onlyUnmade={onlyUnmade}
+          onOnlyUnmadeChange={setOnlyUnmade}
+        />
+
+        {!isUserInAnyLeague && (
+          <div className="rounded-2xl border border-emerald-500/20 bg-emerald-950/20 px-4 py-3.5 space-y-2">
+            <p className="text-xs text-slate-300 font-sans leading-relaxed">
+              You are active in the Global Leaderboard. Want to compete directly
+              with friends? Create or join a Private League from the navigation
+              menu.
+            </p>
+            <button
+              type="button"
+              onClick={onOpenLeagues}
+              className="inline-flex items-center gap-1.5 text-[10px] font-bold font-display uppercase tracking-wide text-emerald-400 hover:text-emerald-300 cursor-pointer"
+            >
+              <Users className="h-3.5 w-3.5" />
+              Browse Private Leagues
+            </button>
+          </div>
+        )}
+
+        <OfflineDraftBanner
+          isOffline={isOffline}
+          hasDraft={hasOfflineDraft}
+          onApplyAndSubmit={onApplyOfflineDraft}
+          applying={applyingOfflineDraft}
+        />
+
+        {!hasSeenFeature(seenFeatures, howToPredictFeatureKey(sportFilter)) && (
+          <HowToPredictStepper
+            sport={toHowToPredictSport(sportFilter)}
+            dismissible
+            onDismiss={() => {
+              void onFeatureSeen(howToPredictFeatureKey(sportFilter));
+            }}
+          />
+        )}
+
         <MatchPredictor
-          selectedSport={selectedSport}
+          selectedSport={predictorSport}
           selectedCompId={selectedCompId}
           setSelectedCompId={setSelectedCompId}
           allMatches={allMatches}
-          sortedActiveMatches={sortedActiveMatches}
-          activeMatches={activeMatches}
+          sortedActiveMatches={feedMatches}
+          activeMatches={feedMatches}
           filteredCompetitions={filteredCompetitions}
           selectedCompetition={selectedCompetition}
           predictions={predictions}
@@ -211,8 +237,18 @@ export default function PredictionsPage({
           onRugbyPredictionChange={onRugbyPredictionChange}
           onSubmitPrediction={onSubmitPrediction}
           userId={user.id}
+          unifiedFeed
+          feedSportFilter={sportFilter}
+          competitionFilterIds={compFilterIds}
+          onCompetitionFilterIdsChange={setCompFilterIds}
         />
-      )}
-    </div>
+      </div>
+
+      <MobileFilterFab
+        options={competitionFilterOptions}
+        selectedIds={compFilterIds}
+        onChange={setCompFilterIds}
+      />
+    </>
   );
 }

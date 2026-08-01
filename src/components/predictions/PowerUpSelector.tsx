@@ -33,6 +33,10 @@ type Props = {
   assignedPowerUpIds?: PowerUpId[];
   /** False when every visible fixture is closed / locked. */
   hasOpenFixtures?: boolean;
+  /** Show the Power-Ups title / hint row (hide inside sticky dropdown). */
+  showHeader?: boolean;
+  /** Smaller chips for the sticky pill overlay. */
+  isCompact?: boolean;
   onSelect?: (powerUpId: PowerUpId) => void;
   className?: string;
 };
@@ -46,6 +50,8 @@ export default function PowerUpSelector({
   assigningPowerUpId = null,
   assignedPowerUpIds = [],
   hasOpenFixtures = true,
+  showHeader = true,
+  isCompact = false,
   onSelect,
   className = "",
 }: Props) {
@@ -63,17 +69,22 @@ export default function PowerUpSelector({
 
   return (
     <div className={`space-y-2 ${className}`} data-no-swipe="true">
-      <div className="flex items-center justify-between gap-2 px-0.5">
-        <p className="text-[10px] font-mono uppercase tracking-widest text-slate-500">
-          Power-Ups
-          <span className="text-slate-600 normal-case tracking-normal font-sans text-[9px]">
-            {" "}
-            · tap a chip, then a fixture
-          </span>
-        </p>
-      </div>
+      {showHeader && (
+        <div className="flex flex-col gap-0.5 px-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+          <p className="text-[10px] font-mono uppercase tracking-widest text-slate-500">
+            Power-Ups
+          </p>
+          <p className="text-[9px] font-sans normal-case tracking-normal text-slate-600">
+            Tap a chip, then a fixture
+          </p>
+        </div>
+      )}
 
-      <div className="grid grid-cols-5 gap-2 w-full">
+      <div
+        className={`grid w-full grid-cols-5 ${
+          isCompact ? "gap-1" : "gap-1.5 sm:gap-2"
+        }`}
+      >
         {POWER_UPS.map((def) => {
           const instance = byId.get(def.id);
           const unlocked =
@@ -94,7 +105,9 @@ export default function PowerUpSelector({
 
           let borderClass = "border border-transparent";
           if (unlocked && hasOpenFixtures && (assigned || assigning)) {
-            borderClass = `border-2 border-solid ${accent} shadow-lg`;
+            borderClass = `border-2 border-solid ${accent} ${
+              isCompact ? "shadow-md" : "shadow-lg"
+            }`;
           } else if (unlocked && hasOpenFixtures) {
             borderClass = `border-2 border-dashed ${accent}`;
           }
@@ -124,7 +137,10 @@ export default function PowerUpSelector({
                   onSelect?.(def.id);
                 }}
                 className={[
-                  "relative flex w-full flex-col items-center gap-1 rounded-xl px-1 py-2.5 transition-all cursor-pointer",
+                  "relative flex w-full flex-col items-center transition-all cursor-pointer",
+                  isCompact
+                    ? "gap-0.5 rounded-lg px-0.5 py-1.5"
+                    : "gap-1 rounded-xl px-1 py-2.5",
                   unlocked && hasOpenFixtures
                     ? def.isPremium
                       ? "bg-linear-to-br from-amber-200/25 via-yellow-500/15 to-slate-950"
@@ -136,7 +152,11 @@ export default function PowerUpSelector({
               >
                 <span className="relative inline-flex">
                   <span
-                    className={`flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-lg border ${
+                    className={`flex items-center justify-center border ${
+                      isCompact
+                        ? "h-6 w-6 rounded-md"
+                        : "h-8 w-8 sm:h-9 sm:w-9 rounded-lg"
+                    } ${
                       unlocked && hasOpenFixtures
                         ? def.isPremium
                           ? "border-amber-200/50 bg-slate-950/70"
@@ -145,7 +165,7 @@ export default function PowerUpSelector({
                     }`}
                   >
                     <Icon
-                      className={`h-4 w-4 ${
+                      className={`${isCompact ? "h-3 w-3" : "h-4 w-4"} ${
                         unlocked && hasOpenFixtures
                           ? def.isPremium
                             ? "text-amber-200 drop-shadow-[0_0_6px_rgba(251,191,36,0.8)]"
@@ -154,15 +174,21 @@ export default function PowerUpSelector({
                       }`}
                     />
                   </span>
-                  <span className="absolute -bottom-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full border border-slate-700 bg-slate-950 shadow-md overflow-hidden">
+                  <span
+                    className={`absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full border border-slate-700 bg-slate-950 shadow-md overflow-hidden ${
+                      isCompact ? "h-2.5 w-2.5" : "h-3.5 w-3.5 -bottom-1 -right-1"
+                    }`}
+                  >
                     <SportIcon
                       sport={sportKeyFromPowerUp(sportType)}
-                      className="h-2.5 w-2.5"
+                      className={isCompact ? "h-2 w-2" : "h-2.5 w-2.5"}
                     />
                   </span>
                 </span>
                 <span
-                  className={`text-[7px] sm:text-[8px] font-bold font-display leading-tight text-center truncate w-full px-0.5 ${
+                  className={`font-bold font-display leading-tight text-center truncate w-full px-0.5 ${
+                    isCompact ? "text-[6px]" : "text-[7px] sm:text-[8px]"
+                  } ${
                     unlocked && hasOpenFixtures
                       ? def.isPremium
                         ? "text-amber-100"
@@ -173,18 +199,30 @@ export default function PowerUpSelector({
                   {def.name}
                 </span>
                 {assigned && unlocked && hasOpenFixtures && (
-                  <span className="text-[7px] font-mono uppercase tracking-wider text-emerald-400">
-                    Armed
+                  <span
+                    className={`font-mono uppercase tracking-wider text-emerald-400 ${
+                      isCompact ? "text-[5px]" : "text-[7px]"
+                    }`}
+                  >
+                    Played
                   </span>
                 )}
                 {noOpenFixtures && (
-                  <span className="text-[6px] font-mono uppercase tracking-wide text-slate-500 leading-tight text-center px-0.5">
+                  <span
+                    className={`font-mono uppercase tracking-wide text-slate-500 leading-tight text-center px-0.5 ${
+                      isCompact ? "text-[5px]" : "text-[6px]"
+                    }`}
+                  >
                     No open fixtures
                   </span>
                 )}
                 {consumed && (
                   <span className="absolute inset-0 flex items-center justify-center rounded-xl bg-slate-950/55">
-                    <Lock className="h-4 w-4 text-slate-300" />
+                    <Lock
+                      className={
+                        isCompact ? "h-3 w-3 text-slate-300" : "h-4 w-4 text-slate-300"
+                      }
+                    />
                   </span>
                 )}
               </button>

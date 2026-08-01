@@ -25,6 +25,7 @@ export interface AccountPortalProps {
   onUpdateUser: (updatedUser: UserProfile) => void;
   onSelectLeague?: (leagueId: string) => void;
   onOpenRules?: () => void;
+  onOpenAdmin?: () => void;
   onLogout?: () => void;
   origin?: RadialOrigin | null;
   /**
@@ -41,6 +42,7 @@ export default function AccountPortal({
   onUpdateUser,
   onSelectLeague,
   onOpenRules,
+  onOpenAdmin,
   onLogout,
   variant = 'overlay',
 }: AccountPortalProps) {
@@ -99,6 +101,7 @@ export default function AccountPortal({
         getCompetitions={getCompetitions}
         onSelectLeague={onSelectLeague}
         onOpenRules={() => onOpenRules?.()}
+        onOpenAdmin={onOpenAdmin}
         onClose={embedded ? undefined : handleReturnToDashboard}
         onLogout={onLogout}
       />

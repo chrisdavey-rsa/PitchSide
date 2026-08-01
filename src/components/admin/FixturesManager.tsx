@@ -50,6 +50,13 @@ export default function FixturesManager({
   const [matchSeason, setMatchSeason] = useState(getLatestSeason);
   const [matchHour, setMatchHour] = useState('15');
   const [matchMinute, setMatchMinute] = useState('00');
+  const [formErrors, setFormErrors] = useState<{
+    homeTeam?: string;
+    awayTeam?: string;
+    matchDate?: string;
+    competition?: string;
+  }>({});
+  const [submittingFixture, setSubmittingFixture] = useState(false);
 
   // Score update inputs
   const [scoreInputs, setScoreInputs] = useState<Record<string, { home: string; away: string }>>({});
@@ -173,21 +180,38 @@ export default function FixturesManager({
 
   const handleAddFixture = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!homeTeam.trim() || !awayTeam.trim() || !matchDateInput) {
-      onError('Please populate all fields to register this sports fixture.');
+
+    const nextErrors: typeof formErrors = {};
+    if (!homeTeam.trim()) nextErrors.homeTeam = 'Home team is required.';
+    if (!awayTeam.trim()) nextErrors.awayTeam = 'Away team is required.';
+    if (!matchDateInput) nextErrors.matchDate = 'Kick-off date is required.';
+    if (!compSelect) nextErrors.competition = 'Competition is required.';
+
+    const kickoffLocal = matchDateInput
+      ? new Date(`${matchDateInput}T${matchHour}:${matchMinute}:00`)
+      : null;
+    if (matchDateInput && (!kickoffLocal || Number.isNaN(kickoffLocal.getTime()))) {
+      nextErrors.matchDate = 'Kick-off date/time is invalid.';
+    }
+
+    setFormErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      const first = Object.values(nextErrors)[0];
+      onError(first || 'Please fix the highlighted fields.');
       return;
     }
 
-    const randHex = Math.floor(1000 + Math.random() * 9000).toString();
-    const prefix = sport === SportType.FOOTBALL ? 'EPL' : 'R6N';
-    const fixtureId = `PS-${prefix}-${randHex}`;
-    const combinedDateTime = new Date(`${matchDateInput}T${matchHour}:${matchMinute}:00Z`).toISOString();
+    const competitionName =
+      getCompetitions().find((c) => c.id === compSelect)?.name ?? undefined;
+    const prefix = sport === SportType.FOOTBALL ? 'FB' : 'RU';
+    const fixtureId = `PS-${prefix}-${Date.now().toString(36).toUpperCase()}`;
+    const combinedDateTime = kickoffLocal!.toISOString();
 
     const fixtureObj: Match = {
       id: fixtureId,
       sport,
       competitionId: compSelect,
-      competitionName: getCompetitions().find((c) => c.id === compSelect)?.name,
+      competitionName,
       homeTeam: homeTeam.trim(),
       awayTeam: awayTeam.trim(),
       matchDate: combinedDateTime,
@@ -196,6 +220,20 @@ export default function FixturesManager({
       isVisible: true,
     };
 
+    const payload = {
+      id: fixtureObj.id,
+      competition_id: fixtureObj.competitionId,
+      competition_name: fixtureObj.competitionName || null,
+      sport: fixtureObj.sport,
+      home_team: fixtureObj.homeTeam,
+      away_team: fixtureObj.awayTeam,
+      kickoff_time: fixtureObj.matchDate,
+      status: fixtureObj.status,
+      is_visible: true,
+    };
+    console.log('Form Submitted', payload);
+
+    setSubmittingFixture(true);
     try {
       await dbSaveMatch(fixtureObj);
       setGroupFixtures((prev) => [fixtureObj, ...prev]);
@@ -204,11 +242,24 @@ export default function FixturesManager({
       setMatchDateInput('');
       setMatchHour('15');
       setMatchMinute('00');
-      onSuccess(`🚀 Successfully Registered! Fixture ID: ${fixtureId}`);
+      setFormErrors({});
+      onSuccess(`Fixture registered — ID: ${fixtureId}`);
       setFixtureSubTab('manage');
-    } catch (err: any) {
+      onRefresh();
+    } catch (err: unknown) {
       console.error('Fixture creation failed:', err);
-      onError(`Failed to register fixture: ${err.message || 'Database error'}`);
+      const message =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'object' &&
+              err &&
+              'message' in err &&
+              typeof (err as { message: unknown }).message === 'string'
+            ? (err as { message: string }).message
+            : 'Database error';
+      onError(`Failed to register fixture: ${message}`);
+    } finally {
+      setSubmittingFixture(false);
     }
   };
 
@@ -456,7 +507,11 @@ export default function FixturesManager({
             </p>
           </div>
 
-          <form onSubmit={handleAddFixture} className="space-y-4 text-xs font-mono">
+          <form
+            onSubmit={handleAddFixture}
+            noValidate
+            className="space-y-4 text-xs font-mono"
+          >
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[9px]">
@@ -477,8 +532,13 @@ export default function FixturesManager({
                 </label>
                 <select
                   value={compSelect}
-                  onChange={(e) => setCompSelect(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white focus:border-blue-500 focus:outline-hidden"
+                  onChange={(e) => {
+                    setCompSelect(e.target.value);
+                    setFormErrors((prev) => ({ ...prev, competition: undefined }));
+                  }}
+                  className={`w-full bg-slate-900 border rounded-lg p-2.5 text-white focus:border-blue-500 focus:outline-hidden ${
+                    formErrors.competition ? 'border-red-500/60' : 'border-slate-800'
+                  }`}
                 >
                   {getCompetitions()
                     .filter((c) => c.sport === sport)
@@ -488,6 +548,9 @@ export default function FixturesManager({
                       </option>
                     ))}
                 </select>
+                {formErrors.competition && (
+                  <p className="mt-1 text-[10px] text-red-400 font-sans">{formErrors.competition}</p>
+                )}
               </div>
               <div>
                 <label className="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[9px]">Season</label>
@@ -513,11 +576,18 @@ export default function FixturesManager({
                 <input
                   id="fixture-date-input"
                   type="date"
-                  required
                   value={matchDateInput}
-                  onChange={(e) => setMatchDateInput(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white focus:border-blue-500 focus:outline-hidden"
+                  onChange={(e) => {
+                    setMatchDateInput(e.target.value);
+                    setFormErrors((prev) => ({ ...prev, matchDate: undefined }));
+                  }}
+                  className={`w-full bg-slate-900 border rounded-lg p-2.5 text-white focus:border-blue-500 focus:outline-hidden ${
+                    formErrors.matchDate ? 'border-red-500/60' : 'border-slate-800'
+                  }`}
                 />
+                {formErrors.matchDate && (
+                  <p className="mt-1 text-[10px] text-red-400 font-sans">{formErrors.matchDate}</p>
+                )}
               </div>
               <div>
                 <label className="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[9px]">
@@ -555,12 +625,19 @@ export default function FixturesManager({
                 <input
                   id="fixture-home-input"
                   type="text"
-                  required
                   placeholder="e.g. Manchester Utd"
                   value={homeTeam}
-                  onChange={(e) => setHomeTeam(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white focus:border-blue-500 placeholder:text-slate-600 outline-hidden focus:outline-hidden"
+                  onChange={(e) => {
+                    setHomeTeam(e.target.value);
+                    setFormErrors((prev) => ({ ...prev, homeTeam: undefined }));
+                  }}
+                  className={`w-full bg-slate-900 border rounded-lg p-2.5 text-white focus:border-blue-500 placeholder:text-slate-600 outline-hidden focus:outline-hidden ${
+                    formErrors.homeTeam ? 'border-red-500/60' : 'border-slate-800'
+                  }`}
                 />
+                {formErrors.homeTeam && (
+                  <p className="mt-1 text-[10px] text-red-400 font-sans">{formErrors.homeTeam}</p>
+                )}
               </div>
               <div>
                 <label className="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[9px]">
@@ -569,12 +646,19 @@ export default function FixturesManager({
                 <input
                   id="fixture-away-input"
                   type="text"
-                  required
                   placeholder="e.g. Liverpool"
                   value={awayTeam}
-                  onChange={(e) => setAwayTeam(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white focus:border-blue-500 placeholder:text-slate-600 outline-hidden focus:outline-hidden"
+                  onChange={(e) => {
+                    setAwayTeam(e.target.value);
+                    setFormErrors((prev) => ({ ...prev, awayTeam: undefined }));
+                  }}
+                  className={`w-full bg-slate-900 border rounded-lg p-2.5 text-white focus:border-blue-500 placeholder:text-slate-600 outline-hidden focus:outline-hidden ${
+                    formErrors.awayTeam ? 'border-red-500/60' : 'border-slate-800'
+                  }`}
                 />
+                {formErrors.awayTeam && (
+                  <p className="mt-1 text-[10px] text-red-400 font-sans">{formErrors.awayTeam}</p>
+                )}
               </div>
             </div>
 
@@ -582,9 +666,18 @@ export default function FixturesManager({
               <button
                 id="submit-new-fixture-btn"
                 type="submit"
-                className="bg-blue-600 hover:bg-blue-700 text-white font-bold font-display uppercase text-xs p-3.5 rounded-xl cursor-pointer transition-transform duration-100 flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/10 w-full"
+                disabled={submittingFixture}
+                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold font-display uppercase text-xs p-3.5 rounded-xl cursor-pointer transition-transform duration-100 flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/10 w-full"
               >
-                <Plus className="w-4 h-4" /> Save & Register sports Fixture ID
+                {submittingFixture ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" /> Saving fixture…
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4" /> Save &amp; Register sports Fixture ID
+                  </>
+                )}
               </button>
             </div>
           </form>

@@ -218,9 +218,11 @@ export default function JoinLeague({
                 </h2>
                 <p className="text-[11px] text-slate-400 font-mono">
                   Created by {league.creatorName || "a PitchSide player"}
-                  {league.members.length > 0
+                  {league.members.length >= 100
                     ? ` · ${league.members.length} member${league.members.length === 1 ? "" : "s"}`
-                    : ""}
+                    : league.members.length > 0
+                      ? " · Active"
+                      : ""}
                 </p>
               </div>
 

@@ -8,11 +8,31 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 export type Sport = "football" | "rugby";
 
-/** Soft safety margin under free-tier ~100/day, applied per sport. */
-export const DAILY_BUDGET_CAP = 90;
+/**
+ * Soft safety margin under the verified Pro plan (~7500/day).
+ * Override per deploy with API_SPORTS_DAILY_BUDGET if needed.
+ */
+export const DAILY_BUDGET_CAP = (() => {
+  const raw = Deno.env.get("API_SPORTS_DAILY_BUDGET");
+  const n = raw != null ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : 7000;
+})();
 
 export const FOOTBALL_HOST = "https://v3.football.api-sports.io";
 export const RUGBY_HOST = "https://v1.rugby.api-sports.io";
+
+/** Thrown on upstream 401/403 — callers must halt the sync and not touch the DB. */
+export class UpstreamAuthError extends Error {
+  readonly status: number;
+  readonly caller: string;
+
+  constructor(status: number, caller: string) {
+    super("Upstream API-Sports authentication failure");
+    this.name = "UpstreamAuthError";
+    this.status = status;
+    this.caller = caller;
+  }
+}
 
 export type ApiSportsResult =
   | {
@@ -30,7 +50,8 @@ export type ApiSportsResult =
         | "network"
         | "http"
         | "plan_blocked"
-        | "validation_error";
+        | "validation_error"
+        | "auth_failure";
       message: string;
       callsMadeToday?: number;
       remainingBudget?: number;
@@ -56,6 +77,12 @@ export function createRunStats(): RunStats {
     planBlocked: [],
     validationErrors: [],
   };
+}
+
+/** Sole supported secret name for API-Sports credentials. */
+export function getApiSportsKey(): string | null {
+  const key = Deno.env.get("API_SPORTS_KEY");
+  return typeof key === "string" && key.length > 0 ? key : null;
 }
 
 export function classifyApiErrors(
@@ -91,7 +118,7 @@ export function resolveSeasonYear(
   const y = now.getUTCFullYear();
   const m = now.getUTCMonth() + 1;
   const preferred = m >= 7 ? y : y - 1;
-  const maxSeason = opts.maxSeason ?? 2024;
+  const maxSeason = opts.maxSeason ?? y;
   const season = Math.min(preferred, maxSeason);
   return { season, preferred, clamped: season !== preferred };
 }
@@ -108,6 +135,24 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function readRateLimitRemaining(headers: Headers): number | null {
+  const rem =
+    headers.get("x-ratelimit-requests-remaining") ??
+    headers.get("x-ratelimit-remaining");
+  if (rem == null || rem === "") return null;
+  const n = Number(rem);
+  return Number.isFinite(n) ? n : null;
+}
+
+function readRateLimitLimit(headers: Headers): number | null {
+  const lim =
+    headers.get("x-ratelimit-requests-limit") ??
+    headers.get("x-ratelimit-limit");
+  if (lim == null || lim === "") return null;
+  const n = Number(lim);
+  return Number.isFinite(n) ? n : null;
+}
+
 export class RateLimiter {
   private lastAt = 0;
   remaining: number | null = null;
@@ -116,14 +161,17 @@ export class RateLimiter {
   constructor(private minIntervalMs: number) {}
 
   noteHeaders(headers: Headers) {
-    const rem = headers.get("x-ratelimit-requests-remaining");
-    const lim = headers.get("x-ratelimit-requests-limit");
-    if (rem != null && rem !== "") this.remaining = Number(rem);
-    if (lim != null && lim !== "") this.limit = Number(lim);
+    this.remaining = readRateLimitRemaining(headers);
+    this.limit = readRateLimitLimit(headers);
     if (this.remaining != null) {
       console.log(
         `[api-sports] rate-limit remaining=${this.remaining}/${this.limit ?? "?"}`,
       );
+      if (this.remaining < 500) {
+        console.warn(
+          `[api-sports] WARNING: rate-limit remaining below 500 (${this.remaining}/${this.limit ?? "?"})`,
+        );
+      }
     }
   }
 
@@ -175,6 +223,16 @@ export class ApiSportsClient {
       last_remaining_from_header: number | null;
       last_limit_from_header: number | null;
     };
+  }
+
+  /** Strict post-fetch gate: 401/403 halt the entire sync. */
+  private assertUpstreamAuth(res: Response): void {
+    if (res.status === 401 || res.status === 403) {
+      console.error(
+        `[api-sports] CRITICAL: Upstream API-Sports authentication failure (HTTP ${res.status}, caller=${this.opts.caller})`,
+      );
+      throw new UpstreamAuthError(res.status, this.opts.caller);
+    }
   }
 
   async get(
@@ -231,8 +289,6 @@ export class ApiSportsClient {
     for (const [k, v] of Object.entries(params)) {
       url.searchParams.set(k, String(v));
     }
-    // Cache-bust: unique query param so edge / upstream never reuse a stale body.
-    url.searchParams.set("_t", String(Date.now()));
 
     const fetchHeaders = {
       "x-apisports-key": this.opts.apiKey,
@@ -263,6 +319,7 @@ export class ApiSportsClient {
 
     this.limiter.noteHeaders(res.headers);
     this.stats.callsThisRun += 1;
+    this.assertUpstreamAuth(res);
 
     await this.opts.supabase.rpc("record_api_quota_headers", {
       p_date: day,
@@ -274,14 +331,12 @@ export class ApiSportsClient {
     if (res.status === 429) {
       console.warn("[api-sports] 429 — backing off 65s then retrying once");
       await sleep(65_000);
-      // Retry does NOT re-reserve (slot already spent); fire again carefully.
-      // Fresh timestamp so the retry itself is also uncacheable.
-      url.searchParams.set("_t", String(Date.now()));
       const retry = await fetch(url.toString(), {
         headers: fetchHeaders,
         cache: "no-store",
       });
       this.limiter.noteHeaders(retry.headers);
+      this.assertUpstreamAuth(retry);
       const retryJson = await retry.json().catch(() => ({}));
       return this.wrapOk(retry, retryJson, reservation);
     }
@@ -366,6 +421,52 @@ export class ApiSportsClient {
         validationErrors: this.stats.validationErrors,
         ...extra,
       }),
+    );
+  }
+
+  /** Latest upstream rate-limit remaining observed this client instance. */
+  get lastRemaining(): number | null {
+    return this.limiter.remaining;
+  }
+}
+
+export type SystemMetricStatus = "STABLE" | "ERROR";
+
+/**
+ * Upsert a health row for the Admin API Status widget.
+ * Failures are logged but never throw — metrics must not break sync.
+ */
+export async function reportSystemMetric(
+  supabase: SupabaseClient,
+  opts: {
+    serviceName: string;
+    status: SystemMetricStatus;
+    apiQuotaRemaining?: number | null;
+    errorMessage?: string | null;
+  },
+): Promise<void> {
+  try {
+    const { error } = await supabase.from("system_metrics").upsert(
+      {
+        service_name: opts.serviceName,
+        status: opts.status,
+        last_sync_time: new Date().toISOString(),
+        api_quota_remaining: opts.apiQuotaRemaining ?? null,
+        error_message: opts.status === "ERROR"
+          ? (opts.errorMessage ?? "Unknown error")
+          : null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "service_name" },
+    );
+    if (error) {
+      console.warn(`[system_metrics] upsert failed: ${error.message}`);
+    }
+  } catch (err) {
+    console.warn(
+      `[system_metrics] upsert threw: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
     );
   }
 }

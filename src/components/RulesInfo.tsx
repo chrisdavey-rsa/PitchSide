@@ -198,7 +198,7 @@ function FootballContent({
             <li className="flex gap-2">
               <span className="text-emerald-400 font-bold shrink-0">*</span>
               <span>
-                <span className="text-white font-semibold">Premier League:</span> 38 games · 3 drop
+                <span className="text-white font-semibold">English Premier League:</span> 38 games · 3 drop
                 weeks.
               </span>
             </li>
@@ -549,13 +549,22 @@ export default function RulesInfo({ user, onClose }: RulesInfoProps) {
 
       <div className="flex items-center gap-3 px-5 sm:px-6 pt-5 pb-4 border-b border-slate-800">
         <Award className="w-8 h-8 text-yellow-400 shrink-0" />
-        <div className="min-w-0 pr-10">
+        <div className="min-w-0 pr-10 flex-1">
           <h2 className="text-2xl font-bold font-display tracking-tight text-white">
             PitchSide Player Guide
           </h2>
           <p className="text-xs text-slate-400 font-mono">
             HOW TO PLAY · POINTS · POWER-UPS
           </p>
+          <button
+            type="button"
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent("pitchside:replay-product-tour"));
+            }}
+            className="mt-1.5 text-[10px] font-mono text-slate-600 hover:text-emerald-400 transition-colors cursor-pointer underline-offset-2 hover:underline"
+          >
+            Replay product tour
+          </button>
         </div>
       </div>
 

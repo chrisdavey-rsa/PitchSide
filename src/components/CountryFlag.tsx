@@ -38,7 +38,7 @@ export default function CountryFlag({
       width={size}
       height={Math.round(size * 0.75)}
       alt={alt}
-      className={`rounded-sm object-cover select-none inline-block align-middle shrink-0 ${className}`}
+      className={`rounded-sm object-cover overflow-hidden select-none inline-block align-middle shrink-0 ${className}`}
       referrerPolicy="no-referrer"
       loading="lazy"
       onError={() => setFailed(true)}

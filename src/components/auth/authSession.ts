@@ -47,7 +47,7 @@ export async function profileFromSession(
   const { data: row } = await supabase
     .from('profiles')
     .select(
-      'id, first_name, surname, email, username, dob, phone, nationality, supported_team, preferred_sport, is_admin, is_profile_public, created_at, seen_features, selected_sports, favorite_f1_team, favorite_golfer, role, golf_mulligans_available',
+      'id, first_name, surname, email, username, dob, phone, nationality, supported_team, preferred_sport, is_admin, is_profile_public, created_at, seen_features, selected_sports, favorite_f1_team, favorite_golfer, role, golf_mulligans_available, age_confirmed_13, terms_accepted_at, privacy_accepted_at',
     )
     .eq('id', authUser.id)
     .single();
@@ -69,7 +69,7 @@ export async function profileFromSession(
       emailVerified: !!authUser.email_confirmed_at,
       emailConfirmedAt: authUser.email_confirmed_at || null,
       isAdmin: row.is_admin || false,
-      agreedToTerms: true,
+      agreedToTerms: Boolean(row.terms_accepted_at),
       // Preserve null/empty so needsOnboarding() can gate OAuth users.
       nationality: row.nationality || undefined,
       supportedTeam: row.supported_team || undefined,

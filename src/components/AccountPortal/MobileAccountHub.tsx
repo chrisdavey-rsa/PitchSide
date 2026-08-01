@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ShieldAlert,
   LogOut,
+  Lock,
 } from 'lucide-react';
 import { UserProfile, League, Competition } from '../../types';
 import { MyLeagues } from './MyLeagues';
@@ -21,6 +22,8 @@ interface MobileAccountHubProps {
   getCompetitions: () => Competition[];
   onSelectLeague?: (leagueId: string) => void;
   onOpenRules: () => void;
+  /** Admin console — only wired when `user.isAdmin`. */
+  onOpenAdmin?: () => void;
   /** Omit in embedded tab mode — no close control. */
   onClose?: () => void;
   onLogout?: () => void;
@@ -36,6 +39,7 @@ export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
   getCompetitions,
   onSelectLeague,
   onOpenRules,
+  onOpenAdmin,
   onClose,
   onLogout,
   embedded = false,
@@ -151,6 +155,39 @@ export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
             </div>
             <ChevronDown className="w-4 h-4 text-slate-600 -rotate-90 shrink-0" />
           </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              window.dispatchEvent(new CustomEvent("pitchside:replay-product-tour"));
+            }}
+            className="w-full text-left px-4 py-2 text-[10px] font-mono text-slate-600 hover:text-emerald-400 transition-colors cursor-pointer"
+          >
+            Replay product tour
+          </button>
+
+          {user.isAdmin && onOpenAdmin && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenAdmin();
+              }}
+              className="w-full text-left rounded-xl border border-purple-500/30 bg-purple-950/30 hover:bg-purple-950/50 hover:border-purple-500/50 px-4 py-3.5 flex items-center gap-3 transition-colors cursor-pointer group"
+            >
+              <div className="w-10 h-10 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center shrink-0">
+                <Lock className="w-4.5 h-4.5 text-purple-300" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-white">Admin</span>
+                <span className="block text-[10px] text-slate-500 font-mono mt-0.5">
+                  Fixtures, players &amp; scoring tools
+                </span>
+              </div>
+              <ChevronDown className="w-4 h-4 text-slate-600 -rotate-90 shrink-0" />
+            </button>
+          )}
 
           <div className="rounded-xl border border-slate-800/80 bg-slate-900/50 overflow-hidden">
             <button

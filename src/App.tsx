@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Routes, Route, useNavigate } from 'react-router-dom';
+import { Routes, Route, useNavigate, Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'motion/react';
 import { Award, Lock, Star } from 'lucide-react';
@@ -21,7 +21,10 @@ import AdminPanel from './components/AdminPanel';
 import AccountPortal from './components/AccountPortal';
 import InstallPWA from './components/InstallPWA';
 import SplashScreen from './components/SplashScreen';
+import ProductTour from './components/onboarding/ProductTour';
 import JoinLeague from './pages/JoinLeague';
+import TermsOfService from './pages/TermsOfService';
+import PrivacyPolicy from './pages/PrivacyPolicy';
 import { RadialOrigin } from './radial';
 import { useBodyScrollLock } from './hooks/useBodyScrollLock';
 import { useSupabaseRealtime } from './hooks/useSupabaseRealtime';
@@ -51,7 +54,15 @@ function AppShell() {
   const [isAppReady, setIsAppReady] = useState(false);
   const skipMinSplash = useRef(false);
   const [guestAuthView, setGuestAuthView] = useState<GuestAuthView>('login');
+  const [showProductTour, setShowProductTour] = useState(false);
   const [loginSuccessMessage, setLoginSuccessMessage] = useState<string | undefined>();
+
+  useEffect(() => {
+    const onReplay = () => setShowProductTour(true);
+    window.addEventListener("pitchside:replay-product-tour", onReplay);
+    return () =>
+      window.removeEventListener("pitchside:replay-product-tour", onReplay);
+  }, []);
   const [dashboardWelcome, setDashboardWelcome] = useState<string | null>(null);
   const emailVerifyPending = useRef(false);
 
@@ -417,6 +428,8 @@ function AppShell() {
             className="relative z-10 flex-1 flex flex-col w-full max-w-none p-4 sm:p-6 lg:p-8"
           >
             <Routes>
+              <Route path="/terms" element={<TermsOfService />} />
+              <Route path="/privacy" element={<PrivacyPolicy />} />
               <Route
                 path="/join/:leagueId"
                 element={
@@ -565,6 +578,7 @@ function AppShell() {
                         setLoginSuccessMessage(undefined);
                       }}
                       onLogoClick={replaySplash}
+                      onTakeTour={() => setShowProductTour(true)}
                     />
                   ) : (
                     <LoginView
@@ -577,6 +591,7 @@ function AppShell() {
                       }}
                       successMessage={loginSuccessMessage}
                       onLogoClick={replaySplash}
+                      onTakeTour={() => setShowProductTour(true)}
                     />
                   )}
                 </div>
@@ -587,8 +602,17 @@ function AppShell() {
               />
             </Routes>
             {/* Footer hugs the content so short pages don't leave a dead gap */}
-            <footer className="pt-6 pb-4 mt-6 text-center text-[10px] text-slate-600 font-mono tracking-widest uppercase border-t border-slate-900/40 w-full max-w-6xl mx-auto flex-shrink-0">
-              © {new Date().getFullYear()} PitchSide Predictor • All Rights Reserved
+            <footer className="pt-6 pb-4 mt-6 text-center text-[10px] text-slate-600 font-mono tracking-widest uppercase border-t border-slate-900/40 w-full max-w-6xl mx-auto flex-shrink-0 space-y-2">
+              <div className="flex items-center justify-center gap-3 normal-case tracking-normal">
+                <Link to="/terms" className="hover:text-emerald-400 transition-colors">
+                  Terms
+                </Link>
+                <span className="text-slate-800">·</span>
+                <Link to="/privacy" className="hover:text-emerald-400 transition-colors">
+                  Privacy
+                </Link>
+              </div>
+              <p>© {new Date().getFullYear()} PitchSide Predictor • All Rights Reserved</p>
             </footer>
           </motion.main>
         )}
@@ -637,6 +661,11 @@ function AppShell() {
             closeAccount();
             requestAnimationFrame(() => openRules());
           }}
+          onOpenAdmin={() => {
+            retainOverlayHistoryDuringTransition();
+            closeAccount();
+            requestAnimationFrame(() => setShowAdmin(true));
+          }}
           onSelectLeague={(leagueId) => {
             transferOverlay("account", "league-hub", () => {
               /* league-hub close is owned by Dashboard once mounted */
@@ -652,6 +681,11 @@ function AppShell() {
           }}
         />
       )}
+
+      <ProductTour
+        open={showProductTour}
+        onClose={() => setShowProductTour(false)}
+      />
     </div>
   );
 }

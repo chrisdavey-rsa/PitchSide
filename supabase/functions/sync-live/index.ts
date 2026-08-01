@@ -1,19 +1,23 @@
 // ============================================================================
 // sync-live — API-Sports live score ingestion (Phase 2)
 // ----------------------------------------------------------------------------
-// Both sports: ONE date-only call for today (GET /fixtures?date=X or
-// /games?date=X — no league/season, no live=all). Empirically equivalent to
-// live=all for status/elapsed/score; filter to in-progress fixtures client-side.
-// Skips the API call when DB has no matches in the live kickoff window.
+// Football: GET /fixtures?live=all (freshest minute/score ticks).
+// Rugby:    GET /games?date=today (no live=all equivalent).
+// Skips the upstream call entirely when DB has no matches in the live
+// kickoff window — exits gracefully without consuming API quota.
 // ============================================================================
 
 import { createClient } from "@supabase/supabase-js";
 import {
   ApiSportsClient,
   DAILY_BUDGET_CAP,
+  UpstreamAuthError,
+  getApiSportsKey,
+  reportSystemMetric,
   type Sport,
   utcDay,
 } from "../_shared/apiSportsClient.ts";
+import { FOOTBALL_API_IDS } from "../_shared/footballLeagues.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -44,8 +48,9 @@ function formatMatchMinute(fixture: any, item: any): string | null {
 }
 
 function normalizeLiveUpdate(sport: SportT, item: any) {
+  // Football (verified): fixture.status.short, goals.home/away, fixture.id
+  // Rugby: status.short + scores.home/away
   const fixture = item.fixture ?? item;
-  const teams = item.teams ?? {};
   const goals = item.goals ?? item.scores ?? {};
   const apiId = fixture.id ?? item.id;
   if (apiId == null) return null;
@@ -56,13 +61,15 @@ function normalizeLiveUpdate(sport: SportT, item: any) {
   const finished = new Set(["FT", "AET", "PEN", "AWD", "WO"]);
   if (finished.has(statusShort)) return null;
 
-  const home =
-    goals.home ?? item.scores?.home ?? fixture.score?.fulltime?.home ?? null;
-  const away =
-    goals.away ?? item.scores?.away ?? fixture.score?.fulltime?.away ?? null;
+  const home = goals.home ?? null;
+  const away = goals.away ?? null;
+  const externalFixtureId = Number.isFinite(Number(apiId))
+    ? Number(apiId)
+    : null;
 
   return {
     id: `${sport}-${apiId}`,
+    external_fixture_id: externalFixtureId,
     status: "live" as const,
     match_minute: formatMatchMinute(fixture, item),
     provisional_home_score: home != null ? Number(home) : null,
@@ -100,7 +107,7 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: "Method not allowed. Use POST." }, 405);
   }
 
-  const apiKey = Deno.env.get("API_SPORTS_KEY");
+  const apiKey = getApiSportsKey();
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
@@ -140,13 +147,26 @@ Deno.serve(async (req: Request) => {
     budgetCap: DAILY_BUDGET_CAP,
   });
 
+  const serviceName =
+    sport === "football" ? "Football Live Sync" : "Rugby Live Sync";
+
+  try {
   const need = await hasLiveWindow(supabase, sport);
   if (!need) {
+    console.log(
+      `[sync-live] No ${sport} matches in live kickoff window — skipping upstream (0 API calls)`,
+    );
     client.stats.skippedNoNeed.push(`live ${sport} (no matches in window)`);
     client.logRunSummary({ sport, skipped: "no_live_window" });
+    await reportSystemMetric(supabase, {
+      serviceName,
+      status: "STABLE",
+      apiQuotaRemaining: client.lastRemaining,
+    });
     return jsonResponse({
       sport,
       skipped: "no_live_window",
+      message: "No matches currently in the live window. 0 API calls made.",
       fetched: 0,
       updated: 0,
       budget: DAILY_BUDGET_CAP,
@@ -155,10 +175,19 @@ Deno.serve(async (req: Request) => {
 
   const today = utcDay();
   const path = sport === "football" ? "/fixtures" : "/games";
-  const label = `live ${sport} date=${today} (date-only)`;
-  console.log(`[sync-live] Fetching ${sport} fixtures for date=${today} (date-only)`);
+  const params: Record<string, string> = sport === "football"
+    ? { live: "all" }
+    : { date: today };
+  const label = sport === "football"
+    ? `live football live=all`
+    : `live rugby date=${today}`;
+  console.log(
+    `[sync-live] Active window open — fetching ${sport} (${
+      sport === "football" ? "live=all" : `date=${today}`
+    })`,
+  );
 
-  const result = await client.get(sport, path, { date: today }, label);
+  const result = await client.get(sport, path, params, label);
   if (!result.ok) {
     if (result.reason === "budget_exhausted") {
       client.logRunSummary({ sport, skipped: "budget_exhausted" });
@@ -189,7 +218,7 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  // date=today returns all fixtures that day; keep only in-progress for live updates.
+  // Keep only in-progress statuses for live score updates.
   const NOT_LIVE = new Set([
     "FT",
     "AET",
@@ -202,12 +231,24 @@ Deno.serve(async (req: Request) => {
     "CANC",
     "ABD",
   ]);
-  const items: any[] = (result.json?.response || []).filter((item: any) => {
+  const upstream: any[] = Array.isArray(result.json?.response)
+    ? result.json.response
+    : [];
+  const items = upstream.filter((item: any) => {
     const short = String(
-      item?.status?.short ?? item?.fixture?.status?.short ?? "",
+      item?.fixture?.status?.short ?? item?.status?.short ?? "",
     ).toUpperCase();
-    return short !== "" && !NOT_LIVE.has(short);
+    if (short === "" || NOT_LIVE.has(short)) return false;
+    if (sport === "football") {
+      const leagueId = Number(item?.league?.id);
+      return Number.isFinite(leagueId) && FOOTBALL_API_IDS.has(leagueId);
+    }
+    return true;
   });
+
+  console.log(
+    `[sync-live] Upstream ${sport}: ${upstream.length} raw → ${items.length} catalog in-play`,
+  );
 
   const rows = items
     .map((item) => normalizeLiveUpdate(sport, item))
@@ -215,6 +256,7 @@ Deno.serve(async (req: Request) => {
 
   let updated = 0;
   const errors: string[] = [];
+  const progress: string[] = [];
   for (const row of rows) {
     const { id, ...liveFields } = row;
     const { data, error } = await supabase
@@ -226,7 +268,22 @@ Deno.serve(async (req: Request) => {
       errors.push(`${id}: ${error.message}`);
       continue;
     }
-    if (data && data.length > 0) updated++;
+    if (data && data.length > 0) {
+      updated++;
+      progress.push(
+        `${id} ${liveFields.match_minute ?? ""} ${liveFields.provisional_home_score ?? "-"}-${liveFields.provisional_away_score ?? "-"}`,
+      );
+    }
+  }
+
+  if (progress.length > 0) {
+    console.log(
+      `[sync-live] Updated ${updated} fixture(s): ${progress.slice(0, 12).join(" | ")}`,
+    );
+  } else {
+    console.log(
+      `[sync-live] No catalog fixtures matched for update (${items.length} in-play upstream)`,
+    );
   }
 
   const usage = await client.getUsageToday(sport).catch(() => null);
@@ -239,6 +296,13 @@ Deno.serve(async (req: Request) => {
       usage != null ? Math.max(0, DAILY_BUDGET_CAP - usage.calls_made) : null,
   });
 
+  await reportSystemMetric(supabase, {
+    serviceName,
+    status: errors.length > 0 && updated === 0 ? "ERROR" : "STABLE",
+    apiQuotaRemaining: client.lastRemaining,
+    errorMessage: errors.length > 0 ? errors.slice(0, 3).join("; ") : null,
+  });
+
   return jsonResponse({
     sport,
     fetched: items.length,
@@ -249,4 +313,27 @@ Deno.serve(async (req: Request) => {
     budget: DAILY_BUDGET_CAP,
     ...(errors.length > 0 ? { warnings: errors } : {}),
   });
+  } catch (err) {
+    if (err instanceof UpstreamAuthError) {
+      await reportSystemMetric(supabase, {
+        serviceName,
+        status: "ERROR",
+        errorMessage: "Upstream API-Sports authentication failure",
+      });
+      return jsonResponse(
+        {
+          error: "Upstream API-Sports authentication failure",
+          status: err.status,
+          caller: err.caller,
+        },
+        err.status,
+      );
+    }
+    await reportSystemMetric(supabase, {
+      serviceName,
+      status: "ERROR",
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
 });

@@ -73,6 +73,7 @@ import WelcomeHeader from './Dashboard/WelcomeHeader';
 import type { LeaderboardScope } from './Dashboard/leaderboardTypes';
 import LeagueHub from './Dashboard/LeagueHub';
 import LeagueManagementPanel from './Dashboard/LeagueManagementPanel';
+import { Link } from 'react-router-dom';
 import MobileNavigation, { type MobileNavTab } from './Dashboard/MobileNavigation';
 import PredictionsPage from './Dashboard/PredictionsPage';
 import LeaderboardsPage from './Dashboard/LeaderboardsPage';
@@ -817,19 +818,44 @@ export default function Dashboard({
     matchId: string,
     powerupInstanceId?: string | null,
   ) => {
-    const pred = predictions[matchId];
-    if (!pred || pred.submitted) return;
+    // Inputs default to 0–0 in the UI even when state has no row yet — locking
+    // must still write those scores (previously `!pred` silently no-op'd).
+    const pred = predictions[matchId] ?? {
+      home: 0,
+      away: 0,
+      submitted: false,
+    };
+    if (pred.submitted) {
+      triggerToast("This prediction is already locked.");
+      return;
+    }
 
     const previousPredictions = predictions;
     const matchObj = allMatches.find((m) => m.id === matchId);
-    const sport = matchObj?.sport || SportType.FOOTBALL;
-    const competitionId = matchObj?.competitionId || "f-epl";
+    if (!matchObj) {
+      console.error("[submitPrediction] fixture missing from local cache", {
+        matchId,
+        userId: user.id,
+      });
+      triggerToast("Fixture not found — cannot lock prediction.");
+      return;
+    }
+    if (!user?.id) {
+      console.error("[submitPrediction] missing user_id");
+      triggerToast("You must be signed in to lock a prediction.");
+      return;
+    }
+
+    const sport = matchObj.sport || SportType.FOOTBALL;
+    const competitionId = matchObj.competitionId || "f-epl";
+    const homeScore = Number(pred.home) || 0;
+    const awayScore = Number(pred.away) || 0;
 
     if (typeof navigator !== "undefined" && !navigator.onLine) {
       persistOfflinePredictionDraft(
         matchId,
-        pred.home,
-        pred.away,
+        homeScore,
+        awayScore,
         sport,
         competitionId,
       );
@@ -845,8 +871,8 @@ export default function Dashboard({
         matchId,
         sport,
         competitionId,
-        pred.home,
-        pred.away,
+        homeScore,
+        awayScore,
         powerupInstanceId ?? null,
       );
 
@@ -854,6 +880,8 @@ export default function Dashboard({
         ...predictions,
         [matchId]: {
           ...pred,
+          home: homeScore,
+          away: awayScore,
           submitted: true,
           lockedAt: new Date().toISOString(),
         },
@@ -897,10 +925,19 @@ export default function Dashboard({
       triggerToast(
         powerupInstanceId
           ? "Prediction locked — Power-Up consumed."
-          : "Prediction submitted successfully!",
+          : "Prediction locked successfully!",
       );
     } catch (e) {
-      console.error("Error locking prediction:", e);
+      console.error("[submitPrediction] lock failed", {
+        matchId,
+        userId: user.id,
+        homeScore,
+        awayScore,
+        sport,
+        competitionId,
+        powerupInstanceId,
+        error: e,
+      });
       setPredictions(previousPredictions);
       localStorage.setItem(
         `predictions_${user.id}`,
@@ -914,14 +951,24 @@ export default function Dashboard({
         triggerToast(LOCK_TIME_PASSED_TOAST);
         return;
       }
+      const detail =
+        e instanceof Error
+          ? e.message
+          : typeof e === "object" && e && "message" in e
+            ? String((e as { message: unknown }).message)
+            : "Prediction not saved";
       persistOfflinePredictionDraft(
         matchId,
-        pred.home,
-        pred.away,
+        homeScore,
+        awayScore,
         sport,
         competitionId,
       );
-      triggerToast("Network error: Prediction not saved. Please try again.");
+      triggerToast(
+        /rls|not authorised|permission|auth/i.test(detail)
+          ? detail
+          : `Failed to lock prediction: ${detail}`,
+      );
     }
   };
 
@@ -1066,7 +1113,8 @@ export default function Dashboard({
       return;
     }
 
-    const newLeagueId = `LG_${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+    const { generateUniqueLeagueCode } = await import("../lib/leagueCodes");
+    const newLeagueId = await generateUniqueLeagueCode();
     const newLeague: League = {
       id: newLeagueId,
       name,
@@ -1429,7 +1477,7 @@ export default function Dashboard({
   }, [privateLeagues.length]);
 
   return (
-    <div className="relative z-10 w-full max-w-6xl xl:max-w-7xl mx-auto flex flex-col gap-6 animate-fade-in pb-[calc(5.75rem+env(safe-area-inset-bottom,0px))] md:pb-0 touch-pan-y">
+    <div className="relative z-10 w-full max-w-6xl xl:max-w-7xl mx-auto flex flex-col gap-6 animate-fade-in pb-[calc(5.75rem+env(safe-area-inset-bottom,0px))] md:pb-0 touch-pan-y overflow-visible">
       <TopNavigation
         user={user}
         onLogout={onLogout}
@@ -1502,7 +1550,7 @@ export default function Dashboard({
       ) : (
         <>
           {/* Desktop: Predictions workspace (2/3 + 1/3) or full Leaderboards */}
-          <div className="hidden md:block w-full space-y-6">
+          <div className="hidden md:block w-full space-y-6 overflow-visible">
             <WelcomeHeader
               user={user}
               userPoints={userPoints}
@@ -1537,7 +1585,7 @@ export default function Dashboard({
               <div
                 ref={predictionsAnchorDesktopRef}
                 id="predictions-workspace-anchor"
-                className="scroll-mt-4 w-full"
+                className="scroll-mt-4 w-full overflow-visible"
               >
                 <PredictionsPage
                   user={user}
@@ -1571,11 +1619,11 @@ export default function Dashboard({
                 />
               </div>
             ) : (
-              <div className="w-full grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+              <div className="w-full grid grid-cols-1 lg:grid-cols-3 gap-6 items-start overflow-visible">
                 <div
                   ref={predictionsAnchorDesktopRef}
                   id="predictions-workspace-anchor"
-                  className="scroll-mt-4 w-full lg:col-span-2"
+                  className="scroll-mt-4 w-full lg:col-span-2 overflow-visible"
                 >
                   <PredictionsPage
                     user={user}
@@ -1646,7 +1694,7 @@ export default function Dashboard({
               <div
                 ref={predictionsAnchorMobileRef}
                 id="predictions-workspace-anchor-mobile"
-                className="scroll-mt-4"
+                className="scroll-mt-4 overflow-visible"
               >
               <PredictionsPage
                 user={user}
@@ -1773,6 +1821,7 @@ export default function Dashboard({
                 registeredUsers={registeredUsers}
                 onLogout={onLogout}
                 onOpenRules={() => handleMobileNavTab("rules")}
+                onOpenAdmin={onOpenAdmin}
                 onSelectLeague={(leagueId) => {
                   setMobileNavTab("leagues");
                   openLeagueHub(leagueId);
@@ -1838,6 +1887,16 @@ export default function Dashboard({
           </div>
         );
       })()}
+
+      <div className="flex items-center justify-center gap-3 text-[10px] font-mono text-slate-600 pb-1 md:pb-4">
+        <Link to="/terms" className="hover:text-emerald-400 transition-colors">
+          Terms
+        </Link>
+        <span className="text-slate-800">·</span>
+        <Link to="/privacy" className="hover:text-emerald-400 transition-colors">
+          Privacy
+        </Link>
+      </div>
 
       <MobileNavigation
         user={user}

@@ -588,7 +588,10 @@ export default function LeagueManagementPanel({
                           </h4>
                         </div>
                         <div className="col-span-3 md:col-span-2 text-center text-[12px] text-slate-300 font-mono tabular-nums">
-                          {league.members?.length ?? 0}
+                          {(() => {
+                            const n = league.members?.length ?? 0;
+                            return n >= 100 ? n : "Active";
+                          })()}
                         </div>
                         <div className="hidden md:block col-span-3 min-w-0 text-[10px] text-slate-400 font-mono truncate">
                           {comp?.name || "All sports"}
