@@ -18,7 +18,7 @@ import { readAuthHash, clearAuthHash, profileFromSession } from './components/au
 import Dashboard from './components/Dashboard';
 import OnboardingFlow, { needsOnboarding } from './components/OnboardingFlow';
 import CompleteProfile, {
-  needsUsername,
+  needsCompleteProfile,
 } from './components/auth/CompleteProfile';
 import RulesInfo from './components/RulesInfo';
 import AdminPanel from './components/AdminPanel';
@@ -695,7 +695,7 @@ function AppShell() {
                   </div>
                 </div>
               )
-            ) : needsUsername(currentUser) && currentUser ? (
+            ) : needsCompleteProfile(currentUser) && currentUser ? (
               <CompleteProfile
                 user={currentUser}
                 onComplete={(updated) => {

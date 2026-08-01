@@ -157,6 +157,7 @@ export default function PredictionsPage({
     <>
       {/* Viewport-fixed nation filter — outside scroll / overflow containers. */}
       <aside
+        data-tour="tour-filters"
         className="fixed left-4 xl:left-8 top-32 flex flex-col gap-2 z-50 hidden md:flex"
         aria-label="Nation filter"
       >
@@ -178,12 +179,14 @@ export default function PredictionsPage({
           </p>
         </div>
 
-        <PredictionsFeedFilter
-          sportFilter={sportFilter}
-          onSportFilterChange={setSportFilter}
-          onlyUnmade={onlyUnmade}
-          onOnlyUnmadeChange={setOnlyUnmade}
-        />
+        <div data-tour="tour-filters-sports">
+          <PredictionsFeedFilter
+            sportFilter={sportFilter}
+            onSportFilterChange={setSportFilter}
+            onlyUnmade={onlyUnmade}
+            onOnlyUnmadeChange={setOnlyUnmade}
+          />
+        </div>
 
         {!isUserInAnyLeague && (
           <div className="rounded-2xl border border-emerald-500/20 bg-emerald-950/20 px-4 py-3.5 space-y-2">

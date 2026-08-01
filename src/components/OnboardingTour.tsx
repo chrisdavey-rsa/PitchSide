@@ -12,6 +12,8 @@ export interface TourStep {
   /**
    * Value of the element's `data-tour` attribute to spotlight
    * (e.g. `"nav-predictions"` → `[data-tour="nav-predictions"]`).
+   * Pipe-separate alternatives for viewport fallbacks
+   * (e.g. `"tour-filters|tour-filters-mobile"` — first usable match wins).
    * If missing / zero-sized, the tooltip centres on screen with a full dim overlay.
    */
   target: string;
@@ -39,12 +41,22 @@ const SPOTLIGHT_PADDING = 8;
 
 function findTourTarget(target: string): HTMLElement | null {
   if (!target) return null;
-  try {
-    const el = document.querySelector(`[data-tour="${target}"]`);
-    return el instanceof HTMLElement ? el : null;
-  } catch {
-    return null;
+  const ids = target
+    .split("|")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  let firstFound: HTMLElement | null = null;
+  for (const id of ids) {
+    try {
+      const el = document.querySelector(`[data-tour="${id}"]`);
+      if (!(el instanceof HTMLElement)) continue;
+      if (!firstFound) firstFound = el;
+      if (isUsableTarget(el)) return el;
+    } catch {
+      /* ignore invalid selectors */
+    }
   }
+  return firstFound;
 }
 
 function isUsableTarget(el: HTMLElement): boolean {

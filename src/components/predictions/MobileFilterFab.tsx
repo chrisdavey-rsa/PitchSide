@@ -43,7 +43,10 @@ export default function MobileFilterFab({
         />
       ) : null}
 
-      <div className="fixed bottom-24 right-4 z-50 flex flex-col items-center gap-2">
+      <div
+        data-tour="tour-filters-mobile"
+        className="fixed bottom-24 right-4 z-50 flex flex-col items-center gap-2"
+      >
         {isOpen ? (
           <div className="flex flex-col items-center gap-2 rounded-2xl border border-slate-700/80 bg-slate-950/95 p-2 shadow-xl shadow-black/50 backdrop-blur-md">
             <CompetitionFilterRail

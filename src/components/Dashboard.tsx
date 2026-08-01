@@ -349,10 +349,18 @@ export default function Dashboard({
             "Scoring, margins, and power-ups — open any time you need a refresher.",
           placement: "above",
         },
+        {
+          // Mixer FAB first; sport tabs as fallback if FAB is not mounted.
+          target: "tour-filters-mobile|tour-filters-sports",
+          title: "Filter your feed",
+          description:
+            "Filter your feed. Use the top tabs to switch between sports, and use the mixer button to drill down into specific nations and competitions.",
+          placement: "above",
+        },
       ];
     }
 
-    // Desktop: strict data-tour targets on TopNavigation only (no orphaned FAB / globe steps).
+    // Desktop: top nav + predictions filter rail (nation flags / sport tabs).
     return [
       {
         target: "nav-predictions",
@@ -373,6 +381,14 @@ export default function Dashboard({
         title: "Account & Rules",
         description:
           "Account and Rules sit in the top bar next to Leagues — open them any time to manage your profile or review scoring.",
+        placement: "below",
+      },
+      {
+        // Nation rail first; sport tabs if the rail is hidden / off-screen.
+        target: "tour-filters|tour-filters-sports",
+        title: "Filter your feed",
+        description:
+          "Filter your feed. Use the top tabs to switch between sports, and use the flag icons (or the mixer button on mobile) to drill down into specific nations and competitions.",
         placement: "below",
       },
     ];
