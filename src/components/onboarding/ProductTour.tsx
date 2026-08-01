@@ -151,8 +151,8 @@ const SLIDES = [
           sport="rugby"
           home="South Africa"
           away="England"
-          homeScore={1}
-          awayScore={0}
+          homeScore={45}
+          awayScore={13}
         />
         <DummyFixture
           sport="football"

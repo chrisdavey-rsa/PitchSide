@@ -18,6 +18,10 @@ import {
   utcDay,
 } from "../_shared/apiSportsClient.ts";
 import { FOOTBALL_API_IDS } from "../_shared/footballLeagues.ts";
+import {
+  formatMatchMinuteFromProvider,
+  providerStatusFromItem,
+} from "../_shared/matchClock.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -36,15 +40,6 @@ function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
   });
-}
-
-function formatMatchMinute(fixture: any, item: any): string | null {
-  const elapsed = fixture.status?.elapsed ?? item.status?.elapsed;
-  if (elapsed != null && elapsed !== "") {
-    return `${elapsed}'`;
-  }
-  const short = fixture.status?.short ?? item.status?.short;
-  return short ? String(short) : null;
 }
 
 function normalizeLiveUpdate(sport: SportT, item: any) {
@@ -71,7 +66,7 @@ function normalizeLiveUpdate(sport: SportT, item: any) {
     id: `${sport}-${apiId}`,
     external_fixture_id: externalFixtureId,
     status: "live" as const,
-    match_minute: formatMatchMinute(fixture, item),
+    match_minute: formatMatchMinuteFromProvider(providerStatusFromItem(item)),
     provisional_home_score: home != null ? Number(home) : null,
     provisional_away_score: away != null ? Number(away) : null,
     updated_at: new Date().toISOString(),

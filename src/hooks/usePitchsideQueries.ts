@@ -31,17 +31,48 @@ function useMatchesRealtimeSync() {
   useEffect(() => acquireMatchesRealtime(queryClient), [queryClient]);
 }
 
+/**
+ * Force a matches refetch when the tab/app returns to the foreground.
+ * Complements React Query's refetchOnWindowFocus (which skips fresh queries).
+ */
+function useForegroundMatchesRefetch() {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const refetchLiveData = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        return;
+      }
+      void queryClient.refetchQueries({ queryKey: queryKeys.matches });
+      void queryClient.refetchQueries({ queryKey: ['liveProvisional'] });
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') refetchLiveData();
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', refetchLiveData);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', refetchLiveData);
+    };
+  }, [queryClient]);
+}
+
 export function useMatchesQuery() {
   useMatchesRealtimeSync();
+  useForegroundMatchesRefetch();
 
   return useQuery({
     queryKey: queryKeys.matches,
     queryFn: () => dbFetchMatches({ horizonDays: MATCH_HORIZON_DAYS }),
-    // Live fields arrive via Realtime patches — avoid focus/reconnect refetches
-    // that would look like loading flashes during a match.
-    staleTime: 5 * 60_000,
-    refetchOnMount: false,
-    refetchOnReconnect: false,
+    // Short stale window so focus/visibility refetches actually hit the network
+    // while Realtime still patches live ticks in between.
+    staleTime: 15_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    refetchOnMount: true,
   });
 }
 

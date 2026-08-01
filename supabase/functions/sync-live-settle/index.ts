@@ -37,6 +37,10 @@ import {
   FOOTBALL_LEAGUES,
   FOOTBALL_SLUG_BY_API,
 } from "../_shared/footballLeagues.ts";
+import {
+  formatMatchMinuteFromProvider,
+  providerStatusFromItem,
+} from "../_shared/matchClock.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -140,11 +144,7 @@ function apiFixtureId(item: any): number | string | null {
 }
 
 function formatMatchMinute(item: any): string | null {
-  const fixture = item.fixture ?? item;
-  const elapsed = fixture.status?.elapsed ?? item.status?.elapsed;
-  if (elapsed != null && elapsed !== "") return `${elapsed}'`;
-  const short = statusShort(item);
-  return short || null;
+  return formatMatchMinuteFromProvider(providerStatusFromItem(item));
 }
 
 function isFinished(sport: Sport, item: any): boolean {

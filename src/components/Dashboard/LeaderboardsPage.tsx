@@ -1,13 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Trophy, ArrowUpDown, X } from "lucide-react";
 import { Match, SportType, UserProfile } from "../../types";
-import { calculatePoints } from "../../utils";
 import { getCountryFlag } from "../AccountPortal/data";
 import type { LeaderboardItem, LeaderboardScope } from "./leaderboardTypes";
-import type { LeaderboardRecord } from "../../supabase";
+import {
+  dbFetchGlobalLeaderboardHorizon,
+  type LeaderboardRecord,
+} from "../../supabase";
 import {
   StandingsHorizon,
-  isMatchInHorizon,
   seasonHorizonLabel,
 } from "../../lib/leagueStandings";
 import { mapLeaderboardForSport } from "../../hooks/usePitchsideQueries";
@@ -22,7 +24,10 @@ import {
   type SportKey,
 } from "../../sports/emerging";
 
-type SortKey = "name" | "points";
+/** Min settled picks required to appear when sorting by prediction accuracy. */
+export const ACCURACY_MIN_PREDICTIONS = 5;
+
+type SortKey = "name" | "points" | "accuracy";
 type SortDir = "asc" | "desc";
 
 interface LeaderboardsPageProps {
@@ -53,59 +58,14 @@ function coreSportFromKey(sport: SportKey): SportType | null {
   return null;
 }
 
-function recomputedHorizonRows(
-  records: LeaderboardRecord[],
-  matches: Match[],
-  sport: SportType,
-  horizon: StandingsHorizon,
-  currentUserId: string,
-): LeaderboardItem[] {
-  const matchById = new Map(matches.map((m) => [m.id, m]));
+function pointsPerPrediction(row: LeaderboardItem): number {
+  if (row.displayPredictions <= 0) return 0;
+  return row.displayPoints / row.displayPredictions;
+}
 
-  const rows = records
-    .map((rec) => {
-      let points = 0;
-      let made = 0;
-      let correct = 0;
-
-      Object.entries(rec.predictions || {}).forEach(([matchId, pred]) => {
-        if (!pred?.submitted) return;
-        const match = matchById.get(matchId);
-        if (!match || match.sport !== sport) return;
-        if (!isMatchInHorizon(match, horizon)) return;
-        if (match.homeScore === undefined || match.awayScore === undefined) return;
-
-        const pts = calculatePoints(
-          match.sport,
-          pred.home,
-          pred.away,
-          match.homeScore,
-          match.awayScore,
-        );
-        made += 1;
-        points += pts;
-        if (pts > 0) correct += 1;
-      });
-
-      if (made === 0) return null;
-
-      return {
-        ...rec,
-        displayPoints: points,
-        displayPredictions: made,
-        displayAccuracy: `${Math.round((correct / made) * 100)}%`,
-        displayGhostPoints: points,
-        displayDropsUsed: 0,
-        displayDropsAllowed: 0,
-        displayProvisionalPoints: 0,
-        rank: 0,
-        isCurrentUser: rec.isCurrentUser || rec.playerId === currentUserId,
-      } as LeaderboardItem;
-    })
-    .filter((r): r is LeaderboardItem => r !== null);
-
-  rows.sort((a, b) => b.displayPoints - a.displayPoints);
-  return rows.map((r, i) => ({ ...r, rank: i + 1 }));
+function parseAccuracyPercent(accuracy: string): number {
+  const n = Number.parseFloat(String(accuracy).replace("%", ""));
+  return Number.isFinite(n) ? n : 0;
 }
 
 /**
@@ -114,7 +74,7 @@ function recomputedHorizonRows(
 export default function LeaderboardsPage({
   user,
   leaderboardList,
-  allMatches,
+  allMatches: _allMatches,
   provisionalByUser = {},
   scope = "global",
   setScope,
@@ -150,6 +110,18 @@ export default function LeaderboardsPage({
   const coreSport = coreSportFromKey(boardSport);
   const emergingSelected = isEmergingSport(boardSport);
 
+  // Wider completed window for week/month point sums (season uses RPC totals).
+  const { data: horizonLeaderboard = [] } = useQuery({
+    queryKey: ["leaderboard", "horizon", horizon, user.id],
+    queryFn: () =>
+      dbFetchGlobalLeaderboardHorizon(
+        horizon === "month" ? "month" : "week",
+        user.id,
+      ),
+    enabled: !emergingSelected && (horizon === "week" || horizon === "month"),
+    staleTime: 60_000,
+  });
+
   const baseRows = useMemo(() => {
     if (emergingSelected || !coreSport) return [];
 
@@ -173,12 +145,12 @@ export default function LeaderboardsPage({
       );
     }
 
-    return recomputedHorizonRows(
-      leaderboardList,
-      allMatches,
+    // This Week / This Month — server-side sum within date bounds.
+    return mapLeaderboardForSport(
+      horizonLeaderboard,
       coreSport,
-      horizon,
       user.id,
+      {},
     );
   }, [
     emergingSelected,
@@ -190,7 +162,7 @@ export default function LeaderboardsPage({
     leaderboardList,
     user.id,
     provisionalByUser,
-    allMatches,
+    horizonLeaderboard,
   ]);
 
   const seasonLeagueAware = useMemo(() => {
@@ -226,16 +198,37 @@ export default function LeaderboardsPage({
   const displayRows = useMemo(() => {
     const source =
       horizon === "season" && scope === "league" ? seasonLeagueAware : baseRows;
-    const sorted = [...source];
-    sorted.sort((a, b) => {
+
+    let filtered = [...source];
+    if (sortKey === "accuracy") {
+      filtered = filtered.filter(
+        (r) => r.displayPredictions >= ACCURACY_MIN_PREDICTIONS,
+      );
+    }
+
+    filtered.sort((a, b) => {
       if (sortKey === "name") {
         const cmp = a.nickname.localeCompare(b.nickname);
         return sortDir === "asc" ? cmp : -cmp;
       }
+      if (sortKey === "accuracy") {
+        const aRate = pointsPerPrediction(a);
+        const bRate = pointsPerPrediction(b);
+        if (aRate !== bRate) {
+          return sortDir === "asc" ? aRate - bRate : bRate - aRate;
+        }
+        const aPct = parseAccuracyPercent(a.displayAccuracy);
+        const bPct = parseAccuracyPercent(b.displayAccuracy);
+        if (aPct !== bPct) {
+          return sortDir === "asc" ? aPct - bPct : bPct - aPct;
+        }
+        return b.displayPredictions - a.displayPredictions;
+      }
       const cmp = a.displayPoints - b.displayPoints;
       return sortDir === "asc" ? cmp : -cmp;
     });
-    return sorted;
+
+    return filtered.map((row, i) => ({ ...row, rank: i + 1 }));
   }, [baseRows, seasonLeagueAware, horizon, scope, sortKey, sortDir]);
 
   const sportTabs: { id: SportKey; label: string }[] = [
@@ -259,9 +252,9 @@ export default function LeaderboardsPage({
   };
 
   const horizonOptions: { id: StandingsHorizon; label: string }[] = [
-    { id: "season", label: seasonHorizonLabel() },
-    { id: "month", label: "This Month" },
     { id: "week", label: "This Week" },
+    { id: "month", label: "This Month" },
+    { id: "season", label: seasonHorizonLabel() },
   ];
 
   const openPlayerForm = (player: LeaderboardItem) => {
@@ -359,6 +352,48 @@ export default function LeaderboardsPage({
         })}
       </div>
 
+      <div
+        role="tablist"
+        aria-label="Sort metric"
+        data-no-swipe="true"
+        className="flex gap-1.5 overflow-x-auto pb-0.5"
+      >
+        {(
+          [
+            { id: "points" as const, label: "Total Points" },
+            { id: "accuracy" as const, label: "Prediction Accuracy" },
+          ] as const
+        ).map((opt) => {
+          const active = sortKey === opt.id;
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => {
+                setSortKey(opt.id);
+                setSortDir("desc");
+              }}
+              className={`shrink-0 px-3.5 py-2 rounded-full text-[10px] font-mono font-bold uppercase tracking-wide border transition-colors cursor-pointer ${
+                active
+                  ? "bg-sky-500/15 border-sky-500/40 text-sky-300"
+                  : "bg-slate-950/50 border-slate-800 text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {sortKey === "accuracy" ? (
+        <p className="text-[10px] font-mono text-slate-500 px-0.5">
+          Accuracy ranks require at least {ACCURACY_MIN_PREDICTIONS} settled
+          predictions · sorted by points per pick
+        </p>
+      ) : null}
+
       {hasPrivateLeague && setScope && (
         <div className="flex gap-2">
           <button
@@ -402,12 +437,14 @@ export default function LeaderboardsPage({
           </button>
           <button
             type="button"
-            onClick={() => toggleSort("points")}
+            onClick={() =>
+              toggleSort(sortKey === "accuracy" ? "accuracy" : "points")
+            }
             className="inline-flex items-center justify-end gap-1 hover:text-slate-300 cursor-pointer"
           >
-            Points
+            {sortKey === "accuracy" ? "Avg" : "Points"}
             <ArrowUpDown className="w-3 h-3 opacity-60" />
-            {sortKey === "points" && (
+            {(sortKey === "points" || sortKey === "accuracy") && (
               <span
                 className="text-emerald-400 text-[10px] font-mono"
                 title={
@@ -428,13 +465,16 @@ export default function LeaderboardsPage({
           </p>
         ) : displayRows.length === 0 ? (
           <p className="py-12 text-center text-xs text-slate-500 font-mono px-4">
-            No settled results in this window yet.
+            {sortKey === "accuracy"
+              ? `No players with ${ACCURACY_MIN_PREDICTIONS}+ settled picks in this window yet.`
+              : "No settled results in this window yet."}
           </p>
         ) : (
           <ul className="divide-y divide-slate-800/60">
-            {displayRows.map((item, idx) => {
+            {displayRows.map((item) => {
               const isYou =
                 item.isCurrentUser || item.playerId === user.id;
+              const avg = pointsPerPrediction(item);
               return (
                 <li key={item.playerId}>
                   <button
@@ -447,7 +487,7 @@ export default function LeaderboardsPage({
                     }`}
                   >
                     <span className="font-mono text-[11px] text-slate-500">
-                      #{sortKey === "points" && sortDir === "desc" ? item.rank : idx + 1}
+                      #{item.rank}
                     </span>
                     <span className="flex items-center gap-2 min-w-0">
                       <span
@@ -472,7 +512,16 @@ export default function LeaderboardsPage({
                         isYou ? "text-emerald-400" : "text-white"
                       }`}
                     >
-                      {item.displayPoints}
+                      {sortKey === "accuracy" ? (
+                        <span className="inline-flex flex-col items-end leading-tight">
+                          <span>{avg.toFixed(2)}</span>
+                          <span className="text-[9px] font-mono font-semibold text-slate-500">
+                            {item.displayAccuracy}
+                          </span>
+                        </span>
+                      ) : (
+                        item.displayPoints
+                      )}
                     </span>
                   </button>
                 </li>
@@ -482,7 +531,6 @@ export default function LeaderboardsPage({
         )}
       </div>
 
-      {/* Stub: recent weekly form modal */}
       {formPlayer && (
         <div className="fixed inset-0 z-[120] flex items-end sm:items-center justify-center p-0 sm:p-6 bg-slate-950/80 backdrop-blur-sm">
           <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl p-5 space-y-4 shadow-2xl">
@@ -502,6 +550,9 @@ export default function LeaderboardsPage({
                 <p className="text-xs text-slate-400 font-mono mt-1">
                   {formPlayer.displayPoints} pts · {formPlayer.displayPredictions}{" "}
                   picks · {formPlayer.displayAccuracy} accuracy
+                  {formPlayer.displayPredictions > 0
+                    ? ` · ${pointsPerPrediction(formPlayer).toFixed(2)} pts/pick`
+                    : ""}
                 </p>
               </div>
               <button

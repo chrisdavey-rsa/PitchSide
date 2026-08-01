@@ -32,9 +32,9 @@ export type LeagueStandingRow = {
   perfectHits: number;
 };
 
-/** Labels for the Season pill (e.g. "2026 Season"). */
+/** Labels for the Season pill (e.g. "YTD / 2026 Season"). */
 export function seasonHorizonLabel(now: Date = new Date()): string {
-  return `${getLatestSeason(now)} Season`;
+  return `YTD / ${getLatestSeason(now)} Season`;
 }
 
 export function isMatchInHorizon(

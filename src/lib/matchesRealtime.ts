@@ -87,19 +87,35 @@ export function patchMatchesQueryCache(
   queryClient: QueryClient,
   row: Record<string, unknown> | null | undefined,
 ) {
-  if (!row?.id || typeof row.id !== 'string') return;
+  if (!row) return;
+
+  const rowId = typeof row.id === 'string' ? row.id : null;
+  const externalId =
+    row.external_fixture_id != null ? Number(row.external_fixture_id) : NaN;
+  if (!rowId && !Number.isFinite(externalId)) return;
 
   const patch = toLivePatch(row);
   let becameCompleted = false;
+  let matchedId = rowId;
 
   queryClient.setQueryData<Match[]>(queryKeys.matches, (prev) => {
     if (!prev) return prev;
 
-    const idx = prev.findIndex((m) => m.id === row.id);
+    let idx = rowId ? prev.findIndex((m) => m.id === rowId) : -1;
+    // Fallback: provider fixture id (sport-{external_fixture_id}).
+    if (idx === -1 && Number.isFinite(externalId)) {
+      idx = prev.findIndex(
+        (m) =>
+          m.id.endsWith(`-${externalId}`) ||
+          m.id === String(externalId),
+      );
+      if (idx !== -1) matchedId = prev[idx].id;
+    }
+
     if (idx === -1) {
       // Avoid refetch storms for out-of-horizon rows. Only admit live fixtures
       // that just entered play so the predictor can show them without reload.
-      if (patch.status !== 'live') return prev;
+      if (patch.status !== 'live' || !rowId) return prev;
       const mapped = mapMatchRow(row);
       if (mapped.isVisible === false) return prev;
       return [...prev, mapped].sort((a, b) =>
@@ -129,8 +145,8 @@ export function patchMatchesQueryCache(
     return next;
   });
 
-  if (becameCompleted) {
-    applyCompletedCleanup(queryClient, row.id);
+  if (becameCompleted && matchedId) {
+    applyCompletedCleanup(queryClient, matchedId);
   }
 }
 

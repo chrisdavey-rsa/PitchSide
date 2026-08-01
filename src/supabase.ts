@@ -13,6 +13,7 @@ import {
   type SeenFeatures,
 } from "./lib/seenFeatures";
 import { normalizeMatchStatus } from "./lib/matchStatus";
+import { formatLiveMatchClock } from "./lib/matchClock";
 import type { SupportedTeamOption, TeamSport } from "./data/supportedTeams";
 
 // Retrieve environment variables and clean them of common copy-paste errors
@@ -573,8 +574,7 @@ function isWithinMatchHorizon(
   if (match.status === "live") return true;
   const kickoff = new Date(match.matchDate).getTime();
   if (Number.isNaN(kickoff)) return false;
-  // Recent completed + upcoming inside the forward horizon.
-  const start = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+  const start = now.getTime() - horizonDays * 24 * 60 * 60 * 1000;
   const end = now.getTime() + horizonDays * 24 * 60 * 60 * 1000;
   return kickoff >= start && kickoff <= end;
 }
@@ -617,7 +617,17 @@ export function mapMatchRow(d: Record<string, unknown>): Match {
       d.provisional_home_score != null ? Number(d.provisional_home_score) : undefined,
     provisionalAwayScore:
       d.provisional_away_score != null ? Number(d.provisional_away_score) : undefined,
-    matchMinute: (d.match_minute as string) || undefined,
+    matchMinute:
+      formatLiveMatchClock({
+        status:
+          typeof d.status === "string" ? d.status : String(d.status ?? ""),
+        matchMinute:
+          typeof d.match_minute === "string"
+            ? d.match_minute
+            : d.match_minute != null
+              ? String(d.match_minute)
+              : null,
+      }) ?? undefined,
     isVisible: d.is_visible !== false,
   };
 }
@@ -669,9 +679,11 @@ export async function dbFetchMatches(
   }
 
   const now = new Date();
-  // Include recently completed fixtures (7d) so the unified predictions feed
-  // can show upcoming + recent in one scrollable list.
-  const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  // Symmetric window: look back `horizonDays` so week/month standings and
+  // Game History (3d UI slice) have enough settled fixtures available.
+  const start = new Date(
+    now.getTime() - horizonDays * 24 * 60 * 60 * 1000,
+  ).toISOString();
   const end = new Date(
     now.getTime() + horizonDays * 24 * 60 * 60 * 1000,
   ).toISOString();
@@ -1565,6 +1577,30 @@ export async function dbFetchGlobalLeaderboard(
   }
   if (!Array.isArray(data)) {
     throw new Error("Leaderboard RPC returned an invalid payload.");
+  }
+
+  return data.map((row) =>
+    mapRpcLeaderboardRow(row as Record<string, unknown>, currentUserId),
+  );
+}
+
+/** Week / month scoped global leaderboard (no gameweek drops). */
+export async function dbFetchGlobalLeaderboardHorizon(
+  horizon: "week" | "month" | "season",
+  currentUserId?: string,
+): Promise<LeaderboardRecord[]> {
+  if (!supabase) throw new Error("Database not connected.");
+
+  const { data, error } = await supabase.rpc("get_global_leaderboard_horizon", {
+    p_horizon: horizon,
+    p_current_user_id: currentUserId ?? null,
+  });
+
+  if (error) {
+    throw new Error(`Horizon leaderboard RPC failed: ${error.message}`);
+  }
+  if (!Array.isArray(data)) {
+    throw new Error("Horizon leaderboard RPC returned an invalid payload.");
   }
 
   return data.map((row) =>

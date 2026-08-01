@@ -8,6 +8,7 @@ import type { SportKey } from "../../sports/emerging/types";
 import { getCompetitionTitle } from "../../constants/competitions";
 import { displayTeamName } from "../../lib/teamNames";
 import { isLiveMatch } from "../../lib/matchStatus";
+import { formatLiveMatchClock } from "../../lib/matchClock";
 import type { Match } from "../../types";
 
 /** F1 checkered strip (user-specified repeating gradients). */
@@ -119,7 +120,7 @@ export function CardCompetitionMeta({
 export const CARD_CORNER_META_CLASS =
   "font-mono text-[10px] font-bold uppercase tracking-wider leading-none";
 
-/** Centre-column status for upcoming fixtures. */
+/** Centre-column status for upcoming / live / same-day finished fixtures. */
 export function MatchCentreStatusLabel({
   match,
 }: {
@@ -138,8 +139,8 @@ export function MatchCentreStatusLabel({
   }
   if (match.status === "completed") {
     return (
-      <span className="text-green-500 font-mono text-[10px] uppercase tracking-widest font-bold">
-        Finished
+      <span className="text-emerald-400 font-mono text-[10px] uppercase tracking-widest font-bold">
+        Full time
       </span>
     );
   }
@@ -150,26 +151,45 @@ export function MatchCentreStatusLabel({
   );
 }
 
-/** Live score block for the centre column between team names. */
+/** Live score + clock for the centre column between team names. */
 export function MatchLiveScoreCentre({
   homeScore,
   awayScore,
   matchMinute,
+  status,
 }: {
   homeScore?: number | null;
   awayScore?: number | null;
   matchMinute?: string | null;
+  /** Domain or provider status (HT / FT / live / …). */
+  status?: string | null;
 }) {
+  const clock = formatLiveMatchClock({ status, matchMinute });
+  const isTerminalClock =
+    clock === "FT" || clock === "AET" || clock === "PEN" || clock === "HT";
+
   return (
-    <div className="flex flex-col items-center gap-0.5">
+    <div className="flex flex-col items-center gap-1">
       <span className="font-display font-black text-xl sm:text-2xl tracking-widest text-white tabular-nums leading-none">
         {homeScore != null ? homeScore : "–"}
         <span className="mx-1.5 text-slate-500">–</span>
         {awayScore != null ? awayScore : "–"}
       </span>
-      {matchMinute ? (
-        <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-rose-300/90">
-          {matchMinute}
+      {clock ? (
+        <span
+          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] sm:text-xs font-mono font-bold tracking-wide tabular-nums ${
+            isTerminalClock
+              ? "border-emerald-500/35 bg-emerald-500/10 text-emerald-300"
+              : "border-rose-500/35 bg-rose-500/10 text-rose-300"
+          }`}
+        >
+          {!isTerminalClock ? (
+            <span className="relative flex h-1.5 w-1.5" aria-hidden>
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-50" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-rose-500" />
+            </span>
+          ) : null}
+          {clock}
         </span>
       ) : null}
     </div>

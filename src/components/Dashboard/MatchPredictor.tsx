@@ -42,7 +42,9 @@ import {
 import {
   belongsInActiveFeed,
   belongsInGameHistory,
+  isFinishedMatch,
   isLiveMatch,
+  isSameLocalDay,
 } from "../../lib/matchStatus";
 import { usePersistedCompetitionFilter } from "../predictions/CompetitionFilterRail";
 import { settlePredictionWithPowerUp } from "../../utils";
@@ -311,8 +313,8 @@ export default function MatchPredictor({
     const upcoming: Match[] = [];
 
     for (const m of sortedActiveMatches) {
-      // History is finished statuses only — live / in-play stay in the active feed
-      // even when kickoff_time is in the past.
+      // Same-day fixtures stay in the active feed (including FT).
+      // History is previous-day settled matches within the last 72 hours.
       if (belongsInGameHistory(m, now)) {
         history.push(m);
         continue;
@@ -797,8 +799,13 @@ export default function MatchPredictor({
                           (savedPred.home || 0) === (savedPred.away || 0);
                         const showActiveGreen = hasPick || isSubmitted;
                         const isLive = isLiveMatch(match);
+                        const isFinished = isFinishedMatch(match);
+                        const finishedToday =
+                          isFinished && isSameLocalDay(match.matchDate);
                         const isMatchStarted =
-                          isLive || new Date() > new Date(match.matchDate);
+                          isLive ||
+                          isFinished ||
+                          new Date() > new Date(match.matchDate);
                         // State 3: locked once submitted OR once the fixture is in play / kicked off.
                         const isLocked = isSubmitted || isMatchStarted;
 
@@ -806,6 +813,13 @@ export default function MatchPredictor({
                         // scores; fall back to the DB provisional_points field.
                         const liveHome = match.provisionalHomeScore;
                         const liveAway = match.provisionalAwayScore;
+                        const resultHome = finishedToday
+                          ? match.homeScore
+                          : liveHome;
+                        const resultAway = finishedToday
+                          ? match.awayScore
+                          : liveAway;
+                        const showScoreCentre = isLive || finishedToday;
                         const armedInstanceId = armedInstanceByMatch[match.id];
                         const poweredChip =
                           (armedInstanceId
@@ -858,6 +872,22 @@ export default function MatchPredictor({
                               {asItStandsPoints > 0
                                 ? `+${asItStandsPoints}`
                                 : asItStandsPoints}{" "}
+                              pts
+                            </span>
+                          </div>
+                        ) : finishedToday && isSubmitted ? (
+                          <div className="w-full h-6 sm:h-9 flex flex-col items-center justify-center text-[10px] sm:text-xs font-mono bg-emerald-500/10 border border-emerald-500/30 rounded-md sm:rounded-lg">
+                            <span className="text-[7px] sm:text-[8px] uppercase tracking-widest text-emerald-500/80 leading-none">
+                              Result
+                            </span>
+                            <span className="font-display font-black text-emerald-300 text-[10px] sm:text-xs leading-none">
+                              {typeof savedPred.pointsWon === "number"
+                                ? savedPred.pointsWon > 0
+                                  ? `+${savedPred.pointsWon}`
+                                  : savedPred.pointsWon
+                                : asItStandsPoints > 0
+                                  ? `+${asItStandsPoints}`
+                                  : asItStandsPoints}{" "}
                               pts
                             </span>
                           </div>
@@ -987,11 +1017,15 @@ export default function MatchPredictor({
                                     } as React.CSSProperties)
                                   : undefined
                               }
-                              className={`relative overflow-hidden pl-4 pr-2.5 pt-2.5 pb-5 sm:pl-5 sm:pr-4 sm:pt-3 sm:pb-5 rounded-xl border transition-all w-full ${
+                              className={`relative overflow-hidden pl-4 pr-2.5 pt-2.5 sm:pl-5 sm:pr-4 sm:pt-3 rounded-xl border transition-all w-full h-auto ${
+                                finishedToday ? "pb-3 sm:pb-3 " : "pb-5 sm:pb-5 "
+                              }${
                                 hasPowerUpAssigned ? "powerup-assigned-ring " : ""
                               }${
                                 isLive
                                   ? "border-rose-500/40 bg-slate-900 shadow-[0_0_24px_rgba(244,63,94,0.08)]"
+                                  : finishedToday
+                                  ? "border-emerald-500/25 bg-slate-900"
                                   : isAssigningPowerUp && !isLocked
                                   ? "border-violet-500/60 bg-slate-900 ring-1 ring-violet-400/40 cursor-pointer"
                                   : hasPowerUpAssigned
@@ -1050,7 +1084,7 @@ export default function MatchPredictor({
                                 </div>
                               )}
 
-                              {isMatchStarted && !isLive && (
+                              {isMatchStarted && !isLive && !finishedToday && (
                                 <div className="mb-2 flex justify-center">
                                   <span className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/80 px-2.5 py-0.5 text-[9px] font-semibold font-mono uppercase tracking-wide text-slate-300">
                                     {isSubmitted
@@ -1152,11 +1186,18 @@ export default function MatchPredictor({
 
                                   <div className="min-w-0 flex flex-col items-center justify-center text-center gap-1 px-1 pt-2">
                                     <MatchCentreStatusLabel match={match} />
-                                    {isLive ? (
+                                    {showScoreCentre ? (
                                       <MatchLiveScoreCentre
-                                        homeScore={liveHome}
-                                        awayScore={liveAway}
-                                        matchMinute={match.matchMinute}
+                                        homeScore={resultHome}
+                                        awayScore={resultAway}
+                                        matchMinute={
+                                          finishedToday
+                                            ? null
+                                            : match.matchMinute
+                                        }
+                                        status={
+                                          finishedToday ? "FT" : match.status
+                                        }
                                       />
                                     ) : (
                                       <span className="font-mono font-bold text-slate-600 text-[10px] uppercase tracking-widest">
@@ -1303,18 +1344,25 @@ export default function MatchPredictor({
 
                                     <div className="min-w-0 flex flex-col items-center justify-center text-center gap-1 px-1 pt-2">
                                       <MatchCentreStatusLabel match={match} />
-                                      {isLive ? (
+                                      {showScoreCentre ? (
                                         <MatchLiveScoreCentre
-                                          homeScore={liveHome}
-                                          awayScore={liveAway}
-                                          matchMinute={match.matchMinute}
+                                          homeScore={resultHome}
+                                          awayScore={resultAway}
+                                          matchMinute={
+                                            finishedToday
+                                              ? null
+                                              : match.matchMinute
+                                          }
+                                          status={
+                                            finishedToday ? "FT" : match.status
+                                          }
                                         />
                                       ) : (
                                         <span className="font-mono font-bold text-slate-600 text-[10px] uppercase tracking-widest">
                                           vs
                                         </span>
                                       )}
-                                      {!isLive ? (
+                                      {!showScoreCentre ? (
                                         <button
                                           type="button"
                                           disabled={isLocked}
@@ -1464,8 +1512,8 @@ export default function MatchPredictor({
                               )}
                               </div>
 
-                            {/* Consensus: only after lock, and only with ≥20 submitted picks */}
-                            {isSubmitted && (
+                            {/* Consensus: hide on finished fixtures to shrink the card */}
+                            {isSubmitted && !isFinished && (
                               <div className="mt-2.5 border-t border-slate-800/60 pt-2 overflow-hidden">
                                 <div className="flex items-center justify-center gap-1.5">
                                   <Users className="h-3.5 w-3.5 text-slate-600" />
