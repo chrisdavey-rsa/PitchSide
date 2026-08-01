@@ -12,6 +12,7 @@ import {
   type SeenFeatureKey,
   type SeenFeatures,
 } from "./lib/seenFeatures";
+import { normalizeMatchStatus } from "./lib/matchStatus";
 import type { SupportedTeamOption, TeamSport } from "./data/supportedTeams";
 
 // Retrieve environment variables and clean them of common copy-paste errors
@@ -601,7 +602,9 @@ export function mapMatchRow(d: Record<string, unknown>): Match {
     homeScore: d.actual_home_score != null ? Number(d.actual_home_score) : undefined,
     awayScore: d.actual_away_score != null ? Number(d.actual_away_score) : undefined,
     matchDate: String(d.kickoff_time ?? ""),
-    status: (d.status as Match["status"]) || "upcoming",
+    status: normalizeMatchStatus(
+      typeof d.status === "string" ? d.status : String(d.status ?? "upcoming"),
+    ),
     season: (d.season as string) || undefined,
     matchTag: (d.match_tag as string) || undefined,
     roundName: (d.round_name as string) || undefined,

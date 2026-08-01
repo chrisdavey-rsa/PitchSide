@@ -33,10 +33,17 @@ import {
   CARD_CORNER_META_CLASS,
   CardKickoffTime,
   CompetitionSubHeader,
+  MatchCentreStatusLabel,
+  MatchLiveScoreCentre,
   SportColorStrip,
   TEAM_NAME_CLASS,
   formatTeamName,
 } from "../predictions/MatchCard";
+import {
+  belongsInActiveFeed,
+  belongsInGameHistory,
+  isLiveMatch,
+} from "../../lib/matchStatus";
 import { usePersistedCompetitionFilter } from "../predictions/CompetitionFilterRail";
 import { settlePredictionWithPowerUp } from "../../utils";
 import LockGuessButton from "./LockGuessButton";
@@ -84,28 +91,6 @@ import {
 } from "../../lib/seenFeatures";
 
 const CONSENSUS_THRESHOLD = 20;
-
-function getMatchStatusDisplay(match: Match) {
-  if (match.status === "completed") {
-    return {
-      label: "Finished",
-      className:
-        "text-green-500 font-mono text-[10px] uppercase tracking-widest font-bold",
-    };
-  }
-  if (match.status === "live") {
-    return {
-      label: "In play",
-      className:
-        "text-green-500 font-mono text-[10px] uppercase tracking-widest font-bold animate-pulse",
-    };
-  }
-  return {
-    label: "To be played",
-    className:
-      "text-slate-400 font-mono text-[10px] uppercase tracking-widest font-bold",
-  };
-}
 
 interface MatchPredictorProps {
   selectedSport: SportType | null;
@@ -298,7 +283,8 @@ export default function MatchPredictor({
   const hasOpenFixtures = useMemo(
     () =>
       sortedActiveMatches.some((m) => {
-        const started = m.status === "live" || new Date() > new Date(m.matchDate);
+        const started =
+          isLiveMatch(m) || new Date() > new Date(m.matchDate);
         const submitted = predictions[m.id]?.submitted;
         return !started && !submitted;
       }),
@@ -321,25 +307,19 @@ export default function MatchPredictor({
 
   const { historyMatches, upcomingMatches } = useMemo(() => {
     const now = Date.now();
-    const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
     const history: Match[] = [];
     const upcoming: Match[] = [];
 
     for (const m of sortedActiveMatches) {
-      const t = new Date(m.matchDate).getTime();
-      if (m.status === "completed") {
-        if (t >= weekAgo) history.push(m);
+      // History is finished statuses only — live / in-play stay in the active feed
+      // even when kickoff_time is in the past.
+      if (belongsInGameHistory(m, now)) {
+        history.push(m);
         continue;
       }
-      if (m.status === "live") {
+      if (belongsInActiveFeed(m, now)) {
         upcoming.push(m);
-        continue;
       }
-      if (t < now) {
-        if (t >= weekAgo) history.push(m);
-        continue;
-      }
-      upcoming.push(m);
     }
 
     // Date → competition → kick-off (supports date + competition sub-headers).
@@ -816,9 +796,10 @@ export default function MatchPredictor({
                           hasPick &&
                           (savedPred.home || 0) === (savedPred.away || 0);
                         const showActiveGreen = hasPick || isSubmitted;
-                        const isLive = match.status === "live";
+                        const isLive = isLiveMatch(match);
                         const isMatchStarted =
                           isLive || new Date() > new Date(match.matchDate);
+                        // State 3: locked once submitted OR once the fixture is in play / kicked off.
                         const isLocked = isSubmitted || isMatchStarted;
 
                         // As It Stands: prefer live-computed points from provisional
@@ -850,7 +831,6 @@ export default function MatchPredictor({
                               ).earnedPoints
                             : savedPred.provisionalPoints ?? 0;
 
-                        const matchStatus = getMatchStatusDisplay(match);
                         const assignedInstanceId =
                           armedInstanceByMatch[match.id] ?? null;
                         const assignedChip = assignedInstanceId
@@ -881,11 +861,19 @@ export default function MatchPredictor({
                               pts
                             </span>
                           </div>
-                        ) : !isMatchStarted || isSubmitted ? (
+                        ) : isLocked ? (
                           <LockGuessButton
                             id={`submit-pred-btn-${match.id}`}
                             className="w-full"
-                            submitted={isSubmitted}
+                            submitted
+                            disabled
+                            onClick={() => {}}
+                          />
+                        ) : (
+                          <LockGuessButton
+                            id={`submit-pred-btn-${match.id}`}
+                            className="w-full"
+                            submitted={false}
                             onClick={() => {
                               const fixtureLabel = `${formatTeamName(match.homeTeam)} v ${formatTeamName(match.awayTeam)}`;
                               const powerupId =
@@ -914,7 +902,7 @@ export default function MatchPredictor({
                               });
                             }}
                           />
-                        ) : null;
+                        );
 
                         const pickState: "unpicked" | "saved" | "locked" =
                           isSubmitted
@@ -1062,28 +1050,6 @@ export default function MatchPredictor({
                                 </div>
                               )}
 
-                              {isLive && (
-                                <div className="mb-2 flex flex-wrap items-center justify-center gap-2 text-center">
-                                  <span className="inline-flex items-center gap-1.5 bg-rose-500/10 border border-rose-500/40 text-rose-300 text-[9px] font-mono font-bold px-2.5 py-0.5 rounded-full uppercase tracking-widest">
-                                    <span className="relative flex h-1.5 w-1.5">
-                                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-60" />
-                                      <span className="relative inline-flex h-1.5 w-1.5 animate-pulse rounded-full bg-rose-500" />
-                                    </span>
-                                    Live
-                                    {match.matchMinute && (
-                                      <span className="text-rose-200/90">
-                                        {match.matchMinute}
-                                      </span>
-                                    )}
-                                  </span>
-                                  <span className="font-display font-black text-lg tracking-widest text-white tabular-nums">
-                                    {liveHome ?? "–"}
-                                    <span className="mx-1 text-slate-500">–</span>
-                                    {liveAway ?? "–"}
-                                  </span>
-                                </div>
-                              )}
-
                               {isMatchStarted && !isLive && (
                                 <div className="mb-2 flex justify-center">
                                   <span className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/80 px-2.5 py-0.5 text-[9px] font-semibold font-mono uppercase tracking-wide text-slate-300">
@@ -1185,14 +1151,18 @@ export default function MatchPredictor({
                                   </div>
 
                                   <div className="min-w-0 flex flex-col items-center justify-center text-center gap-1 px-1 pt-2">
-                                    <span
-                                      className={`${matchStatus.className} whitespace-nowrap`}
-                                    >
-                                      {matchStatus.label}
-                                    </span>
-                                    <span className="font-mono font-bold text-slate-600 text-[10px] uppercase tracking-widest">
-                                      vs
-                                    </span>
+                                    <MatchCentreStatusLabel match={match} />
+                                    {isLive ? (
+                                      <MatchLiveScoreCentre
+                                        homeScore={liveHome}
+                                        awayScore={liveAway}
+                                        matchMinute={match.matchMinute}
+                                      />
+                                    ) : (
+                                      <span className="font-mono font-bold text-slate-600 text-[10px] uppercase tracking-widest">
+                                        vs
+                                      </span>
+                                    )}
                                     {lockControl}
                                   </div>
 
@@ -1332,39 +1302,45 @@ export default function MatchPredictor({
                                     </div>
 
                                     <div className="min-w-0 flex flex-col items-center justify-center text-center gap-1 px-1 pt-2">
-                                      <span
-                                        className={`${matchStatus.className} whitespace-nowrap`}
-                                      >
-                                        {matchStatus.label}
-                                      </span>
-                                      <span className="font-mono font-bold text-slate-600 text-[10px] uppercase tracking-widest">
-                                        vs
-                                      </span>
-                                      <button
-                                        type="button"
-                                        disabled={isLocked}
-                                        onClick={() => {
-                                          onRugbyPredictionChange(
-                                            match.id,
-                                            "draw",
-                                            "0",
-                                          );
-                                        }}
-                                        className={`w-full h-6 sm:h-9 rounded-md sm:rounded-lg border text-[9px] sm:text-[10px] font-bold font-display uppercase tracking-wide transition-all select-none ${
-                                          isLocked
-                                            ? "cursor-default"
-                                            : "cursor-pointer"
-                                        } ${
-                                          isDrawPick ||
-                                          ((savedPred.home || 0) ===
-                                            (savedPred.away || 0) &&
-                                            hasPick)
-                                            ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300"
-                                            : "bg-slate-950/60 border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
-                                        }`}
-                                      >
-                                        Draw
-                                      </button>
+                                      <MatchCentreStatusLabel match={match} />
+                                      {isLive ? (
+                                        <MatchLiveScoreCentre
+                                          homeScore={liveHome}
+                                          awayScore={liveAway}
+                                          matchMinute={match.matchMinute}
+                                        />
+                                      ) : (
+                                        <span className="font-mono font-bold text-slate-600 text-[10px] uppercase tracking-widest">
+                                          vs
+                                        </span>
+                                      )}
+                                      {!isLive ? (
+                                        <button
+                                          type="button"
+                                          disabled={isLocked}
+                                          onClick={() => {
+                                            onRugbyPredictionChange(
+                                              match.id,
+                                              "draw",
+                                              "0",
+                                            );
+                                          }}
+                                          className={`w-full h-6 sm:h-9 rounded-md sm:rounded-lg border text-[9px] sm:text-[10px] font-bold font-display uppercase tracking-wide transition-all select-none ${
+                                            isLocked
+                                              ? "cursor-default"
+                                              : "cursor-pointer"
+                                          } ${
+                                            isDrawPick ||
+                                            ((savedPred.home || 0) ===
+                                              (savedPred.away || 0) &&
+                                              hasPick)
+                                              ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300"
+                                              : "bg-slate-950/60 border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
+                                          }`}
+                                        >
+                                          Draw
+                                        </button>
+                                      ) : null}
                                       {lockControl}
                                     </div>
 

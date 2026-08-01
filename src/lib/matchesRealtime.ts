@@ -146,10 +146,15 @@ function ensureChannel(queryClient: QueryClient) {
     .channel(CHANNEL_NAME)
     .on(
       'postgres_changes',
-      { event: 'UPDATE', schema: 'public', table: 'matches' },
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'matches',
+      },
       (payload) => {
         const client = boundClient;
         if (!client) return;
+        // sync-live ticks land here — patch live score / status without refetch.
         patchMatchesQueryCache(
           client,
           payload.new as Record<string, unknown> | null,

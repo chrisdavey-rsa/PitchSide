@@ -16,6 +16,7 @@ SELECT cron.alter_job(
 );
 
 -- sync-live: every 5 minutes (live=all / active window gate)
+-- Superseded by 20260801180000_sync_live_cron_every_minute.sql (* * * * *).
 SELECT cron.alter_job(
   (SELECT jobid FROM cron.job WHERE jobname = 'sync-live-football' LIMIT 1),
   schedule := '*/5 * * * *',

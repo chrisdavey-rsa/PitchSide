@@ -7,6 +7,8 @@ import CompetitionFlag from "./CompetitionFlag";
 import type { SportKey } from "../../sports/emerging/types";
 import { getCompetitionTitle } from "../../constants/competitions";
 import { displayTeamName } from "../../lib/teamNames";
+import { isLiveMatch } from "../../lib/matchStatus";
+import type { Match } from "../../types";
 
 /** F1 checkered strip (user-specified repeating gradients). */
 const F1_CHECKERED: React.CSSProperties = {
@@ -116,6 +118,63 @@ export function CardCompetitionMeta({
 /** Shared size for kick-off + Locked/Unpicked bottom-corner metadata. */
 export const CARD_CORNER_META_CLASS =
   "font-mono text-[10px] font-bold uppercase tracking-wider leading-none";
+
+/** Centre-column status for upcoming fixtures. */
+export function MatchCentreStatusLabel({
+  match,
+}: {
+  match: Pick<Match, "status">;
+}) {
+  if (isLiveMatch(match)) {
+    return (
+      <span className="inline-flex items-center justify-center gap-1.5 text-rose-400 font-mono text-[10px] uppercase tracking-widest font-bold">
+        <span className="relative flex h-1.5 w-1.5">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-60" />
+          <span className="relative inline-flex h-1.5 w-1.5 animate-pulse rounded-full bg-rose-500" />
+        </span>
+        IN PLAY
+      </span>
+    );
+  }
+  if (match.status === "completed") {
+    return (
+      <span className="text-green-500 font-mono text-[10px] uppercase tracking-widest font-bold">
+        Finished
+      </span>
+    );
+  }
+  return (
+    <span className="text-slate-400 font-mono text-[10px] uppercase tracking-widest font-bold">
+      To be played
+    </span>
+  );
+}
+
+/** Live score block for the centre column between team names. */
+export function MatchLiveScoreCentre({
+  homeScore,
+  awayScore,
+  matchMinute,
+}: {
+  homeScore?: number | null;
+  awayScore?: number | null;
+  matchMinute?: string | null;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-0.5">
+      <span className="font-display font-black text-xl sm:text-2xl tracking-widest text-white tabular-nums leading-none">
+        {homeScore != null ? homeScore : "–"}
+        <span className="mx-1.5 text-slate-500">–</span>
+        {awayScore != null ? awayScore : "–"}
+      </span>
+      {matchMinute ? (
+        <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-rose-300/90">
+          {matchMinute}
+        </span>
+      ) : null}
+    </div>
+  );
+}
 
 /** Kick-off time — bottom-left of the card, clear of team names / inputs. */
 export function CardKickoffTime({
