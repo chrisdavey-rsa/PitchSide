@@ -9,8 +9,12 @@ import { motion, AnimatePresence } from "motion/react";
 import { X, ArrowRight, ArrowLeft, Sparkles } from "lucide-react";
 
 export interface TourStep {
-  /** id of the DOM element to spotlight. If it isn't mounted, the step is shown as a centered card. */
-  targetId: string;
+  /**
+   * Value of the element's `data-tour` attribute to spotlight
+   * (e.g. `"nav-predictions"` → `[data-tour="nav-predictions"]`).
+   * If missing / zero-sized, the tooltip centres on screen with a full dim overlay.
+   */
+  target: string;
   title: string;
   description: string;
   /** Prefer tooltip above/below the target (auto picks based on space). */
@@ -33,6 +37,33 @@ interface Rect {
 
 const SPOTLIGHT_PADDING = 8;
 
+function findTourTarget(target: string): HTMLElement | null {
+  if (!target) return null;
+  try {
+    const el = document.querySelector(`[data-tour="${target}"]`);
+    return el instanceof HTMLElement ? el : null;
+  } catch {
+    return null;
+  }
+}
+
+function isUsableTarget(el: HTMLElement): boolean {
+  const style = window.getComputedStyle(el);
+  if (style.display === "none" || style.visibility === "hidden") return false;
+  const r = el.getBoundingClientRect();
+  if (r.width < 2 || r.height < 2) return false;
+  // Reject targets entirely off-screen (empty "void" boxes).
+  if (
+    r.bottom < 0 ||
+    r.right < 0 ||
+    r.top > window.innerHeight ||
+    r.left > window.innerWidth
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export default function OnboardingTour({ steps, onComplete }: OnboardingTourProps) {
   const [stepIndex, setStepIndex] = useState(0);
   const [rect, setRect] = useState<Rect | null>(null);
@@ -43,16 +74,12 @@ export default function OnboardingTour({ steps, onComplete }: OnboardingTourProp
 
   const measure = useCallback(() => {
     if (!step) return;
-    const el = document.getElementById(step.targetId);
-    if (!el) {
+    const el = findTourTarget(step.target);
+    if (!el || !isUsableTarget(el)) {
       setRect(null);
       return;
     }
     const r = el.getBoundingClientRect();
-    if (r.width === 0 && r.height === 0) {
-      setRect(null);
-      return;
-    }
     setRect({
       top: r.top - SPOTLIGHT_PADDING,
       left: r.left - SPOTLIGHT_PADDING,
@@ -62,9 +89,8 @@ export default function OnboardingTour({ steps, onComplete }: OnboardingTourProp
   }, [step]);
 
   useLayoutEffect(() => {
-    const el = step ? document.getElementById(step.targetId) : null;
-    if (el) {
-      // Bottom-nav targets: keep them pinned; avoid scrolling the page under the bar.
+    const el = step ? findTourTarget(step.target) : null;
+    if (el && isUsableTarget(el)) {
       const nearBottom =
         el.getBoundingClientRect().bottom > window.innerHeight - 140;
       if (!nearBottom) {
@@ -131,7 +157,6 @@ export default function OnboardingTour({ steps, onComplete }: OnboardingTourProp
       const top = Math.min(rect.top + rect.height + 12, viewportHeight - 220);
       tooltipStyle = { top: Math.max(12, top), left, width: tooltipWidth };
     } else {
-      // Prefer CSS bottom so tooltips sit cleanly above the bottom nav.
       const bottomGap = viewportHeight - rect.top + 12;
       tooltipStyle = {
         bottom: Math.max(12, Math.min(bottomGap, viewportHeight - 80)),
@@ -140,6 +165,7 @@ export default function OnboardingTour({ steps, onComplete }: OnboardingTourProp
       };
     }
   } else {
+    // Missing / hidden target → centred tooltip, no void spotlight box.
     tooltipStyle = {
       top: "50%",
       left: "50%",

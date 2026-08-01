@@ -187,7 +187,17 @@ export default function MatchPredictor({
   // Just-in-time onboarding: first open of Football / Rugby (profiles.seen_features).
   const [introSport, setIntroSport] = useState<"football" | "rugby" | null>(null);
 
+  // Sport intro only after the nav walkthrough has finished (or was already seen).
   useEffect(() => {
+    const navTourDone = hasSeenFeature(
+      seenFeatures,
+      SeenFeature.MainWalkthrough,
+    );
+    if (!navTourDone) {
+      setIntroSport(null);
+      return;
+    }
+
     if (
       selectedSport === SportType.FOOTBALL &&
       !hasSeenFeature(seenFeatures, SeenFeature.FootballIntro)
@@ -498,10 +508,7 @@ export default function MatchPredictor({
       )}
 
       {selectedSport && (
-            <div
-              id="tour-match-predictor"
-              className="bg-slate-900/60 rounded-3xl border border-slate-800 shadow-xl p-4 sm:p-6 w-full overflow-visible"
-            >
+            <div className="bg-slate-900/60 rounded-3xl border border-slate-800 shadow-xl p-4 sm:p-6 w-full overflow-visible">
               <div ref={setTopControlsEl}>
               {!unifiedFeed && (
                 <>

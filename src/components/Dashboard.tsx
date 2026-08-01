@@ -232,9 +232,10 @@ export default function Dashboard({
     [user, isSandbox, syncSeenFeatures],
   );
 
-  // Main walkthrough: gate on profiles.seen_features (not localStorage alone).
+  // Nav tour first (MainWalkthrough), then Sport Intro waits on that flag.
   useEffect(() => {
     let cancelled = false;
+    let startTimer: ReturnType<typeof setTimeout> | undefined;
     setWalkthroughResolved(false);
     setShowOnboarding(false);
 
@@ -244,12 +245,24 @@ export default function Dashboard({
         return;
       }
 
-      // Sandbox / offline: fall back to in-memory profile flag only.
+      const startTourIfNeeded = (features: Record<string, boolean>) => {
+        const needsWalkthrough = !hasSeenFeature(
+          features,
+          SeenFeature.MainWalkthrough,
+        );
+        if (!needsWalkthrough) {
+          setShowOnboarding(false);
+          return;
+        }
+        // Let the dashboard / top-nav paint before spotlight targeting.
+        startTimer = window.setTimeout(() => {
+          if (!cancelled) setShowOnboarding(true);
+        }, 300);
+      };
+
       if (isSandbox || !isSupabaseConfigured()) {
         if (!cancelled) {
-          setShowOnboarding(
-            !hasSeenFeature(user.seenFeatures, SeenFeature.MainWalkthrough),
-          );
+          startTourIfNeeded(user.seenFeatures || {});
           setWalkthroughResolved(true);
         }
         return;
@@ -259,15 +272,10 @@ export default function Dashboard({
         const features = await dbFetchSeenFeatures(user.id);
         if (cancelled) return;
         syncSeenFeatures(features);
-        setShowOnboarding(
-          !hasSeenFeature(features, SeenFeature.MainWalkthrough),
-        );
+        startTourIfNeeded(features);
       } catch (err) {
         console.error("[walkthrough] failed to load seen_features", err);
-        if (!cancelled) {
-          // Fail closed for returning users: do not force-show the tour.
-          setShowOnboarding(false);
-        }
+        if (!cancelled) setShowOnboarding(false);
       } finally {
         if (!cancelled) setWalkthroughResolved(true);
       }
@@ -276,6 +284,7 @@ export default function Dashboard({
     void resolveWalkthrough();
     return () => {
       cancelled = true;
+      if (startTimer) window.clearTimeout(startTimer);
     };
     // Only re-resolve when the logged-in account changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: user.id + sandbox gate
@@ -283,10 +292,11 @@ export default function Dashboard({
 
   const completeOnboarding = () => {
     setShowOnboarding(false);
+    // Marks MainWalkthrough — SportIntroModal opens once this flag is true.
     void markFeatureSeen(SeenFeature.MainWalkthrough);
   };
 
-  // Ensure tour targets are mounted (predictions panel + mobile bottom nav).
+  // Ensure tour targets are mounted (desktop top nav / mobile bottom nav).
   useEffect(() => {
     if (!showOnboarding) return;
     if (!selectedSport) {
@@ -296,6 +306,8 @@ export default function Dashboard({
     }
     if (isMobileLayout) {
       setMobileNavTab("predictions");
+    } else {
+      setDesktopMainView("predictions");
     }
   }, [showOnboarding, selectedSport, user.preferredSport, isMobileLayout]);
 
@@ -303,35 +315,35 @@ export default function Dashboard({
     if (isMobileLayout) {
       return [
         {
-          targetId: "tour-mobile-predictions",
+          target: "mobile-predictions",
           title: "Predictions",
           description:
             "Centre tab — pick Football or Rugby, choose a competition, enter your scoreline, and lock it before kick-off.",
           placement: "above",
         },
         {
-          targetId: "tour-mobile-leagues",
+          target: "mobile-leagues",
           title: "Leagues",
           description:
             "Create a private league or join with a code to compete with friends. You are already active on the Global Leaderboard.",
           placement: "above",
         },
         {
-          targetId: "tour-mobile-boards",
+          target: "mobile-leaderboards",
           title: "Leaderboards",
           description:
             "Compare season standings in your league and globally.",
           placement: "above",
         },
         {
-          targetId: "tour-mobile-account",
+          target: "mobile-account",
           title: "Account",
           description:
             "Your profile, league memberships, and log out live here.",
           placement: "above",
         },
         {
-          targetId: "tour-mobile-rules",
+          target: "mobile-rules",
           title: "Rules",
           description:
             "Scoring, margins, and power-ups — open any time you need a refresher.",
@@ -340,23 +352,24 @@ export default function Dashboard({
       ];
     }
 
+    // Desktop: strict data-tour targets on TopNavigation only (no orphaned FAB / globe steps).
     return [
       {
-        targetId: "tour-match-predictor",
+        target: "nav-predictions",
         title: "Predictions",
         description:
           "Pick Football or Rugby from the sport banner, choose a competition, enter your scoreline, and lock it before kick-off.",
         placement: "below",
       },
       {
-        targetId: "tour-league-manager",
+        target: "nav-leagues",
         title: "Leagues",
         description:
           "Create or join leagues with a code and password to compete with friends. You are already active on the Global Leaderboard.",
         placement: "below",
       },
       {
-        targetId: "nav-account-btn",
+        target: "nav-account",
         title: "Account & Rules",
         description:
           "Account and Rules sit in the top bar next to Leagues — open them any time to manage your profile or review scoring.",

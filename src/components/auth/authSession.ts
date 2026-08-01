@@ -7,6 +7,7 @@ import { User as SupabaseUser } from '@supabase/supabase-js';
 import { UserProfile, SportType } from '../../types';
 import { dbFetchPlayers, isSupabaseConfigured, supabase } from '../../supabase';
 import { parseSeenFeatures } from '../../lib/seenFeatures';
+import { namesFromAuthUser } from '../../lib/oauthProfile';
 
 /** Auth redirect types Supabase puts in the URL hash after email-link clicks. */
 export type AuthHashType = 'signup' | 'recovery' | 'invite' | 'magiclink' | 'email' | null;
@@ -57,14 +58,39 @@ export async function profileFromSession(
       ? (row.selected_sports as UserProfile["selectedSports"])
       : [];
 
+    const fromMeta = namesFromAuthUser(authUser);
+    let firstName = (row.first_name || '').trim();
+    let surname = (row.surname || '').trim();
+
+    // Repair Google OAuth profiles that only stored the given name.
+    if ((!surname || !firstName) && (fromMeta.firstName || fromMeta.surname)) {
+      if (!firstName && fromMeta.firstName) firstName = fromMeta.firstName;
+      if (!surname && fromMeta.surname) surname = fromMeta.surname;
+      if (supabase && (fromMeta.firstName || fromMeta.surname)) {
+        void supabase
+          .from('profiles')
+          .update({
+            first_name: firstName || row.first_name,
+            surname: surname || row.surname || '',
+          })
+          .eq('id', authUser.id)
+          .then(({ error }) => {
+            if (error) {
+              console.warn('[profileFromSession] name backfill failed', error.message);
+            }
+          });
+      }
+    }
+
     return {
       id: row.id,
-      firstName: row.first_name || '',
-      surname: row.surname || '',
+      firstName: firstName || fromMeta.firstName || '',
+      surname: surname || fromMeta.surname || '',
       email: row.email || authUser.email || loginEmail || '',
       phone: row.phone || '',
       dob: row.dob || '1990-01-01',
-      nickname: row.username || 'Contestant',
+      // Empty nickname → CompleteProfile gate (do not invent from email).
+      nickname: (row.username || '').trim(),
       createdAt: row.created_at || new Date().toISOString(),
       emailVerified: !!authUser.email_confirmed_at,
       emailConfirmedAt: authUser.email_confirmed_at || null,
@@ -88,16 +114,17 @@ export async function profileFromSession(
 }
 
 function minimalProfile(authUser: SupabaseUser, loginEmail?: string): UserProfile {
+  const fromMeta = namesFromAuthUser(authUser);
   return {
     id: authUser.id,
-    firstName: 'Player',
-    surname: '',
+    firstName: fromMeta.firstName || 'Player',
+    surname: fromMeta.surname || '',
     email: authUser.email || loginEmail || '',
     phone: '',
     dob: '1990-01-01',
-    nickname: authUser.email?.split('@')[0] || 'Player',
-    nationality: 'Global',
-    supportedTeam: 'Unknown',
+    nickname: '',
+    nationality: undefined,
+    supportedTeam: undefined,
     createdAt: new Date().toISOString(),
     emailVerified: !!authUser.email_confirmed_at,
     emailConfirmedAt: authUser.email_confirmed_at || null,

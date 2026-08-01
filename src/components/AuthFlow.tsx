@@ -25,6 +25,7 @@ import CountryFlag from './CountryFlag';
 import { filterTeams } from '../data/supportedTeams';
 import { useTeamsCatalogQuery } from '../hooks/usePitchsideQueries';
 import OAuthButtons from './auth/OAuthButtons';
+import { splitFullName } from '../lib/oauthProfile';
 
 interface AuthFlowProps {
   onAuthSuccess: (user: UserProfile) => void;
@@ -40,14 +41,6 @@ const LABEL =
   'block text-[11px] font-medium text-slate-400 mb-1';
 const INPUT =
   'w-full bg-slate-950/60 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-sm text-white placeholder:text-slate-600 outline-none transition-colors font-sans';
-
-function splitFullName(fullName: string): { firstName: string; surname: string } {
-  const trimmed = fullName.trim().replace(/\s+/g, ' ');
-  if (!trimmed) return { firstName: '', surname: '' };
-  const i = trimmed.indexOf(' ');
-  if (i === -1) return { firstName: trimmed, surname: '' };
-  return { firstName: trimmed.slice(0, i), surname: trimmed.slice(i + 1) };
-}
 
 function passwordStrength(password: string): { score: number; label: string } {
   let score = 0;

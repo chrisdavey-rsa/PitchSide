@@ -46,7 +46,7 @@ export default function TopNavigation({
   const accountRef = useRef<HTMLButtonElement>(null);
 
   return (
-    <div className="relative z-30 bg-slate-900/80 backdrop-blur-md rounded-2xl border border-slate-800/80 p-4 sm:px-6 shadow-xl">
+    <div className="relative z-[60] bg-slate-900/80 backdrop-blur-md rounded-2xl border border-slate-800/80 p-4 sm:px-6 shadow-xl">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
           <div onClick={onResetState} className="cursor-pointer shrink-0">
@@ -59,11 +59,14 @@ export default function TopNavigation({
           )}
         </div>
 
-        <div id="tour-nav-buttons" className="hidden md:flex items-center gap-2 sm:gap-3">
+        <div
+          data-tour="nav-buttons"
+          className="hidden md:flex items-center gap-2 sm:gap-3"
+        >
           <motion.button
             layoutId="nav-predictions-btn"
-            id="tour-match-predictor"
             type="button"
+            data-tour="nav-predictions"
             onClick={() => onSelectDesktopView?.("predictions")}
             className={`text-xs hover:text-white bg-slate-800/60 px-3 py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-1.5 font-medium ${
               desktopMainView === "predictions"
@@ -77,8 +80,8 @@ export default function TopNavigation({
 
           <motion.button
             layoutId="nav-leaderboards-btn"
-            id="tour-leaderboards"
             type="button"
+            data-tour="nav-leaderboards"
             onClick={() => onSelectDesktopView?.("leaderboards")}
             className={`text-xs hover:text-white bg-slate-800/60 px-3 py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-1.5 font-medium ${
               desktopMainView === "leaderboards"
@@ -92,8 +95,8 @@ export default function TopNavigation({
 
           <motion.button
             layoutId="nav-leagues-btn"
-            id="tour-league-manager"
             type="button"
+            data-tour="nav-leagues"
             onClick={(e) => onOpenLeagues(radialOriginFromEvent(e))}
             className={`relative overflow-hidden text-xs text-slate-300 hover:text-white bg-slate-800/60 px-3 py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-1.5 font-medium ${
               highlightLeagues
@@ -108,30 +111,32 @@ export default function TopNavigation({
             <span>Leagues</span>
           </motion.button>
 
-          <button
-            ref={accountRef}
-            id="nav-account-btn"
-            type="button"
-            onClick={(e) => onOpenAccount(radialOriginFromEvent(e))}
-            className="text-xs text-slate-300 hover:text-white bg-slate-800/60 px-3 py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-1.5 font-medium"
+          <div
+            data-tour="nav-account"
+            className="flex items-center gap-2 sm:gap-3"
           >
-            <UserCheck className="w-4 h-4 text-emerald-400" />
-            <span>Account</span>
-          </button>
+            <button
+              ref={accountRef}
+              type="button"
+              onClick={(e) => onOpenAccount(radialOriginFromEvent(e))}
+              className="text-xs text-slate-300 hover:text-white bg-slate-800/60 px-3 py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-1.5 font-medium"
+            >
+              <UserCheck className="w-4 h-4 text-emerald-400" />
+              <span>Account</span>
+            </button>
 
-          <button
-            id="nav-rules-btn"
-            type="button"
-            onClick={(e) => onOpenRules(radialOriginFromEvent(e))}
-            className="text-xs text-slate-300 hover:text-white bg-slate-800/60 px-3 py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-1.5 font-medium"
-          >
-            <HelpCircle className="w-4 h-4 text-blue-400" />
-            <span>Rules</span>
-          </button>
+            <button
+              type="button"
+              onClick={(e) => onOpenRules(radialOriginFromEvent(e))}
+              className="text-xs text-slate-300 hover:text-white bg-slate-800/60 px-3 py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-1.5 font-medium"
+            >
+              <HelpCircle className="w-4 h-4 text-blue-400" />
+              <span>Rules</span>
+            </button>
+          </div>
 
           {user.isAdmin && (
             <button
-              id="nav-admin-toggle-btn"
               type="button"
               onClick={onOpenAdmin}
               className="text-xs text-white bg-purple-600 hover:bg-purple-700 active:translate-y-[0.5px] border border-purple-500 py-1.5 px-3 rounded-lg flex items-center gap-1.5 font-semibold transition-all shadow-[0_4px_12px_rgba(147,51,234,0.3)] cursor-pointer"
@@ -142,7 +147,6 @@ export default function TopNavigation({
           )}
 
           <button
-            id="nav-logout-btn"
             type="button"
             onClick={() => setLogoutConfirmOpen(true)}
             className="text-xs text-slate-400 hover:text-red-400 bg-slate-950/60 p-2 rounded-lg cursor-pointer transition-colors"

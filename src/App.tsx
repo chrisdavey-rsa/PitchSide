@@ -7,7 +7,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Routes, Route, useNavigate, Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'motion/react';
-import { Award, Lock, Star } from 'lucide-react';
+import { Award, Lock, Star, Loader2 } from 'lucide-react';
+import type { Session } from '@supabase/supabase-js';
 import { dbFetchPlayers, dbDeletePlayerAccount, dbSaveArchivedPlayer, dbSaveUnsubscribedEmail, dbUpdatePlayerAdmin, dbFetchPredictions, supabase, testSupabaseConnection } from './supabase';
 import { UserProfile } from './types';
 import AuthFlow from './components/AuthFlow';
@@ -16,6 +17,9 @@ import ResetPasswordView from './components/auth/ResetPasswordView';
 import { readAuthHash, clearAuthHash, profileFromSession } from './components/auth/authSession';
 import Dashboard from './components/Dashboard';
 import OnboardingFlow, { needsOnboarding } from './components/OnboardingFlow';
+import CompleteProfile, {
+  needsUsername,
+} from './components/auth/CompleteProfile';
 import RulesInfo from './components/RulesInfo';
 import AdminPanel from './components/AdminPanel';
 import AccountPortal from './components/AccountPortal';
@@ -50,6 +54,12 @@ function AppShell() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  /** Supabase auth user id — sole source of truth for “is logged in”. */
+  const [sessionUserId, setSessionUserId] = useState<string | null>(null);
+  /** True after the first session resolution (boot or auth listener). */
+  const [authHydrated, setAuthHydrated] = useState(false);
+  /** Profile fetch in flight for an established session (e.g. OAuth return). */
+  const [isLoadingProfile, setIsLoadingProfile] = useState(false);
   /** Gatekeeper: only the splash renders until platform init + min brand time complete. */
   const [isAppReady, setIsAppReady] = useState(false);
   const skipMinSplash = useRef(false);
@@ -65,6 +75,40 @@ function AppShell() {
   }, []);
   const [dashboardWelcome, setDashboardWelcome] = useState<string | null>(null);
   const emailVerifyPending = useRef(false);
+  const sessionUserIdRef = useRef<string | null>(null);
+  const currentUserIdRef = useRef<string | null>(null);
+  const [registeredUsers, setRegisteredUsers] = useState<UserProfile[]>([]);
+
+  const applySession = useCallback(async (session: Session | null) => {
+    if (!session?.user) {
+      sessionUserIdRef.current = null;
+      currentUserIdRef.current = null;
+      setSessionUserId(null);
+      setCurrentUser(null);
+      setIsLoadingProfile(false);
+      localStorage.removeItem('pitchside_logged_in');
+      return;
+    }
+
+    sessionUserIdRef.current = session.user.id;
+    setSessionUserId(session.user.id);
+    setIsLoadingProfile(true);
+    try {
+      const profile = await profileFromSession(session.user);
+      currentUserIdRef.current = profile.id;
+      setCurrentUser(profile);
+      localStorage.setItem('pitchside_logged_in', JSON.stringify(profile));
+      setRegisteredUsers((prev) =>
+        prev.some((u) => u.id === profile.id) ? prev : [...prev, profile],
+      );
+    } catch (err) {
+      console.error('[auth] profile load failed', err);
+      currentUserIdRef.current = null;
+      setCurrentUser(null);
+    } finally {
+      setIsLoadingProfile(false);
+    }
+  }, []);
 
   const [showRules, setShowRules] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
@@ -97,8 +141,6 @@ function AppShell() {
   useOverlayHistory(showRules, closeRules, 'rules');
   useOverlayHistory(showAdmin, closeAdmin, 'admin');
   // Account portal owns its own overlay-history entry (and nested scroll lock)
-
-  const [registeredUsers, setRegisteredUsers] = useState<UserProfile[]>([]);
 
   const loadRegisteredUsers = useCallback(async () => {
     try {
@@ -151,17 +193,49 @@ function AppShell() {
         const init = await initializePlatform(queryClient);
         if (cancelled) return;
 
-        if (init.profile) {
+        // Session is authoritative — never treat localStorage alone as logged-in.
+        if (supabase) {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          if (cancelled) return;
+          if (session?.user) {
+            sessionUserIdRef.current = session.user.id;
+            setSessionUserId(session.user.id);
+            if (init.profile) {
+              currentUserIdRef.current = init.profile.id;
+              setCurrentUser(init.profile);
+              localStorage.setItem(
+                'pitchside_logged_in',
+                JSON.stringify(init.profile),
+              );
+            } else {
+              await applySession(session);
+            }
+          } else if (!emailVerifyPending.current) {
+            sessionUserIdRef.current = null;
+            currentUserIdRef.current = null;
+            setSessionUserId(null);
+            setCurrentUser(null);
+            localStorage.removeItem('pitchside_logged_in');
+          }
+        } else if (init.profile) {
+          // Sandbox / offline: no Supabase session API.
+          sessionUserIdRef.current = init.profile.id;
+          currentUserIdRef.current = init.profile.id;
+          setSessionUserId(init.profile.id);
           setCurrentUser(init.profile);
-          localStorage.setItem('pitchside_logged_in', JSON.stringify(init.profile));
-        } else if (!emailVerifyPending.current) {
+        } else {
+          sessionUserIdRef.current = null;
+          currentUserIdRef.current = null;
+          setSessionUserId(null);
           setCurrentUser(null);
-          localStorage.removeItem('pitchside_logged_in');
         }
       } catch (err) {
         console.error('Platform initialization failed:', err);
       } finally {
         if (cancelled) return;
+        setAuthHydrated(true);
 
         if (!skipMinSplash.current) {
           const remaining = Math.max(0, MIN_SPLASH_MS - (Date.now() - startedAt));
@@ -177,7 +251,7 @@ function AppShell() {
     return () => {
       cancelled = true;
     };
-  }, [queryClient]);
+  }, [queryClient, applySession]);
 
   // Verify Supabase connection on load
   useEffect(() => {
@@ -188,9 +262,12 @@ function AppShell() {
     });
   }, []);
 
-  // Listen for Supabase auth events: password recovery links & email verification redirects
+  // Listen for Supabase auth events (OAuth return, email verify, logout, recovery).
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase) {
+      setAuthHydrated(true);
+      return;
+    }
 
     // Detect email-verification redirect from URL hash before the listener fires
     const initialHash = readAuthHash();
@@ -204,39 +281,74 @@ function AppShell() {
     if (initialHash.hasTokens && initialHash.type === 'recovery') {
       skipSplashForAuthRedirect();
       setGuestAuthView('reset-update');
+      setSessionUserId(null);
       setCurrentUser(null);
       localStorage.removeItem('pitchside_logged_in');
     }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'PASSWORD_RECOVERY') {
         skipSplashForAuthRedirect();
         setGuestAuthView('reset-update');
+        setSessionUserId(null);
         setCurrentUser(null);
         localStorage.removeItem('pitchside_logged_in');
         clearAuthHash();
+        setAuthHydrated(true);
         return;
       }
 
-      if (event === 'SIGNED_IN' && session?.user && emailVerifyPending.current) {
-        emailVerifyPending.current = false;
-        clearAuthHash();
-        skipSplashForAuthRedirect();
+      if (event === 'SIGNED_OUT') {
+        setSessionUserId(null);
+        setCurrentUser(null);
+        localStorage.removeItem('pitchside_logged_in');
+        setAuthHydrated(true);
+        return;
+      }
 
-        try {
-          const profile = await profileFromSession(session.user);
-          setCurrentUser(profile);
-          localStorage.setItem('pitchside_logged_in', JSON.stringify(profile));
-          setDashboardWelcome(`Welcome to PitchSide, ${profile.nickname}!`);
-          setRegisteredUsers((prev) =>
-            prev.some((u) => u.id === profile.id) ? prev : [...prev, profile],
-          );
-        } catch (err) {
-          console.error('Email verification profile load failed:', err);
-          setGuestAuthView('login');
-          setLoginSuccessMessage('Email verified! Please log in.');
+      // OAuth callback, email verify, magic link, token refresh with user.
+      if (
+        (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') &&
+        session?.user
+      ) {
+        const wasEmailVerify = emailVerifyPending.current;
+        if (wasEmailVerify) {
+          emailVerifyPending.current = false;
+          clearAuthHash();
+          skipSplashForAuthRedirect();
+        }
+
+        // Avoid redundant profile reloads on token refresh when already hydrated.
+        if (
+          event === 'TOKEN_REFRESHED' &&
+          session.user.id === sessionUserIdRef.current &&
+          currentUserIdRef.current === session.user.id
+        ) {
+          setAuthHydrated(true);
+          return;
+        }
+
+        await applySession(session);
+        setAuthHydrated(true);
+
+        if (wasEmailVerify) {
+          setDashboardWelcome('Welcome to PitchSide!');
         }
         return;
+      }
+
+      if (
+        (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') &&
+        !session
+      ) {
+        sessionUserIdRef.current = null;
+        currentUserIdRef.current = null;
+        setSessionUserId(null);
+        setCurrentUser(null);
+        localStorage.removeItem('pitchside_logged_in');
+        setAuthHydrated(true);
       }
     });
 
@@ -245,28 +357,22 @@ function AppShell() {
     if (emailVerifyPending.current) {
       verifyFallbackTimer = setTimeout(async () => {
         if (!emailVerifyPending.current) return;
-        const { data: { session } } = await supabase!.auth.getSession();
+        const {
+          data: { session },
+        } = await supabase!.auth.getSession();
         if (session?.user) {
           emailVerifyPending.current = false;
           clearAuthHash();
-          try {
-            const profile = await profileFromSession(session.user);
-            setCurrentUser(profile);
-            localStorage.setItem('pitchside_logged_in', JSON.stringify(profile));
-            setDashboardWelcome(`Welcome to PitchSide, ${profile.nickname}!`);
-            setRegisteredUsers((prev) =>
-              prev.some((u) => u.id === profile.id) ? prev : [...prev, profile],
-            );
-          } catch {
-            setGuestAuthView('login');
-            setLoginSuccessMessage('Email verified! Please log in.');
-          }
+          await applySession(session);
+          setAuthHydrated(true);
+          setDashboardWelcome('Welcome to PitchSide!');
         } else {
           emailVerifyPending.current = false;
           clearAuthHash();
           skipSplashForAuthRedirect();
           setGuestAuthView('login');
           setLoginSuccessMessage('Email verified! Please log in.');
+          setAuthHydrated(true);
         }
       }, 2500);
     }
@@ -275,7 +381,7 @@ function AppShell() {
       subscription.unsubscribe();
       if (verifyFallbackTimer) clearTimeout(verifyFallbackTimer);
     };
-  }, [skipSplashForAuthRedirect]);
+  }, [skipSplashForAuthRedirect, applySession]);
   // Initial players hydrate — subsequent updates come via the single realtime channel.
   useEffect(() => {
     if (!currentUser) return;
@@ -283,7 +389,11 @@ function AppShell() {
   }, [currentUser, loadRegisteredUsers]);
 
   const handleAuthSuccess = (user: UserProfile) => {
+    sessionUserIdRef.current = user.id;
+    currentUserIdRef.current = user.id;
+    setSessionUserId(user.id);
     setCurrentUser(user);
+    setAuthHydrated(true);
     localStorage.setItem('pitchside_logged_in', JSON.stringify(user));
     const pendingInvite = readPendingInvite();
     if (pendingInvite) {
@@ -297,6 +407,9 @@ function AppShell() {
     } catch (err) {
       console.warn('Supabase signOut failed during logout:', err);
     }
+    sessionUserIdRef.current = null;
+    currentUserIdRef.current = null;
+    setSessionUserId(null);
     setCurrentUser(null);
     localStorage.removeItem('pitchside_logged_in');
   };
@@ -467,24 +580,152 @@ function AppShell() {
                 path="*"
                 element={
                   <>
-            {currentUser ? (
-              needsOnboarding(currentUser) ? (
-                <OnboardingFlow
-                  user={currentUser}
-                  onComplete={(updated) => {
-                    setCurrentUser(updated);
-                    try {
-                      localStorage.setItem(
-                        "pitchside_logged_in",
-                        JSON.stringify(updated),
+            {/*
+              Auth waterfall (strict order):
+              1) No session → Login / Signup
+              2) Session, profile loading → spinner
+              3) Session, missing username → CompleteProfile
+              4) Session, missing country/sports → OnboardingFlow
+              5) Fully ready → Dashboard
+            */}
+            {!authHydrated || (sessionUserId && isLoadingProfile && !currentUser) ? (
+              <div className="flex-1 flex items-center justify-center py-16">
+                <div className="flex flex-col items-center gap-3 text-slate-400">
+                  <Loader2 className="h-6 w-6 animate-spin text-emerald-400" />
+                  <p className="text-xs font-mono uppercase tracking-wider">
+                    Loading account…
+                  </p>
+                </div>
+              </div>
+            ) : !sessionUserId ? (
+              guestAuthView === 'reset-request' || guestAuthView === 'reset-update' ? (
+                <div className="flex-1 flex items-center justify-center py-6">
+                  <ResetPasswordView
+                    mode={guestAuthView === 'reset-update' ? 'update' : 'request'}
+                    onBackToLogin={() => {
+                      setGuestAuthView('login');
+                      setLoginSuccessMessage(undefined);
+                    }}
+                    onPasswordUpdated={() => {
+                      setGuestAuthView('login');
+                      setLoginSuccessMessage(
+                        'Password updated successfully! Please sign in with your new password.',
                       );
-                    } catch {
-                      /* ignore */
-                    }
-                  }}
-                />
+                    }}
+                    onLogoClick={replaySplash}
+                  />
+                </div>
               ) : (
-              /* Authenticated Platform Dashboard */
+                /* Unauthorized Guest Landing — Login / Create Account */
+                <div className="flex-1 flex flex-col lg:flex-row items-center justify-center gap-12 max-w-5xl mx-auto w-full py-6">
+                  <div className="flex-1 space-y-6 text-left max-w-md hidden lg:block">
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-500/10 border border-blue-500/20 rounded-full text-xs font-semibold text-blue-400">
+                      <Award className="w-3.5 h-3.5" />
+                      <span>Ultimate Sports Score Predictor</span>
+                    </div>
+                    <h1 className="text-4xl font-extrabold font-display tracking-tight text-white leading-none">
+                      Take Your{' '}
+                      <span className="text-transparent bg-clip-text bg-linear-to-r from-blue-400 to-green-400">
+                        PitchSide
+                      </span>{' '}
+                      Seat
+                    </h1>
+                    <p className="text-slate-400 text-sm leading-relaxed">
+                      Compete in score predictions across premier Football and Rugby
+                      leagues. Prove your tactical prowess with our tailored points
+                      systems and climb to the top of the leaderboard.
+                    </p>
+                    <div className="space-y-3 pt-2">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center">
+                          <Star className="w-4.5 h-4.5 text-yellow-500" />
+                        </div>
+                        <div className="text-xs">
+                          <span className="font-bold text-white block">
+                            Accurate Point Calculators
+                          </span>
+                          <span className="text-slate-500">
+                            Rugby margin thresholds & Football exact lines formulas.
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center">
+                          <Lock className="w-4.5 h-4.5 text-purple-400" />
+                        </div>
+                        <div className="text-xs">
+                          <span className="font-bold text-white block">
+                            Secure Account Directory
+                          </span>
+                          <span className="text-slate-500">
+                            Profiles isolated safely with double verification.
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex-1 w-full flex items-center justify-center">
+                    {guestAuthView === 'signup' ? (
+                      <AuthFlow
+                        onAuthSuccess={handleAuthSuccess}
+                        onOpenRules={() => openRules()}
+                        registeredUsers={registeredUsers}
+                        onAddNewUser={handleAddNewUser}
+                        onSwitchToLogin={() => {
+                          setGuestAuthView('login');
+                          setLoginSuccessMessage(undefined);
+                        }}
+                        onLogoClick={replaySplash}
+                        onTakeTour={() => setShowProductTour(true)}
+                      />
+                    ) : (
+                      <LoginView
+                        onAuthSuccess={handleAuthSuccess}
+                        onAddNewUser={handleAddNewUser}
+                        onForgotPassword={() => setGuestAuthView('reset-request')}
+                        onCreateAccount={() => {
+                          setGuestAuthView('signup');
+                          setLoginSuccessMessage(undefined);
+                        }}
+                        successMessage={loginSuccessMessage}
+                        onLogoClick={replaySplash}
+                        onTakeTour={() => setShowProductTour(true)}
+                      />
+                    )}
+                  </div>
+                </div>
+              )
+            ) : needsUsername(currentUser) && currentUser ? (
+              <CompleteProfile
+                user={currentUser}
+                onComplete={(updated) => {
+                  setCurrentUser(updated);
+                  try {
+                    localStorage.setItem(
+                      'pitchside_logged_in',
+                      JSON.stringify(updated),
+                    );
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+              />
+            ) : currentUser && needsOnboarding(currentUser) ? (
+              <OnboardingFlow
+                user={currentUser}
+                onComplete={(updated) => {
+                  setCurrentUser(updated);
+                  try {
+                    localStorage.setItem(
+                      'pitchside_logged_in',
+                      JSON.stringify(updated),
+                    );
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+              />
+            ) : currentUser ? (
               <Dashboard
                 user={currentUser}
                 onLogout={handleLogout}
@@ -493,13 +734,15 @@ function AppShell() {
                 onOpenAdmin={() => setShowAdmin(true)}
                 onOpenAccount={openAccount}
                 externalSelectedLeagueId={externalLeagueSelection}
-                onClearExternalLeagueSelection={() => setExternalLeagueSelection(null)}
+                onClearExternalLeagueSelection={() =>
+                  setExternalLeagueSelection(null)
+                }
                 initialToast={dashboardWelcome}
                 onUserUpdate={(updated) => {
                   setCurrentUser(updated);
                   try {
                     localStorage.setItem(
-                      "pitchside_logged_in",
+                      'pitchside_logged_in',
                       JSON.stringify(updated),
                     );
                   } catch {
@@ -507,93 +750,13 @@ function AppShell() {
                   }
                 }}
               />
-              )
-            ) : guestAuthView === 'reset-request' || guestAuthView === 'reset-update' ? (
-              <div className="flex-1 flex items-center justify-center py-6">
-                <ResetPasswordView
-                  mode={guestAuthView === 'reset-update' ? 'update' : 'request'}
-                  onBackToLogin={() => {
-                    setGuestAuthView('login');
-                    setLoginSuccessMessage(undefined);
-                  }}
-                  onPasswordUpdated={() => {
-                    setGuestAuthView('login');
-                    setLoginSuccessMessage('Password updated successfully! Please sign in with your new password.');
-                  }}
-                  onLogoClick={replaySplash}
-                />
-              </div>
             ) : (
-              /* Unauthorized Guest Landing */
-              <div className="flex-1 flex flex-col lg:flex-row items-center justify-center gap-12 max-w-5xl mx-auto w-full py-6">
-
-                {/* Visual side branding */}
-                <div className="flex-1 space-y-6 text-left max-w-md hidden lg:block">
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-500/10 border border-blue-500/20 rounded-full text-xs font-semibold text-blue-400">
-                    <Award className="w-3.5 h-3.5" />
-                    <span>Ultimate Sports Score Predictor</span>
-                  </div>
-
-                  <h1 className="text-4xl font-extrabold font-display tracking-tight text-white leading-none">
-                    Take Your <span className="text-transparent bg-clip-text bg-linear-to-r from-blue-400 to-green-400">PitchSide</span> Seat
-                  </h1>
-
-                  <p className="text-slate-400 text-sm leading-relaxed">
-                    Compete in score predictions across premier Football and Rugby leagues. Prove your tactical prowess with our tailored points systems and climb to the top of the leaderboard.
+              <div className="flex-1 flex items-center justify-center py-16">
+                <div className="flex flex-col items-center gap-3 text-slate-400">
+                  <Loader2 className="h-6 w-6 animate-spin text-emerald-400" />
+                  <p className="text-xs font-mono uppercase tracking-wider">
+                    Loading account…
                   </p>
-
-                  <div className="space-y-3 pt-2">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center">
-                        <Star className="w-4.5 h-4.5 text-yellow-500" />
-                      </div>
-                      <div className="text-xs">
-                        <span className="font-bold text-white block">Accurate Point Calculators</span>
-                        <span className="text-slate-500">Rugby margin thresholds & Football exact lines formulas.</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center">
-                        <Lock className="w-4.5 h-4.5 text-purple-400" />
-                      </div>
-                      <div className="text-xs">
-                        <span className="font-bold text-white block">Secure Account Directory</span>
-                        <span className="text-slate-500">Profiles isolated safely with double verification.</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Auth form side */}
-                <div className="flex-1 w-full flex items-center justify-center">
-                  {guestAuthView === 'signup' ? (
-                    <AuthFlow
-                      onAuthSuccess={handleAuthSuccess}
-                      onOpenRules={() => openRules()}
-                      registeredUsers={registeredUsers}
-                      onAddNewUser={handleAddNewUser}
-                      onSwitchToLogin={() => {
-                        setGuestAuthView('login');
-                        setLoginSuccessMessage(undefined);
-                      }}
-                      onLogoClick={replaySplash}
-                      onTakeTour={() => setShowProductTour(true)}
-                    />
-                  ) : (
-                    <LoginView
-                      onAuthSuccess={handleAuthSuccess}
-                      onAddNewUser={handleAddNewUser}
-                      onForgotPassword={() => setGuestAuthView('reset-request')}
-                      onCreateAccount={() => {
-                        setGuestAuthView('signup');
-                        setLoginSuccessMessage(undefined);
-                      }}
-                      successMessage={loginSuccessMessage}
-                      onLogoClick={replaySplash}
-                      onTakeTour={() => setShowProductTour(true)}
-                    />
-                  )}
                 </div>
               </div>
             )}
