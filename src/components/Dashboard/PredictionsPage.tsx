@@ -9,22 +9,23 @@ import HowToPredictStepper, {
 import PredictionsFeedFilter, {
   type FeedSportFilter,
 } from "../predictions/PredictionsFeedFilter";
-import CompetitionFilterRail, {
-  useCompetitionFilterOptions,
-  usePersistedCompetitionFilter,
-} from "../predictions/CompetitionFilterRail";
-import MobileFilterFab from "../predictions/MobileFilterFab";
+import VerticalLeaguePills, {
+  ALL_LEAGUES_PILL_ID,
+  buildPillItems,
+} from "./VerticalLeaguePills";
+import TournamentOptInModal from "./TournamentOptInModal";
 import type { PredictionEntry } from "../../supabase";
+import { dbUpdateTournamentSubscriptions } from "../../supabase";
 import {
   SeenFeature,
   hasSeenFeature,
   type SeenFeatureKey,
   type SeenFeatures,
 } from "../../lib/seenFeatures";
+import { defaultSubscribedLeagues } from "../../utils/userOnboardingDefaults";
+import type { GolfCoverageTier } from "../../constants/golfCoverage";
 
-function howToPredictFeatureKey(
-  filter: FeedSportFilter,
-): SeenFeatureKey {
+function howToPredictFeatureKey(filter: FeedSportFilter): SeenFeatureKey {
   return filter === "rugby"
     ? SeenFeature.HowToPredictRugby
     : SeenFeature.HowToPredictFootball;
@@ -37,7 +38,6 @@ function toHowToPredictSport(filter: FeedSportFilter): HowToPredictSport {
 interface PredictionsPageProps {
   user: UserProfile;
   isUserInAnyLeague: boolean;
-  /** Kept for Dashboard leaderboard sync; feed uses local filter. */
   activeSport: string;
   setActiveSport: (sport: "football" | "rugby" | "golf" | "formula1") => void;
   selectedSport: SportType | null;
@@ -61,6 +61,7 @@ interface PredictionsPageProps {
   ) => void;
   onSubmitPrediction: (matchId: string, powerupInstanceId?: string | null) => void;
   onOpenLeagues: () => void;
+  onUserUpdate?: (user: UserProfile) => void;
   isOffline?: boolean;
   hasOfflineDraft?: boolean;
   onApplyOfflineDraft?: () => void | Promise<void>;
@@ -68,8 +69,8 @@ interface PredictionsPageProps {
 }
 
 /**
- * Predictions shell — fixed flag rail (viewport) + flush main column
- * aligned with the Dashboard "Hello" banner (same max-w parent).
+ * Predictions shell — subscribed pills in the left gutter; main column
+ * stays flush with WelcomeHeader (no ml/pl offset).
  */
 export default function PredictionsPage({
   user,
@@ -90,6 +91,7 @@ export default function PredictionsPage({
   onRugbyPredictionChange,
   onSubmitPrediction,
   onOpenLeagues,
+  onUserUpdate,
   isOffline = false,
   hasOfflineDraft = false,
   onApplyOfflineDraft,
@@ -97,6 +99,28 @@ export default function PredictionsPage({
 }: PredictionsPageProps) {
   const [sportFilter, setSportFilter] = useState<FeedSportFilter>("all");
   const [onlyUnmade, setOnlyUnmade] = useState(false);
+  const [optInOpen, setOptInOpen] = useState(false);
+
+  const subscribedLeagues = useMemo(() => {
+    if (user.subscribedLeagues && user.subscribedLeagues.length > 0) {
+      return user.subscribedLeagues;
+    }
+    return defaultSubscribedLeagues({
+      preferredNation: user.preferredNation,
+      selectedSports: user.selectedSports,
+    });
+  }, [user.subscribedLeagues, user.preferredNation, user.selectedSports]);
+
+  const golfTier: GolfCoverageTier = user.golfCoverageTier || "MAJORS_ONLY";
+  const pillItems = useMemo(
+    () => buildPillItems(subscribedLeagues, golfTier),
+    [subscribedLeagues, golfTier],
+  );
+
+  const subscribedCoreIds = useMemo(
+    () => new Set(subscribedLeagues.filter((id) => !id.startsWith("g-"))),
+    [subscribedLeagues],
+  );
 
   useEffect(() => {
     if (sportFilter === "football") {
@@ -116,13 +140,26 @@ export default function PredictionsPage({
     user.preferredSport,
   ]);
 
+  useEffect(() => {
+    if (
+      selectedCompId &&
+      selectedCompId !== ALL_LEAGUES_PILL_ID &&
+      !subscribedCoreIds.has(selectedCompId)
+    ) {
+      setSelectedCompId(null);
+    }
+  }, [selectedCompId, subscribedCoreIds, setSelectedCompId]);
+
   const feedMatches = useMemo(() => {
     const now = Date.now();
     let list = allMatches.filter((m) => {
       const sport = String(m.sport);
-      if (sportFilter === "football") return sport === "football";
-      if (sportFilter === "rugby") return sport === "rugby";
-      return sport === "football" || sport === "rugby";
+      if (sportFilter === "football" && sport !== "football") return false;
+      if (sportFilter === "rugby" && sport !== "rugby") return false;
+      if (sport !== "football" && sport !== "rugby") return false;
+      if (!subscribedCoreIds.has(m.competitionId)) return false;
+      if (selectedCompId && m.competitionId !== selectedCompId) return false;
+      return true;
     });
 
     if (onlyUnmade) {
@@ -141,7 +178,19 @@ export default function PredictionsPage({
       if (t !== 0) return t;
       return a.homeTeam.localeCompare(b.homeTeam);
     });
-  }, [allMatches, sportFilter, onlyUnmade, predictions]);
+  }, [
+    allMatches,
+    sportFilter,
+    onlyUnmade,
+    predictions,
+    subscribedCoreIds,
+    selectedCompId,
+  ]);
+
+  const subscribedCompetitions = useMemo(
+    () => filteredCompetitions.filter((c) => subscribedCoreIds.has(c.id)),
+    [filteredCompetitions, subscribedCoreIds],
+  );
 
   const predictorSport =
     sportFilter === "rugby"
@@ -150,33 +199,83 @@ export default function PredictionsPage({
         ? SportType.FOOTBALL
         : selectedSport ?? user.preferredSport ?? SportType.FOOTBALL;
 
-  const [compFilterIds, setCompFilterIds] = usePersistedCompetitionFilter();
-  const competitionFilterOptions = useCompetitionFilterOptions(feedMatches);
+  const handlePillSelect = (id: string | null) => {
+    if (id == null || id === ALL_LEAGUES_PILL_ID) {
+      setSelectedCompId(null);
+      setSportFilter("all");
+      return;
+    }
+    setSelectedCompId(id);
+    if (id.startsWith("r-")) {
+      setSportFilter("rugby");
+      setActiveSport("rugby");
+    } else {
+      setSportFilter("football");
+      setActiveSport("football");
+    }
+  };
+
+  const handleSaveOptIn = async (next: {
+    subscribedLeagues: string[];
+    golfCoverageTier: GolfCoverageTier;
+  }) => {
+    await dbUpdateTournamentSubscriptions(user.id, next);
+    const updated: UserProfile = {
+      ...user,
+      subscribedLeagues: next.subscribedLeagues,
+      golfCoverageTier: next.golfCoverageTier,
+    };
+    onUserUpdate?.(updated);
+    try {
+      localStorage.setItem("pitchside_logged_in", JSON.stringify(updated));
+    } catch {
+      /* ignore */
+    }
+  };
 
   return (
     <>
-      {/* Viewport-fixed nation filter — outside scroll / overflow containers. */}
+      {/*
+        Fixed gutter rail — does NOT offset the Predictions column.
+        Hello + Predictions share the same max-w container left edge.
+      */}
       <aside
-        data-tour="tour-filters"
-        className="fixed left-4 xl:left-8 top-32 flex flex-col gap-2 z-50 hidden md:flex"
-        aria-label="Nation filter"
+        data-tour="tour-league-pills"
+        className="fixed left-2 xl:left-4 top-32 z-40 hidden md:flex flex-col"
+        aria-label="Subscribed tournaments"
       >
-        <CompetitionFilterRail
-          options={competitionFilterOptions}
-          selectedIds={compFilterIds}
-          onChange={setCompFilterIds}
+        <VerticalLeaguePills
+          items={pillItems}
+          selectedId={selectedCompId}
+          onSelect={handlePillSelect}
+          onAddClick={() => setOptInOpen(true)}
+          orientation="vertical"
         />
       </aside>
 
-      {/* Main Predictions column — flush with Hello banner (same max-w parent). */}
+      {/* Flush with WelcomeHeader — no ml-/pl- offsets */}
       <div className="w-full flex flex-col space-y-4">
         <div>
           <h1 className="text-xl font-display font-extrabold text-white tracking-tight">
             Predictions
           </h1>
           <p className="text-xs text-slate-500 font-sans mt-1 min-h-4">
-            Upcoming and recent fixtures across your sports.
+            Fixtures from your opted-in tournaments.
           </p>
+        </div>
+
+        <div
+          className="md:hidden w-full"
+          data-tour="tour-league-pills-mobile"
+          aria-label="Subscribed tournaments"
+        >
+          <VerticalLeaguePills
+            items={pillItems}
+            selectedId={selectedCompId}
+            onSelect={handlePillSelect}
+            onAddClick={() => setOptInOpen(true)}
+            orientation="horizontal"
+          />
         </div>
 
         <div data-tour="tour-filters-sports">
@@ -230,7 +329,7 @@ export default function PredictionsPage({
           allMatches={allMatches}
           sortedActiveMatches={feedMatches}
           activeMatches={feedMatches}
-          filteredCompetitions={filteredCompetitions}
+          filteredCompetitions={subscribedCompetitions}
           selectedCompetition={selectedCompetition}
           predictions={predictions}
           isEmailVerified={isEmailVerified}
@@ -242,16 +341,17 @@ export default function PredictionsPage({
           userId={user.id}
           unifiedFeed
           feedSportFilter={sportFilter}
-          competitionFilterIds={compFilterIds}
-          onCompetitionFilterIdsChange={setCompFilterIds}
         />
       </div>
 
-      <MobileFilterFab
-        options={competitionFilterOptions}
-        selectedIds={compFilterIds}
-        onChange={setCompFilterIds}
-      />
+      {optInOpen && (
+        <TournamentOptInModal
+          subscribedLeagues={subscribedLeagues}
+          golfCoverageTier={golfTier}
+          onClose={() => setOptInOpen(false)}
+          onSave={handleSaveOptIn}
+        />
+      )}
     </>
   );
 }

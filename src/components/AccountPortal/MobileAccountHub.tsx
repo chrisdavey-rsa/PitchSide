@@ -8,9 +8,11 @@ import {
   ShieldAlert,
   LogOut,
   Lock,
+  Layers,
 } from 'lucide-react';
 import { UserProfile, League, Competition } from '../../types';
 import { MyLeagues } from './MyLeagues';
+import { LeaguesAndCompetitions } from './LeaguesAndCompetitions';
 import { btnClose } from '../../ui';
 import LogoutConfirmModal from '../LogoutConfirmModal';
 
@@ -21,6 +23,7 @@ interface MobileAccountHubProps {
   setSelectedSeason: (season: string) => void;
   getCompetitions: () => Competition[];
   onSelectLeague?: (leagueId: string) => void;
+  onUpdateUser: (updated: UserProfile) => void;
   onOpenRules: () => void;
   /** Admin console — only wired when `user.isAdmin`. */
   onOpenAdmin?: () => void;
@@ -38,14 +41,20 @@ export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
   setSelectedSeason,
   getCompetitions,
   onSelectLeague,
+  onUpdateUser,
   onOpenRules,
   onOpenAdmin,
   onClose,
   onLogout,
   embedded = false,
 }) => {
-  const [leaguesOpen, setLeaguesOpen] = useState(true);
+  const [competitionsOpen, setCompetitionsOpen] = useState(true);
+  const [leaguesOpen, setLeaguesOpen] = useState(false);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
+  const [compStatus, setCompStatus] = useState<{
+    text: string;
+    mode: 'success' | 'error' | 'none';
+  }>({ text: '', mode: 'none' });
   const initials =
     (user.nickname || `${user.firstName?.[0] ?? ''}${user.surname?.[0] ?? ''}` || '?')
       .slice(0, 2)
@@ -192,6 +201,51 @@ export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
           <div className="rounded-xl border border-slate-800/80 bg-slate-900/50 overflow-hidden">
             <button
               type="button"
+              onClick={() => setCompetitionsOpen((o) => !o)}
+              className="w-full text-left px-4 py-3.5 flex items-center gap-3 transition-colors cursor-pointer hover:bg-slate-900/80"
+              aria-expanded={competitionsOpen}
+            >
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
+                <Layers className="w-4.5 h-4.5 text-emerald-400" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-white">
+                  Leagues and Competitions
+                </span>
+                <span className="block text-[10px] text-slate-500 font-mono mt-0.5">
+                  Manage Predictions feed opt-ins
+                </span>
+              </div>
+              <ChevronDown
+                className={`w-4 h-4 text-slate-500 shrink-0 transition-transform ${competitionsOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+
+            {competitionsOpen && (
+              <div className="border-t border-slate-800/60">
+                <div className="p-3 space-y-2">
+                  {compStatus.mode !== 'none' && (
+                    <p
+                      className={`text-[10px] font-mono ${
+                        compStatus.mode === 'success' ? 'text-emerald-400' : 'text-red-400'
+                      }`}
+                    >
+                      {compStatus.text}
+                    </p>
+                  )}
+                  <LeaguesAndCompetitions
+                    user={user}
+                    onUpdateUser={onUpdateUser}
+                    setStatusMsg={setCompStatus}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-slate-800/80 bg-slate-900/50 overflow-hidden">
+            <button
+              type="button"
               onClick={() => setLeaguesOpen((o) => !o)}
               className="w-full text-left px-4 py-3.5 flex items-center gap-3 transition-colors cursor-pointer hover:bg-slate-900/80"
               aria-expanded={leaguesOpen}
@@ -200,7 +254,7 @@ export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
                 <Trophy className="w-4.5 h-4.5 text-emerald-400" />
               </div>
               <div className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold text-white">League participation</span>
+                <span className="block text-sm font-semibold text-white">My Leagues</span>
                 <span className="block text-[10px] text-slate-500 font-mono mt-0.5">
                   {activeLeagueCount === 0
                     ? 'No active leagues yet'

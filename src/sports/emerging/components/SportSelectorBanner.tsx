@@ -1,30 +1,26 @@
 /**
  * Horizontal sport selector banner for the predictions workspace.
- * Players: Football / Rugby only.
- * Admins: also Formula 1 / Golf (build preview).
+ * Football / Rugby are active; Golf / F1 show as Coming Soon (disabled).
  */
 
 import React from 'react';
-import { isSportAccessible } from '../featureFlags';
+import { Lock } from 'lucide-react';
 import { SportIcon } from '../sportIcons';
-import {
-  EMERGING_SPORT_META,
-  type SportKey,
-  type UserRole,
-} from '../types';
+import type { SportKey } from '../types';
 
 export type SportSelectorBannerProps = {
   activeSport: SportKey;
   onSelectSport: (sport: SportKey) => void;
-  userRole: UserRole;
+  /** Kept for API compatibility; Golf/F1 are Coming Soon for all roles. */
+  userRole?: string | null;
   className?: string;
 };
 
-const PILLS: { key: SportKey; label: string }[] = [
+const PILLS: { key: SportKey; label: string; comingSoon?: boolean }[] = [
   { key: 'football', label: 'Football' },
   { key: 'rugby', label: 'Rugby' },
-  { key: 'formula1', label: 'Formula 1' },
-  { key: 'golf', label: 'Golf' },
+  { key: 'formula1', label: 'F1', comingSoon: true },
+  { key: 'golf', label: 'Golf', comingSoon: true },
 ];
 
 const PILL_BASE =
@@ -46,27 +42,38 @@ function pillActiveClass(key: SportKey): string {
 export default function SportSelectorBanner({
   activeSport,
   onSelectSport,
-  userRole,
   className = '',
 }: SportSelectorBannerProps) {
-  const visiblePills = PILLS.filter((p) => isSportAccessible(p.key, userRole));
-  const gridClass =
-    visiblePills.length <= 2
-      ? 'grid-cols-2'
-      : 'grid-cols-2 sm:grid-cols-4';
-
   return (
     <div
       role="tablist"
       aria-label="Sport workspace"
-      className={`grid ${gridClass} gap-1.5 p-1.5 rounded-xl bg-slate-950/70 border border-slate-800 ${className}`}
+      className={`grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1.5 rounded-xl bg-slate-950/70 border border-slate-800 ${className}`}
     >
-      {visiblePills.map(({ key, label }) => {
-        const active = activeSport === key;
-        const displayLabel =
-          key === 'golf' || key === 'formula1'
-            ? EMERGING_SPORT_META[key].label
-            : label;
+      {PILLS.map(({ key, label, comingSoon }) => {
+        const active = activeSport === key && !comingSoon;
+
+        if (comingSoon) {
+          return (
+            <span
+              key={key}
+              role="tab"
+              aria-selected={false}
+              aria-disabled="true"
+              title="Coming soon"
+              className={`${PILL_BASE} opacity-50 pointer-events-none cursor-not-allowed bg-transparent text-slate-500 border-transparent`}
+            >
+              <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              <SportIcon sport={key} colored className="h-7 w-7 sm:h-8 sm:w-8 opacity-60" />
+              <span className="truncate flex flex-col items-start leading-tight">
+                <span>{label}</span>
+                <span className="text-[8px] font-mono uppercase tracking-wider text-slate-600">
+                  Coming Soon
+                </span>
+              </span>
+            </span>
+          );
+        }
 
         return (
           <button
@@ -82,7 +89,7 @@ export default function SportSelectorBanner({
             }`}
           >
             <SportIcon sport={key} colored className="h-7 w-7 sm:h-8 sm:w-8" />
-            <span className="truncate">{displayLabel}</span>
+            <span className="truncate">{label}</span>
           </button>
         );
       })}

@@ -20,16 +20,24 @@ import { filterTeams } from "../data/supportedTeams";
 import { useTeamsCatalogQuery } from "../hooks/usePitchsideQueries";
 import { supabase } from "../supabase";
 import PitchSideLogo from "./PitchSideLogo";
+import {
+  defaultGolfCoverageTier,
+  defaultSubscribedLeagues,
+  preferredNationFromLabel,
+} from "../utils/userOnboardingDefaults";
+import { GOLF_LEAGUE_ID_BY_TIER } from "../constants/golfCoverage";
 
 type Props = {
   user: UserProfile;
   onComplete: (updated: UserProfile) => void;
 };
 
-/** Player-facing sports only — F1/Golf remain admin-preview until public launch. */
-const SPORT_OPTIONS: { key: SportKey; label: string }[] = [
+/** Core sports selectable; Golf / F1 shown as Coming Soon. */
+const SPORT_OPTIONS: { key: SportKey; label: string; comingSoon?: boolean }[] = [
   { key: "football", label: "Football" },
   { key: "rugby", label: "Rugby" },
+  { key: "formula1", label: "F1", comingSoon: true },
+  { key: "golf", label: "Golf", comingSoon: true },
 ];
 
 export default function OnboardingFlow({ user, onComplete }: Props) {
@@ -162,13 +170,30 @@ export default function OnboardingFlow({ user, onComplete }: Props) {
     setSaving(true);
     setError("");
     try {
+      const nationIso = preferredNationFromLabel(nationality.trim());
+      const golfTier = defaultGolfCoverageTier(selectedSports);
+      const subscribed = defaultSubscribedLeagues({
+        preferredNation: nationIso,
+        selectedSports,
+      });
+      // Ensure golf league id matches tier when golf is selected.
+      const leagues = selectedSports.includes("golf")
+        ? [
+            ...subscribed.filter((id) => !id.startsWith("g-")),
+            GOLF_LEAGUE_ID_BY_TIER[golfTier],
+          ]
+        : subscribed;
+
       const payload = {
         nationality: nationality.trim(),
+        preferred_nation: nationIso,
         selected_sports: selectedSports,
         supported_team: needsTeamFavorites ? supportedTeam.trim() : null,
         preferred_sport: preferredSport ?? null,
         favorite_f1_team: needsF1 ? favoriteF1 : null,
         favorite_golfer: needsGolf ? favoriteGolfer : null,
+        subscribed_leagues: leagues,
+        golf_coverage_tier: golfTier,
       };
 
       const { error: updateError } = await supabase
@@ -181,11 +206,14 @@ export default function OnboardingFlow({ user, onComplete }: Props) {
       const updated: UserProfile = {
         ...user,
         nationality: payload.nationality,
+        preferredNation: nationIso,
         selectedSports,
         supportedTeam: payload.supported_team || undefined,
         preferredSport,
         favoriteF1Team: payload.favorite_f1_team,
         favoriteGolfer: payload.favorite_golfer,
+        subscribedLeagues: leagues,
+        golfCoverageTier: golfTier,
       };
       onComplete(updated);
     } catch (err: unknown) {
@@ -312,8 +340,26 @@ export default function OnboardingFlow({ user, onComplete }: Props) {
                   Pick at least one. You can change this later in settings.
                 </p>
                 <div className="grid grid-cols-2 gap-3">
-                  {SPORT_OPTIONS.map(({ key, label }) => {
+                  {SPORT_OPTIONS.map(({ key, label, comingSoon }) => {
                     const active = selectedSports.includes(key);
+                    if (comingSoon) {
+                      return (
+                        <span
+                          key={key}
+                          aria-disabled="true"
+                          title="Coming soon"
+                          className="flex flex-col items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-4 text-slate-500 opacity-50 pointer-events-none cursor-not-allowed"
+                        >
+                          <SportIcon sport={key} className="h-10 w-10 opacity-60" />
+                          <span className="text-xs font-display font-bold uppercase tracking-wide">
+                            {label}
+                          </span>
+                          <span className="text-[8px] font-mono uppercase tracking-wider text-slate-600">
+                            Coming Soon
+                          </span>
+                        </span>
+                      );
+                    }
                     return (
                       <button
                         key={key}

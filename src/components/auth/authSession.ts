@@ -48,7 +48,7 @@ export async function profileFromSession(
   const { data: row } = await supabase
     .from('profiles')
     .select(
-      'id, first_name, surname, email, username, dob, phone, nationality, supported_team, preferred_sport, is_admin, is_profile_public, created_at, seen_features, selected_sports, favorite_f1_team, favorite_golfer, role, golf_mulligans_available, age_confirmed_13, terms_accepted_at, privacy_accepted_at',
+      'id, first_name, surname, email, username, dob, phone, nationality, supported_team, preferred_sport, is_admin, is_profile_public, created_at, seen_features, selected_sports, favorite_f1_team, favorite_golfer, role, golf_mulligans_available, age_confirmed_13, terms_accepted_at, privacy_accepted_at, subscribed_leagues, golf_coverage_tier, preferred_nation',
     )
     .eq('id', authUser.id)
     .single();
@@ -105,6 +105,13 @@ export async function profileFromSession(
       favoriteGolfer: row.favorite_golfer ?? null,
       role: row.role ?? null,
       golfMulligansAvailable: row.golf_mulligans_available ?? null,
+      subscribedLeagues: Array.isArray(row.subscribed_leagues)
+        ? row.subscribed_leagues.map(String)
+        : [],
+      golfCoverageTier:
+        (row.golf_coverage_tier as UserProfile["golfCoverageTier"]) ||
+        "MAJORS_ONLY",
+      preferredNation: row.preferred_nation ?? null,
       isProfilePublic: row.is_profile_public ?? undefined,
       seenFeatures: parseSeenFeatures(row.seen_features),
     };

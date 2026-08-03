@@ -12,15 +12,16 @@ export function isEmergingSport(sportKey: string): sportKey is EmergingSportKey 
 }
 
 /**
+ * Golf / F1 are globally Coming Soon — not selectable for any role.
  * @param sportKey  e.g. 'golf' | 'formula1' (also accepts core sports → always true)
- * @param userRole  from `public.profiles.role` ('admin' | 'player')
+ * @param _userRole kept for call-site compatibility
  */
 export function isSportAccessible(
   sportKey: string,
-  userRole: UserRole | string | null | undefined,
+  _userRole?: UserRole | string | null,
 ): boolean {
   if (!isEmergingSport(sportKey)) return true;
-  return normalizeRole(userRole) === 'admin';
+  return false;
 }
 
 export function normalizeRole(

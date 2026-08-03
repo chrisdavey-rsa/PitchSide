@@ -77,6 +77,14 @@ export const FOOTBALL_LEAGUE_META: CompetitionMeta[] = [
     sport: SportType.FOOTBALL,
   },
   {
+    id: "f-eflcup",
+    name: "EFL Cup",
+    apiSportsId: 48,
+    flagCode: "gb-eng",
+    nationality: "England",
+    sport: SportType.FOOTBALL,
+  },
+  {
     id: "f-worldcup",
     name: "FIFA World Cup",
     apiSportsId: 1,
@@ -90,6 +98,14 @@ export const FOOTBALL_LEAGUE_META: CompetitionMeta[] = [
     apiSportsId: 140,
     flagCode: "es",
     nationality: "Spain",
+    sport: SportType.FOOTBALL,
+  },
+  {
+    id: "f-seriea",
+    name: "Serie A",
+    apiSportsId: 135,
+    flagCode: "it",
+    nationality: "Italy",
     sport: SportType.FOOTBALL,
   },
   {
@@ -189,6 +205,7 @@ export const FILTER_NATIONS: readonly FilterNation[] = [
       "f-epl",
       "f-championship",
       "f-facup",
+      "f-eflcup",
       "f-shield",
       "r-prem",
     ],
@@ -204,6 +221,12 @@ export const FILTER_NATIONS: readonly FilterNation[] = [
     label: "Spain",
     flagCode: "es",
     competitionIds: ["f-laliga"],
+  },
+  {
+    id: "italy",
+    label: "Italy",
+    flagCode: "it",
+    competitionIds: ["f-seriea"],
   },
   {
     id: "germany",

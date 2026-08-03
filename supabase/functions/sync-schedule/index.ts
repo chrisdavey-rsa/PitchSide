@@ -26,6 +26,10 @@ import {
   footballSlugForApiId,
   footballTitleForSlug,
 } from "../_shared/footballLeagues.ts";
+import {
+  shouldIngestFixture,
+  tagPitchsidePick,
+} from "../_shared/fixtureIngestion.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -153,6 +157,12 @@ function normalizeFixture(sport: Sport, item: any) {
     row.actual_away_score = awayScore;
   }
 
+  row.is_pitchside_pick = tagPitchsidePick({
+    sport,
+    homeTeam: row.home_team as string | null,
+    awayTeam: row.away_team as string | null,
+  });
+
   return row;
 }
 
@@ -257,13 +267,28 @@ Deno.serve(async (req: Request) => {
     });
 
     const byId = new Map<string, Record<string, unknown>>();
+    let skippedByPolicy = 0;
     for (const item of catalogFixtures) {
       const row = normalizeFixture(sport, item);
-      if (row.id && row.home_team && row.away_team) {
-        byId.set(String(row.id), row);
+      if (!row.id || !row.home_team || !row.away_team) continue;
+      const allow = shouldIngestFixture({
+        competitionId: row.competition_id as string | null,
+        roundName: row.round_name as string | null,
+        homeTeam: row.home_team as string | null,
+        awayTeam: row.away_team as string | null,
+      });
+      if (!allow) {
+        skippedByPolicy += 1;
+        continue;
       }
+      byId.set(String(row.id), row);
     }
     const rows = [...byId.values()];
+    if (skippedByPolicy > 0) {
+      console.log(
+        `[sync-schedule] ${sport}: skipped ${skippedByPolicy} fixtures (cup/UEFA/preeminent policy)`,
+      );
+    }
 
     const serviceName =
       sport === "football" ? "Football Schedule Sync" : "Rugby Schedule Sync";

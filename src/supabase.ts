@@ -64,11 +64,11 @@ export async function testSupabaseConnection(): Promise<{ ok: boolean; error?: s
 
 /** Columns needed to hydrate UserProfile from profiles (no SELECT *). */
 const PROFILE_LIST_COLUMNS =
-  "id, first_name, surname, email, username, dob, phone, nationality, supported_team, preferred_sport, is_admin, is_verified, is_profile_public, created_at, seen_features, selected_sports, favorite_f1_team, favorite_golfer, role, golf_mulligans_available, age_confirmed_13, terms_accepted_at, privacy_accepted_at";
+  "id, first_name, surname, email, username, dob, phone, nationality, supported_team, preferred_sport, is_admin, is_verified, is_profile_public, created_at, seen_features, selected_sports, favorite_f1_team, favorite_golfer, role, golf_mulligans_available, age_confirmed_13, terms_accepted_at, privacy_accepted_at, subscribed_leagues, golf_coverage_tier, preferred_nation";
 
 /** Match columns used by mapMatchRow — keep in sync with Match domain model. */
 const MATCH_LIST_COLUMNS =
-  "id, external_fixture_id, competition_id, competition_name, sport, home_team, away_team, actual_home_score, actual_away_score, kickoff_time, status, match_tag, round_name, venue_name, odds_home_win, odds_draw, odds_away_win, base_multiplier, provisional_home_score, provisional_away_score, match_minute, is_visible";
+  "id, external_fixture_id, competition_id, competition_name, sport, home_team, away_team, actual_home_score, actual_away_score, kickoff_time, status, match_tag, round_name, venue_name, odds_home_win, odds_draw, odds_away_win, base_multiplier, provisional_home_score, provisional_away_score, match_minute, is_visible, is_pitchside_pick";
 
 const PREDICTION_USER_COLUMNS =
   "match_id, predicted_home_score, predicted_away_score, submitted, created_at, provisional_points, points_won, sport, applied_powerup_id";
@@ -114,6 +114,9 @@ export async function dbFetchPlayers(): Promise<UserProfile[]> {
     age_confirmed_13?: boolean | null;
     terms_accepted_at?: string | null;
     privacy_accepted_at?: string | null;
+    subscribed_leagues?: string[] | null;
+    golf_coverage_tier?: string | null;
+    preferred_nation?: string | null;
   };
 
   const activeData = data.filter(
@@ -148,6 +151,12 @@ export async function dbFetchPlayers(): Promise<UserProfile[]> {
     favoriteGolfer: d.favorite_golfer ?? null,
     role: d.role ?? null,
     golfMulligansAvailable: d.golf_mulligans_available ?? null,
+    subscribedLeagues: Array.isArray(d.subscribed_leagues)
+      ? d.subscribed_leagues.map(String)
+      : [],
+    golfCoverageTier: (d.golf_coverage_tier as UserProfile["golfCoverageTier"]) ||
+      "MAJORS_ONLY",
+    preferredNation: d.preferred_nation ?? null,
     isProfilePublic: d.is_profile_public ?? undefined,
     seenFeatures: parseSeenFeatures(d.seen_features),
   }));
@@ -173,6 +182,29 @@ export async function dbCreatePlayer(profile: UserProfile): Promise<void> {
   };
 
   const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "id" });
+  if (error) throw error;
+}
+
+/** Persist tournament opt-in preferences. */
+export async function dbUpdateTournamentSubscriptions(
+  userId: string,
+  opts: {
+    subscribedLeagues: string[];
+    golfCoverageTier?: UserProfile["golfCoverageTier"];
+    preferredNation?: string | null;
+  },
+): Promise<void> {
+  if (!supabase) throw new Error("Database not connected.");
+  const payload: Record<string, unknown> = {
+    subscribed_leagues: opts.subscribedLeagues,
+  };
+  if (opts.golfCoverageTier) {
+    payload.golf_coverage_tier = opts.golfCoverageTier;
+  }
+  if (opts.preferredNation !== undefined) {
+    payload.preferred_nation = opts.preferredNation;
+  }
+  const { error } = await supabase.from("profiles").update(payload).eq("id", userId);
   if (error) throw error;
 }
 
@@ -248,6 +280,8 @@ export type PredictionEntry = {
   lockedAt?: string;
   /** Live "As It Stands" points while the match is in play. */
   provisionalPoints?: number;
+  /** Settled points after FT (predictions.points_won). */
+  pointsWon?: number | null;
   /** Attached power-up instance id (consumed at lock). */
   appliedPowerupId?: string | null;
 };
@@ -298,6 +332,7 @@ export async function dbFetchPredictions(
       submitted?: boolean | null;
       created_at?: string | null;
       provisional_points?: number | null;
+      points_won?: number | null;
       applied_powerup_id?: string | null;
     }) => {
       result[p.match_id] = {
@@ -306,6 +341,7 @@ export async function dbFetchPredictions(
         submitted: p.submitted ?? false,
         lockedAt: p.submitted ? p.created_at ?? undefined : undefined,
         provisionalPoints: p.provisional_points ?? 0,
+        pointsWon: p.points_won != null ? Number(p.points_won) : null,
         appliedPowerupId: p.applied_powerup_id ?? null,
       };
     });
@@ -347,6 +383,35 @@ export async function dbFetchLeagueSubmittedPredictions(
     home: Number(p.predicted_home_score) || 0,
     away: Number(p.predicted_away_score) || 0,
     submitted: true,
+    pointsWon: p.points_won != null ? Number(p.points_won) : null,
+  }));
+}
+
+/**
+ * Submitted predictions for every member of a league (SECURITY DEFINER RPC).
+ * Required because predictions RLS is own-row only.
+ */
+export async function dbFetchLeagueMemberPredictions(
+  leagueId: string,
+  sinceIso?: string,
+): Promise<LeagueSubmittedPredictionRow[]> {
+  if (!supabase) throw new Error("Database not connected.");
+  if (!leagueId) return [];
+
+  const { data, error } = await supabase.rpc("get_league_member_predictions", {
+    p_league_id: leagueId,
+    ...(sinceIso ? { p_since: sinceIso } : {}),
+  });
+
+  if (error) throw error;
+
+  return (data || []).map((p: any) => ({
+    userId: String(p.user_id),
+    matchId: String(p.match_id),
+    sport: (p.sport as SportType) || SportType.FOOTBALL,
+    home: Number(p.predicted_home_score) || 0,
+    away: Number(p.predicted_away_score) || 0,
+    submitted: p.submitted !== false,
     pointsWon: p.points_won != null ? Number(p.points_won) : null,
   }));
 }
@@ -629,6 +694,7 @@ export function mapMatchRow(d: Record<string, unknown>): Match {
               : null,
       }) ?? undefined,
     isVisible: d.is_visible !== false,
+    isPitchsidePick: d.is_pitchside_pick === true,
   };
 }
 
@@ -1467,9 +1533,16 @@ export interface LeaderboardRecord {
   points: number;
   pointsFootball: number;
   pointsRugby: number;
+  /** All submitted predictions (engagement / activity). */
   predictionsMade: number;
   predictionsFootball: number;
   predictionsRugby: number;
+  /** Completed (FT) predictions only — accuracy & yield denominator. */
+  settledPredictionsFootball: number;
+  settledPredictionsRugby: number;
+  /** Raw base points (no power-up multipliers) for accuracy %. */
+  basePointsFootball: number;
+  basePointsRugby: number;
   accuracy: string;
   accuracyFootball: string;
   accuracyRugby: string;
@@ -1488,6 +1561,19 @@ export interface LeaderboardRecord {
   dropsAllowed: number;
   dropsAllowedFootball: number;
   dropsAllowedRugby: number;
+  perfectHitsFootball: number;
+  perfectHitsRugby: number;
+  correctOutcomesFootball: number;
+  correctOutcomesRugby: number;
+  /** Base-point outcome tiers (5 / 3 / 1 / 0) for accuracy drill-down. */
+  hitsExactFootball: number;
+  hitsCloseFootball: number;
+  hitsWinnerFootball: number;
+  hitsWrongFootball: number;
+  hitsExactRugby: number;
+  hitsCloseRugby: number;
+  hitsWinnerRugby: number;
+  hitsWrongRugby: number;
   predictions: Record<string, { home: number; away: number; submitted: boolean }>;
 }
 
@@ -1505,32 +1591,83 @@ export function dropsAllowedForCompetition(competitionId?: string | null): numbe
   return COMPETITION_DROPS_ALLOWED[competitionId] ?? 0;
 }
 
-function formatAccuracy(points: number, predictions: number): string {
-  if (predictions <= 0) return "0%";
-  // Max base points per prediction is 5 (exact score / exact rugby margin).
-  return `${Math.round((points / (predictions * 5)) * 100)}%`;
+/** Coerce RPC / partial record values to a finite number (default 0). */
+export function safeNum(value: unknown, fallback = 0): number {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/** Accuracy = (base_points / (settled_predictions × 5)) × 100 — no power-up multipliers. */
+export function formatAccuracy(
+  basePoints: number,
+  settledPredictions: number,
+): string {
+  const base = safeNum(basePoints);
+  const settled = safeNum(settledPredictions);
+  if (settled <= 0) return "0%";
+  return `${Math.round((base / (settled * 5)) * 100)}%`;
+}
+
+/** Strike Rate = total_points / settled_predictions (includes power-up scoring). */
+export function formatStrikeRate(
+  totalPoints: number,
+  settledPredictions: number,
+): number {
+  const points = safeNum(totalPoints);
+  const settled = safeNum(settledPredictions);
+  if (settled <= 0) return 0;
+  return points / settled;
+}
+
+/** @deprecated Prefer formatStrikeRate */
+export function formatYield(
+  totalPoints: number,
+  settledPredictions: number,
+): number {
+  return formatStrikeRate(totalPoints, settledPredictions);
 }
 
 function mapRpcLeaderboardRow(
   row: Record<string, unknown>,
   currentUserId?: string,
 ): LeaderboardRecord {
-  const pointsFootball = Number(row.points_football ?? 0);
-  const pointsRugby = Number(row.points_rugby ?? 0);
-  const predictionsFootball = Number(row.predictions_football ?? 0);
-  const predictionsRugby = Number(row.predictions_rugby ?? 0);
-  const totalPoints = Number(row.total_points ?? pointsFootball + pointsRugby);
+  const pointsFootball = safeNum(row.points_football);
+  const pointsRugby = safeNum(row.points_rugby);
+  const predictionsFootball = safeNum(row.predictions_football);
+  const predictionsRugby = safeNum(row.predictions_rugby);
+  const settledPredictionsFootball = safeNum(
+    row.settled_predictions_football ?? predictionsFootball,
+  );
+  const settledPredictionsRugby = safeNum(
+    row.settled_predictions_rugby ?? predictionsRugby,
+  );
+  const totalPoints = safeNum(row.total_points, pointsFootball + pointsRugby);
   const totalPredictions = predictionsFootball + predictionsRugby;
+  const perfectHitsFootball = safeNum(row.perfect_hits_football);
+  const perfectHitsRugby = safeNum(row.perfect_hits_rugby);
+  const basePointsFootball = safeNum(row.base_points_football);
+  const basePointsRugby = safeNum(row.base_points_rugby);
+  const settledTotal = settledPredictionsFootball + settledPredictionsRugby;
+  const basePointsTotal = basePointsFootball + basePointsRugby;
 
-  const ghostPointsFootball = Number(row.ghost_points_football ?? pointsFootball);
-  const ghostPointsRugby = Number(row.ghost_points_rugby ?? pointsRugby);
-  const ghostPoints = Number(row.ghost_points ?? ghostPointsFootball + ghostPointsRugby);
-  const dropsUsedFootball = Number(row.drops_used_football ?? 0);
-  const dropsUsedRugby = Number(row.drops_used_rugby ?? 0);
-  const dropsUsed = Number(row.drops_used ?? dropsUsedFootball + dropsUsedRugby);
-  const dropsAllowedFootball = Number(row.drops_allowed_football ?? 0);
-  const dropsAllowedRugby = Number(row.drops_allowed_rugby ?? 0);
-  const dropsAllowed = Number(row.drops_allowed ?? dropsAllowedFootball + dropsAllowedRugby);
+  const ghostPointsFootball = safeNum(
+    row.ghost_points_football,
+    pointsFootball,
+  );
+  const ghostPointsRugby = safeNum(row.ghost_points_rugby, pointsRugby);
+  const ghostPoints = safeNum(
+    row.ghost_points,
+    ghostPointsFootball + ghostPointsRugby,
+  );
+  const dropsUsedFootball = safeNum(row.drops_used_football);
+  const dropsUsedRugby = safeNum(row.drops_used_rugby);
+  const dropsUsed = safeNum(row.drops_used, dropsUsedFootball + dropsUsedRugby);
+  const dropsAllowedFootball = safeNum(row.drops_allowed_football);
+  const dropsAllowedRugby = safeNum(row.drops_allowed_rugby);
+  const dropsAllowed = safeNum(
+    row.drops_allowed,
+    dropsAllowedFootball + dropsAllowedRugby,
+  );
 
   return {
     playerId: String(row.player_id),
@@ -1544,9 +1681,13 @@ function mapRpcLeaderboardRow(
     predictionsMade: totalPredictions,
     predictionsFootball,
     predictionsRugby,
-    accuracy: formatAccuracy(totalPoints, totalPredictions),
-    accuracyFootball: formatAccuracy(pointsFootball, predictionsFootball),
-    accuracyRugby: formatAccuracy(pointsRugby, predictionsRugby),
+    settledPredictionsFootball,
+    settledPredictionsRugby,
+    basePointsFootball,
+    basePointsRugby,
+    accuracy: formatAccuracy(basePointsTotal, settledTotal),
+    accuracyFootball: formatAccuracy(basePointsFootball, settledPredictionsFootball),
+    accuracyRugby: formatAccuracy(basePointsRugby, settledPredictionsRugby),
     isCurrentUser: String(row.player_id) === currentUserId,
     isProfilePublic: row.is_profile_public !== false,
     ghostPoints,
@@ -1558,6 +1699,18 @@ function mapRpcLeaderboardRow(
     dropsAllowed,
     dropsAllowedFootball,
     dropsAllowedRugby,
+    perfectHitsFootball,
+    perfectHitsRugby,
+    correctOutcomesFootball: safeNum(row.correct_outcomes_football),
+    correctOutcomesRugby: safeNum(row.correct_outcomes_rugby),
+    hitsExactFootball: safeNum(row.hits_exact_football),
+    hitsCloseFootball: safeNum(row.hits_close_football),
+    hitsWinnerFootball: safeNum(row.hits_winner_football),
+    hitsWrongFootball: safeNum(row.hits_wrong_football),
+    hitsExactRugby: safeNum(row.hits_exact_rugby),
+    hitsCloseRugby: safeNum(row.hits_close_rugby),
+    hitsWinnerRugby: safeNum(row.hits_winner_rugby),
+    hitsWrongRugby: safeNum(row.hits_wrong_rugby),
     predictions: {},
   };
 }
@@ -1606,4 +1759,113 @@ export async function dbFetchGlobalLeaderboardHorizon(
   return data.map((row) =>
     mapRpcLeaderboardRow(row as Record<string, unknown>, currentUserId),
   );
+}
+
+export type PlayerPowerupUsageRow = {
+  powerupType: string;
+  sport: string;
+  timesUsed: number;
+};
+
+/** Aggregated power-up deployments for a player's profile modal. */
+export async function dbFetchPlayerPowerupUsage(
+  playerId: string,
+): Promise<PlayerPowerupUsageRow[]> {
+  if (!supabase) throw new Error("Database not connected.");
+  if (!playerId) return [];
+
+  const { data, error } = await supabase.rpc("get_player_powerup_usage", {
+    p_player_id: playerId,
+  });
+
+  if (error) {
+    console.warn("get_player_powerup_usage:", error.message);
+    return [];
+  }
+
+  return (data || []).map((row: any) => ({
+    powerupType: String(row.powerup_type ?? "unknown"),
+    sport: String(row.sport ?? "football"),
+    timesUsed: Number(row.times_used ?? 0),
+  }));
+}
+
+export type PlayerRecentFormRow = {
+  matchId: string;
+  sport: string;
+  homeTeam: string;
+  awayTeam: string;
+  kickoffTime: string | null;
+  actualHome: number;
+  actualAway: number;
+  predictedHome: number;
+  predictedAway: number;
+  basePoints: number;
+  earnedPoints: number;
+  /** perfect | correct | wrong */
+  outcomeTier: "perfect" | "correct" | "wrong";
+};
+
+/** Last N completed picks for profile recent-form strip. */
+export async function dbFetchPlayerRecentForm(
+  playerId: string,
+  limit = 5,
+): Promise<PlayerRecentFormRow[]> {
+  if (!supabase) throw new Error("Database not connected.");
+  if (!playerId) return [];
+
+  const { data, error } = await supabase.rpc("get_player_recent_form", {
+    p_player_id: playerId,
+    p_limit: limit,
+  });
+
+  if (error) {
+    console.warn("get_player_recent_form:", error.message);
+    return [];
+  }
+
+  return (data || []).map((row: Record<string, unknown>) => {
+    const tier = String(row.outcome_tier ?? "wrong");
+    return {
+      matchId: String(row.match_id ?? ""),
+      sport: String(row.sport ?? "football"),
+      homeTeam: String(row.home_team ?? ""),
+      awayTeam: String(row.away_team ?? ""),
+      kickoffTime: row.kickoff_time ? String(row.kickoff_time) : null,
+      actualHome: safeNum(row.actual_home),
+      actualAway: safeNum(row.actual_away),
+      predictedHome: safeNum(row.predicted_home),
+      predictedAway: safeNum(row.predicted_away),
+      basePoints: safeNum(row.base_points),
+      earnedPoints: safeNum(row.earned_points),
+      outcomeTier:
+        tier === "perfect" || tier === "correct" ? tier : "wrong",
+    };
+  });
+}
+
+/** Admin: overwrite FT score and recalculate all prediction points for a match. */
+export async function dbForceResettleFixture(
+  matchId: string,
+  homeScore: number,
+  awayScore: number,
+): Promise<{ updatedPredictions: number }> {
+  if (!supabase) throw new Error("Database not connected.");
+
+  const { data, error } = await supabase.rpc("force_resettle_fixture", {
+    p_fixture_id: matchId,
+    p_home_score: homeScore,
+    p_away_score: awayScore,
+  });
+
+  if (error) {
+    throw new Error(error.message || "force_resettle_fixture failed");
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  return {
+    updatedPredictions: safeNum(
+      (row as Record<string, unknown> | undefined)?.updated_predictions,
+    ),
+  };
 }

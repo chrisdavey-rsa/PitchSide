@@ -13,6 +13,7 @@ import { ChangeEmail } from './AccountPortal/ChangeEmail';
 import { ChangePassword } from './AccountPortal/ChangePassword';
 import { HistoricScores } from './AccountPortal/HistoricScores';
 import { MyLeagues } from './AccountPortal/MyLeagues';
+import { LeaguesAndCompetitions } from './AccountPortal/LeaguesAndCompetitions';
 import { DeleteAccount } from './AccountPortal/DeleteAccount';
 import { MobileAccountHub } from './AccountPortal/MobileAccountHub';
 import { getLatestSeason } from '../seasons';
@@ -100,6 +101,7 @@ export default function AccountPortal({
         setSelectedSeason={setSelectedSeason}
         getCompetitions={getCompetitions}
         onSelectLeague={onSelectLeague}
+        onUpdateUser={onUpdateUser}
         onOpenRules={() => onOpenRules?.()}
         onOpenAdmin={onOpenAdmin}
         onClose={embedded ? undefined : handleReturnToDashboard}
@@ -119,6 +121,7 @@ export default function AccountPortal({
             <div>
               <h4 className="text-base font-extrabold font-display text-white tracking-wide uppercase">
                 {activeTab === 'general' && 'General Account Details'}
+                {activeTab === 'tournaments' && 'Leagues and Competitions'}
                 {activeTab === 'leagues' && 'My Registered Leagues'}
                 {activeTab === 'change-email' && 'Change Email'}
                 {activeTab === 'change-password' && 'Change Password'}
@@ -126,6 +129,7 @@ export default function AccountPortal({
                 {activeTab === 'delete-account' && 'Erase Account Data'}
               </h4>
               <p className="text-[10px] text-slate-500 font-mono uppercase tracking-wider">
+                {activeTab === 'tournaments' && 'Manage your Predictions feed opt-ins'}
                 {activeTab === 'leagues' && 'League Memberships by Season'}
                 {activeTab === 'historic-scores' && 'Performance HUD & Match Results'}
                 {activeTab === 'delete-account' && 'Irreversible Personal Data Erasure'}
@@ -181,6 +185,14 @@ export default function AccountPortal({
 
           {activeTab === 'change-password' && (
             <ChangePassword
+              user={user}
+              onUpdateUser={onUpdateUser}
+              setStatusMsg={setStatusMsg}
+            />
+          )}
+
+          {activeTab === 'tournaments' && (
+            <LeaguesAndCompetitions
               user={user}
               onUpdateUser={onUpdateUser}
               setStatusMsg={setStatusMsg}

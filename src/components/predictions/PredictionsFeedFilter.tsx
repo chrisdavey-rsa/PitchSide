@@ -68,13 +68,14 @@ export default function PredictionsFeedFilter({
           <span
             key={key}
             title="Coming soon"
-            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-[11px] font-semibold font-display tracking-wide border border-slate-800/80 bg-slate-900/40 text-slate-600 cursor-not-allowed opacity-70"
+            aria-disabled="true"
+            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-[11px] font-semibold font-display tracking-wide border border-slate-800/80 bg-slate-900/40 text-slate-600 opacity-50 pointer-events-none cursor-not-allowed"
           >
             <Lock className="h-3 w-3" />
             <SportIcon sport={key} className="h-3.5 w-3.5 opacity-60" />
             {label}
             <span className="text-[8px] font-mono uppercase tracking-wider text-slate-600">
-              Soon
+              Coming Soon
             </span>
           </span>
         ))}

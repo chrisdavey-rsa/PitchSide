@@ -21,6 +21,16 @@ export interface UserProfile {
   preferredSport?: SportType;
   /** From profiles.selected_sports — empty means onboarding required. */
   selectedSports?: Array<"football" | "rugby" | "golf" | "formula1">;
+  /** profiles.subscribed_leagues — opted-in competition IDs. */
+  subscribedLeagues?: string[];
+  /** profiles.golf_coverage_tier */
+  golfCoverageTier?:
+    | "MAJORS_ONLY"
+    | "MAJORS_TEAMS"
+    | "MAJORS_MARQUEE"
+    | "ALL_PGA";
+  /** profiles.preferred_nation — ISO / rugby region code. */
+  preferredNation?: string | null;
   favoriteF1Team?: string | null;
   favoriteGolfer?: string | null;
   /** profiles.role — 'admin' | 'player' when present. */
@@ -70,6 +80,8 @@ export interface Match {
    * reserved for upcoming point-multiplier mechanics.
    */
   matchTag?: string;
+  /** True when a PitchSide Picks club/country features in the fixture. */
+  isPitchsidePick?: boolean;
 
   // --- Live API-Sports data (see 20260715_api_automation_schema.sql) ---
   /** Competition round/stage label from the data provider (e.g. "Round 12"). */

@@ -17,8 +17,10 @@ export const FOOTBALL_LEAGUES: readonly FootballLeagueDef[] = [
   { slug: "f-uel", apiId: 3, title: "UEFA Europa League" },
   { slug: "f-shield", apiId: 528, title: "FA Community Shield" },
   { slug: "f-facup", apiId: 45, title: "FA Cup" },
+  { slug: "f-eflcup", apiId: 48, title: "EFL Cup" },
   { slug: "f-worldcup", apiId: 1, title: "FIFA World Cup" },
   { slug: "f-laliga", apiId: 140, title: "La Liga" },
+  { slug: "f-seriea", apiId: 135, title: "Serie A" },
   { slug: "f-bundesliga", apiId: 78, title: "Bundesliga" },
   { slug: "f-ligue1", apiId: 61, title: "Ligue 1" },
 ] as const;
