@@ -312,6 +312,15 @@ export default function Dashboard({
   }, [showOnboarding, selectedSport, user.preferredSport, isMobileLayout]);
 
   const onboardingSteps: TourStep[] = useMemo(() => {
+    const tournamentNavStep: TourStep = {
+      // Mobile horizontal pills first; desktop fixed rail as fallback.
+      target: "tour-league-pills-mobile|tour-league-pills",
+      title: "Tournaments",
+      description:
+        "Filter your dashboard by tournament using these icons. Tap the plus button to browse and opt into additional leagues and competitions.",
+      placement: "below",
+    };
+
     if (isMobileLayout) {
       return [
         {
@@ -321,6 +330,7 @@ export default function Dashboard({
             "Centre tab — pick Football or Rugby, choose a competition, enter your scoreline, and lock it before kick-off.",
           placement: "above",
         },
+        { ...tournamentNavStep, placement: "above" },
         {
           target: "mobile-leagues",
           title: "Leagues",
@@ -360,7 +370,7 @@ export default function Dashboard({
       ];
     }
 
-    // Desktop: top nav + predictions filter rail (nation flags / sport tabs).
+    // Desktop: top nav → tournament pills → predictions filter rail.
     return [
       {
         target: "nav-predictions",
@@ -369,6 +379,7 @@ export default function Dashboard({
           "Pick Football or Rugby from the sport banner, choose a competition, enter your scoreline, and lock it before kick-off.",
         placement: "below",
       },
+      tournamentNavStep,
       {
         target: "nav-leagues",
         title: "Leagues",
@@ -384,7 +395,7 @@ export default function Dashboard({
         placement: "below",
       },
       {
-        // Nation rail first; sport tabs if the rail is hidden / off-screen.
+        // Sport tabs / mixer — prediction feed mechanics come after tournament nav.
         target: "tour-filters|tour-filters-sports",
         title: "Filter your feed",
         description:

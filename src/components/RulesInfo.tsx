@@ -20,6 +20,8 @@ import {
   BookOpen,
   Target,
   Zap,
+  Trophy,
+  Star,
 } from "lucide-react";
 import { UserProfile } from "../types";
 import { useCommunityShieldScheduled } from "./events/CommunityShieldEvent";
@@ -105,6 +107,45 @@ function SectionHeading({
   );
 }
 
+/** Shared cup ingestion + PitchSide Picks copy (no named clubs/nations). */
+function CupCompetitionsAndPicksSection({ accentBar }: { accentBar: string }) {
+  return (
+    <>
+      <section>
+        <SectionHeading icon={Trophy} title="Cup Competitions" barClass={accentBar} />
+        <div className="p-4 bg-slate-950/40 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed space-y-3">
+          <p>
+            To keep matchups high quality, domestic cups (FA Cup, EFL Cup) only become available for
+            prediction from Round 4 onwards.
+          </p>
+          <p>
+            European competitions (UEFA Champions League, UEFA Europa League) and the Rugby Champions
+            Cup become available from the League / Pool phases.
+          </p>
+          <p>
+            During the early League phases, fixtures are curated to feature top-tier matchups. All
+            remaining fixtures become available once the knockout stages begin.
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <SectionHeading icon={Star} title="PitchSide Picks" barClass="bg-violet-400" />
+        <div className="p-4 bg-slate-950/40 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed space-y-3">
+          <p>
+            PitchSide Picks are curated, marquee fixtures highlighted across the platform — the most
+            highly anticipated matches of the week.
+          </p>
+          <p>
+            These games are automatically tagged so you can quickly find and predict the biggest
+            fixtures without digging through the full schedule.
+          </p>
+        </div>
+      </section>
+    </>
+  );
+}
+
 function FootballContent({
   communityShieldScheduled,
 }: {
@@ -133,14 +174,14 @@ function FootballContent({
         <SectionHeading icon={Target} title="Points System" barClass="bg-yellow-400" />
         <div className="p-5 bg-slate-950/40 rounded-xl border border-blue-900/30 space-y-3.5">
           <p className="text-sm text-slate-300 font-sans leading-relaxed">
-            Football rewards accuracy - from nailing the exact scoreline down to calling the right
+            Football rewards accuracy - from nailing a Perfect Prediction down to calling the right
             winner:
           </p>
           {[
             {
               pts: "5 pts",
               tone: "bg-emerald-500/20 text-emerald-400",
-              title: "Correct Exact Scoreline",
+              title: "Perfect Prediction",
               body: "Guessing the exact final scoreline. E.g., predicted 2-0 when result is 2-0.",
             },
             {
@@ -248,6 +289,8 @@ function FootballContent({
         </div>
       </section>
 
+      <CupCompetitionsAndPicksSection accentBar="bg-blue-400" />
+
       {communityShieldScheduled && (
         <section>
           <SectionHeading icon={Ticket} title="The Golden Ticket" barClass="bg-amber-400" />
@@ -299,7 +342,7 @@ function RugbyContent() {
             {
               pts: "5 pts",
               tone: "bg-emerald-500/20 text-emerald-400",
-              title: "Correct Winner + Exact Margin",
+              title: "Perfect Prediction",
               body: "Correct winner and perfectly guessing the winning margin.",
             },
             {
@@ -335,6 +378,8 @@ function RugbyContent() {
           ))}
         </div>
       </section>
+
+      <CupCompetitionsAndPicksSection accentBar="bg-amber-400" />
     </div>
   );
 }
