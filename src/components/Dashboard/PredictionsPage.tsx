@@ -13,6 +13,7 @@ import VerticalLeaguePills, {
   ALL_LEAGUES_PILL_ID,
   buildPillItems,
 } from "./VerticalLeaguePills";
+import TournamentFilter from "../predictions/TournamentFilter";
 import TournamentOptInModal from "./TournamentOptInModal";
 import type { PredictionEntry } from "../../supabase";
 import { dbUpdateTournamentSubscriptions } from "../../supabase";
@@ -264,19 +265,12 @@ export default function PredictionsPage({
           </p>
         </div>
 
-        <div
-          className="md:hidden w-full"
-          data-tour="tour-league-pills-mobile"
-          aria-label="Subscribed tournaments"
-        >
-          <VerticalLeaguePills
-            items={pillItems}
-            selectedId={selectedCompId}
-            onSelect={handlePillSelect}
-            onAddClick={() => setOptInOpen(true)}
-            orientation="horizontal"
-          />
-        </div>
+        <TournamentFilter
+          items={pillItems}
+          selectedId={selectedCompId}
+          onSelect={handlePillSelect}
+          onAddClick={() => setOptInOpen(true)}
+        />
 
         <div data-tour="tour-filters-sports">
           <PredictionsFeedFilter
@@ -286,6 +280,22 @@ export default function PredictionsPage({
             onOnlyUnmadeChange={setOnlyUnmade}
           />
         </div>
+
+        {subscribedCoreIds.size === 0 && (
+          <div className="rounded-2xl border border-amber-500/25 bg-amber-950/20 px-4 py-3.5 space-y-2">
+            <p className="text-xs text-slate-300 font-sans leading-relaxed">
+              No tournaments selected. Opt in to leagues and competitions to see
+              fixtures in your Predictions feed.
+            </p>
+            <button
+              type="button"
+              onClick={() => setOptInOpen(true)}
+              className="inline-flex items-center gap-1.5 text-[10px] font-bold font-display uppercase tracking-wide text-amber-300 hover:text-amber-200 cursor-pointer"
+            >
+              Choose tournaments
+            </button>
+          </div>
+        )}
 
         {!isUserInAnyLeague && (
           <div className="rounded-2xl border border-emerald-500/20 bg-emerald-950/20 px-4 py-3.5 space-y-2">

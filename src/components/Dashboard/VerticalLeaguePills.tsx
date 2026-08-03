@@ -59,7 +59,7 @@ const BTN_IDLE =
 
 /**
  * Compact subscribed-league pill rail: All → subscribed flags → +.
- * Desktop: vertical. Mobile: horizontal scrolling row.
+ * Desktop gutter only (`hidden md:flex` parent). Mobile uses TournamentFilter FAB.
  */
 export default function VerticalLeaguePills({
   items,

@@ -17,20 +17,20 @@ export const GOLF_COVERAGE_TIERS: readonly {
   {
     id: "MAJORS_ONLY",
     leagueId: "g-majors",
-    label: "Majors Only",
+    label: "The Majors",
     description: "Masters, PGA Championship, US Open, The Open",
   },
   {
     id: "MAJORS_TEAMS",
     leagueId: "g-majors-teams",
-    label: "Majors + Team Cups",
+    label: "Team Events",
     description: "Majors plus Ryder Cup and Presidents Cup",
   },
   {
     id: "MAJORS_MARQUEE",
     leagueId: "g-majors-marquee",
-    label: "Majors + Marquee",
-    description: "Majors, team cups, and signature events",
+    label: "Tier 1 Events",
+    description: "Majors, team cups, and signature events (Players, Phoenix Open, …)",
   },
   {
     id: "ALL_PGA",

@@ -230,8 +230,12 @@ export default function LeagueHubStandings({
             points,
             predictionsMade: made,
             accuracy,
-            correctOutcomes: 0,
-            perfectHits: 0,
+            correctOutcomes: isFootball
+              ? (lb?.correctOutcomesFootball ?? 0)
+              : (lb?.correctOutcomesRugby ?? 0),
+            perfectHits: isFootball
+              ? (lb?.perfectHitsFootball ?? 0)
+              : (lb?.perfectHitsRugby ?? 0),
           };
         })
         .sort((a, b) =>
@@ -496,13 +500,13 @@ export default function LeagueHubStandings({
                         </strong>
                       </div>
                       <div className="flex justify-between">
-                        <span>Outcome Success:</span>
+                        <span>Correct Outcomes:</span>
                         <strong className="text-emerald-400 font-bold">
                           {member.correctOutcomes}
                         </strong>
                       </div>
                       <div className="flex justify-between">
-                        <span>Perfect Hits:</span>
+                        <span>Perfect Predictions:</span>
                         <strong className="text-yellow-400 font-bold">
                           {member.perfectHits}
                         </strong>

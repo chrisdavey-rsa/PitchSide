@@ -8,7 +8,7 @@ import {
   isPitchsidePickTeam,
 } from "./teamMatrices";
 
-const CUP_ROUND4_COMPS = new Set(["f-facup", "f-eflcup"]);
+const CUP_FROM_R4 = new Set(["f-facup", "f-eflcup"]);
 const UEFA_COMPS = new Set(["f-ucl", "f-uel"]);
 const HEINEKEN = "r-heineken";
 
@@ -65,7 +65,7 @@ export function shouldIngestFixture(opts: {
   const { competitionId, roundName, homeTeam, awayTeam, sport } = opts;
   if (!competitionId) return true;
 
-  if (CUP_ROUND4_COMPS.has(competitionId)) {
+  if (CUP_FROM_R4.has(competitionId)) {
     const n = extractRoundNumber(roundName);
     // Allow named late rounds without numbers (quarter-finals etc.)
     if (isKnockoutOrBeyond(roundName)) return true;
