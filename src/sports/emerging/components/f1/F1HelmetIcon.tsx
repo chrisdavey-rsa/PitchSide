@@ -13,8 +13,8 @@ type Props = {
   constructorId?: string | null;
   /** Snake-case variant from DB-shaped objects. */
   constructor_id?: string | null;
-  /** Nested constructor object with an `id` field. */
-  constructor?: ConstructorLike;
+  /** Nested constructor object with an `id` field (avoids JS `constructor` clash). */
+  teamConstructor?: ConstructorLike;
   /**
    * Ignored — remote/DB helmet URLs must not override local HELMET_MAP assets.
    * Kept optional so call sites can still pass the prop without breaking.
@@ -31,13 +31,13 @@ type Props = {
 export default function F1HelmetIcon({
   constructorId,
   constructor_id,
-  constructor,
+  teamConstructor,
   colorHex = '#94a3b8',
   className = 'h-6 w-6 sm:h-8 sm:w-8',
   title,
   loading = 'lazy',
 }: Props) {
-  const rawId = constructorId || constructor_id || constructor?.id || '';
+  const rawId = constructorId || constructor_id || teamConstructor?.id || '';
   const safeId = rawId.toLowerCase().trim();
   const finalId = safeId === 'rb' ? 'racing_bulls' : safeId;
   const imagePath = HELMET_MAP[finalId];

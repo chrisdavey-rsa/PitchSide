@@ -37,6 +37,14 @@ export interface UserProfile {
   role?: string | null;
   /** profiles.golf_mulligans_available */
   golfMulligansAvailable?: number | null;
+  /** profiles.favorite_teams — pins fixtures in the weekly digest. */
+  favoriteTeams?: string[];
+  /** profiles.push_enabled — 24h Web Push reminders. */
+  pushEnabled?: boolean;
+  /** profiles.email_enabled — weekly fixture digest. */
+  emailEnabled?: boolean;
+  /** @deprecated Prefer emailEnabled */
+  weeklyEmailOptIn?: boolean;
   password?: string;
   isProfilePublic?: boolean;
   suspendedUntil?: string;

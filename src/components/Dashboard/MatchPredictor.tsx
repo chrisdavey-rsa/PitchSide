@@ -22,6 +22,7 @@ import {
   Lock as LockIcon,
   ChevronDown,
   History,
+  Loader2,
 } from "lucide-react";
 import { SportType, Competition, Match } from "../../types";
 import {
@@ -68,6 +69,7 @@ import type { FeedSportFilter } from "../predictions/PredictionsFeedFilter";
 import {
   POWER_UP_IDS,
   buildSeasonWallet,
+  getPowerUp,
   toPowerUpSportType,
   type PowerUpId,
   type UserPowerUpInstance,
@@ -115,6 +117,8 @@ interface MatchPredictorProps {
   /** Skip competition picker — show continuous multi-sport feed. */
   unifiedFeed?: boolean;
   feedSportFilter?: FeedSportFilter;
+  /** True while matches query has not settled — never flash empty state. */
+  matchesLoading?: boolean;
   /** Controlled competition filter (rail rendered by PredictionsPage). */
   competitionFilterIds?: string[];
   onCompetitionFilterIdsChange?: (ids: string[]) => void;
@@ -126,10 +130,9 @@ function dateGroupKey(matchDate: string): string {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
-/** e.g. "Saturday, 1 August 2026" (uppercased in the feed header). */
+/** e.g. "2 August 2026" (uppercased in the feed header → "2 AUGUST 2026"). */
 function dateGroupLabel(matchDate: string): string {
   return new Date(matchDate).toLocaleDateString("en-GB", {
-    weekday: "long",
     day: "numeric",
     month: "long",
     year: "numeric",
@@ -167,6 +170,7 @@ export default function MatchPredictor({
   userId,
   unifiedFeed = false,
   feedSportFilter = "all",
+  matchesLoading = false,
   competitionFilterIds: competitionFilterIdsProp,
   onCompetitionFilterIdsChange,
 }: MatchPredictorProps) {
@@ -356,11 +360,12 @@ export default function MatchPredictor({
   const [compFilterIdsInternal] = usePersistedCompetitionFilter();
   const nationFilterIds = competitionFilterIdsProp ?? compFilterIdsInternal;
   const filteredUpcomingMatches = useMemo(() => {
-    if (nationFilterIds.length === 0) return upcomingMatches;
+    // Unified predictions feed is already filtered by subscribed tournaments.
+    if (unifiedFeed || nationFilterIds.length === 0) return upcomingMatches;
     return upcomingMatches.filter((m) =>
       matchPassesNationFilter(m.competitionId, nationFilterIds),
     );
-  }, [upcomingMatches, nationFilterIds]);
+  }, [upcomingMatches, nationFilterIds, unifiedFeed]);
 
   const feedListRef = useRef<HTMLDivElement | null>(null);
   const [feedScrollMargin, setFeedScrollMargin] = useState(0);
@@ -518,7 +523,17 @@ export default function MatchPredictor({
                 </div>
               </div>
 
-              {filteredCompetitions.length === 0 ? (
+              {matchesLoading ? (
+                <div
+                  role="status"
+                  className="rounded-2xl border border-slate-800/80 bg-slate-950/40 px-6 py-14 text-center space-y-3"
+                >
+                  <Loader2 className="h-6 w-6 animate-spin text-emerald-400 mx-auto" />
+                  <p className="text-sm font-display font-semibold text-slate-200">
+                    Loading fixtures…
+                  </p>
+                </div>
+              ) : filteredCompetitions.length === 0 ? (
                 <div className="rounded-2xl border border-slate-800/80 bg-slate-950/40 px-6 py-14 text-center space-y-3">
                   <p className="text-sm font-display font-semibold text-slate-200">
                     No fixtures open for this game-week yet
@@ -624,7 +639,20 @@ export default function MatchPredictor({
                     </div>
                   )}
 
-                  {upcomingMatches.length === 0 && historyMatches.length === 0 ? (
+                  {matchesLoading ? (
+                    <div
+                      role="status"
+                      className="rounded-xl border border-slate-800/70 bg-slate-950/30 px-5 py-12 text-center space-y-3"
+                    >
+                      <Loader2 className="h-6 w-6 animate-spin text-emerald-400 mx-auto" />
+                      <p className="text-sm font-display font-semibold text-slate-200">
+                        Loading fixtures…
+                      </p>
+                      <p className="text-xs text-slate-500 font-sans">
+                        Syncing your subscribed tournaments.
+                      </p>
+                    </div>
+                  ) : upcomingMatches.length === 0 && historyMatches.length === 0 ? (
                     <div className="rounded-xl border border-slate-800/70 bg-slate-950/30 px-5 py-10 text-center space-y-2">
                       <p className="text-sm font-display font-semibold text-slate-200">
                         {unifiedFeed
@@ -743,7 +771,8 @@ export default function MatchPredictor({
                       )}
 
                       {filteredUpcomingMatches.length === 0 &&
-                      upcomingMatches.length > 0 ? (
+                      upcomingMatches.length > 0 &&
+                      !matchesLoading ? (
                         <div className="rounded-xl border border-slate-800/70 bg-slate-950/30 px-5 py-8 text-center space-y-2">
                           <p className="text-sm font-display font-semibold text-slate-200">
                             No fixtures for the selected competitions
@@ -830,6 +859,20 @@ export default function MatchPredictor({
                                 (w) => w.instanceId === savedPred.appliedPowerupId,
                               )
                             : undefined);
+                        const settledPoints =
+                          isFinished &&
+                          isSubmitted &&
+                          (match.homeScore != null || resultHome != null) &&
+                          (match.awayScore != null || resultAway != null)
+                            ? settlePredictionWithPowerUp(
+                                match.sport,
+                                savedPred.home,
+                                savedPred.away,
+                                match.homeScore ?? resultHome ?? 0,
+                                match.awayScore ?? resultAway ?? 0,
+                                poweredChip?.powerUpId ?? null,
+                              ).earnedPoints
+                            : null;
                         const asItStandsPoints =
                           isLive &&
                           isSubmitted &&
@@ -844,17 +887,45 @@ export default function MatchPredictor({
                                 poweredChip?.powerUpId ?? null,
                               ).earnedPoints
                             : savedPred.provisionalPoints ?? 0;
+                        const displayResultPoints =
+                          settledPoints != null
+                            ? settledPoints
+                            : typeof savedPred.pointsWon === "number"
+                              ? savedPred.pointsWon
+                              : asItStandsPoints;
 
                         const assignedInstanceId =
-                          armedInstanceByMatch[match.id] ?? null;
+                          armedInstanceByMatch[match.id] ??
+                          savedPred.appliedPowerupId ??
+                          null;
                         const assignedChip = assignedInstanceId
                           ? wallet.find((w) => w.instanceId === assignedInstanceId)
                           : undefined;
-                        const assignedPowerUpId = assignedChip?.powerUpId ?? null;
+                        const appliedPowerupRow = savedPred.appliedPowerupId
+                          ? powerupRows.find(
+                              (r) => r.id === savedPred.appliedPowerupId,
+                            )
+                          : powerupRows.find(
+                              (r) =>
+                                r.applied_fixture_id === match.id &&
+                                r.status === "used",
+                            );
+                        const assignedPowerUpId =
+                          (assignedChip?.powerUpId as PowerUpId | undefined) ??
+                          (appliedPowerupRow?.powerup_type &&
+                          POWER_UP_IDS.includes(
+                            appliedPowerupRow.powerup_type as PowerUpId,
+                          )
+                            ? (appliedPowerupRow.powerup_type as PowerUpId)
+                            : null);
                         const hasPowerUpAssigned = Boolean(assignedPowerUpId);
                         const ringColor = assignedPowerUpId
                           ? POWERUP_RING_COLOR[assignedPowerUpId]
                           : undefined;
+                        const powerUpDef = assignedPowerUpId
+                          ? getPowerUp(assignedPowerUpId)
+                          : undefined;
+                        const PowerUpBadgeIcon = powerUpDef?.icon;
 
                         const lockControl = !isEmailVerified ? (
                           <div
@@ -881,13 +952,9 @@ export default function MatchPredictor({
                               Result
                             </span>
                             <span className="font-display font-black text-emerald-300 text-[10px] sm:text-xs leading-none">
-                              {typeof savedPred.pointsWon === "number"
-                                ? savedPred.pointsWon > 0
-                                  ? `+${savedPred.pointsWon}`
-                                  : savedPred.pointsWon
-                                : asItStandsPoints > 0
-                                  ? `+${asItStandsPoints}`
-                                  : asItStandsPoints}{" "}
+                              {displayResultPoints > 0
+                                ? `+${displayResultPoints}`
+                                : displayResultPoints}{" "}
                               pts
                             </span>
                           </div>
@@ -1045,6 +1112,29 @@ export default function MatchPredictor({
                             >
                               {hasPowerUpAssigned && ringColor && (
                                 <PowerUpPerimeterBeam color={ringColor} />
+                              )}
+
+                              {hasPowerUpAssigned && powerUpDef && (
+                                <div
+                                  className="absolute top-2 right-2 z-[3] pointer-events-none"
+                                  title={powerUpDef.name}
+                                  aria-label={`${powerUpDef.name} applied`}
+                                >
+                                  <span
+                                    className={`inline-flex h-6 w-6 items-center justify-center rounded-md border shadow-sm ${powerUpDef.theme.border} ${powerUpDef.theme.bg} ${powerUpDef.theme.iconText}`}
+                                    style={{
+                                      boxShadow: `0 0 10px ${ringColor}33`,
+                                    }}
+                                  >
+                                    {assignedPowerUpId === "double_bubble" ? (
+                                      <span className="font-display font-black text-[9px] leading-none tracking-tighter">
+                                        2×
+                                      </span>
+                                    ) : PowerUpBadgeIcon ? (
+                                      <PowerUpBadgeIcon className="h-3 w-3" />
+                                    ) : null}
+                                  </span>
+                                </div>
                               )}
 
                               <SportColorStrip sport={String(match.sport)} />

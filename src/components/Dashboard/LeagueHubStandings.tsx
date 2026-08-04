@@ -165,7 +165,16 @@ export default function LeagueHubStandings({
 
   /** Merge local locked picks so unlock updates immediately after submit. */
   const mergedPredictionRows = useMemo((): LeaguePredictionRow[] => {
-    const rows: LeaguePredictionRow[] = predictionRows.map((r) => ({ ...r }));
+    const rows: LeaguePredictionRow[] = predictionRows.map((r) => ({
+      userId: r.userId,
+      matchId: r.matchId,
+      sport: r.sport,
+      home: r.home,
+      away: r.away,
+      submitted: r.submitted,
+      pointsWon: r.pointsWon,
+      powerupType: (r.powerupType as LeaguePredictionRow["powerupType"]) ?? null,
+    }));
     const seen = new Set(rows.map((r) => `${r.userId}:${r.matchId}`));
 
     Object.entries(userPredictions).forEach(([matchId, pred]) => {
@@ -181,7 +190,9 @@ export default function LeagueHubStandings({
         home: pred.home,
         away: pred.away,
         submitted: true,
-        pointsWon: null,
+        pointsWon:
+          typeof pred.pointsWon === "number" ? pred.pointsWon : null,
+        powerupType: undefined,
       });
       seen.add(key);
     });

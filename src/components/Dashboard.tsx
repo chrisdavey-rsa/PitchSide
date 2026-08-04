@@ -68,6 +68,7 @@ import { getCompetitions } from "../competitions";
 import { getLatestSeason } from "../seasons";
 import { isGlobalLeague } from "../lib/leaguesConfig";
 import { calculatePoints, computeWeeklyStreak } from "../utils";
+import { formatAccuracy, safeNum } from "../supabase";
 import TopNavigation, { type DesktopMainView } from './Dashboard/TopNavigation';
 import WelcomeHeader from './Dashboard/WelcomeHeader';
 import type { LeaderboardScope } from './Dashboard/leaderboardTypes';
@@ -94,6 +95,15 @@ import {
 
 const MOBILE_MQ = "(max-width: 767px)";
 
+/** Prefer football/rugby only — Golf/F1 are Coming Soon and must not drive layout. */
+function coreSportKeyFromPreferred(
+  preferred?: SportType | string | null,
+): "football" | "rugby" {
+  return preferred === SportType.RUGBY || preferred === "rugby"
+    ? "rugby"
+    : "football";
+}
+
 function useIsMobileLayout() {
   const [isMobile, setIsMobile] = useState(() =>
     typeof window !== "undefined" ? window.matchMedia(MOBILE_MQ).matches : false,
@@ -101,6 +111,7 @@ function useIsMobileLayout() {
   useEffect(() => {
     const mq = window.matchMedia(MOBILE_MQ);
     const onChange = () => setIsMobile(mq.matches);
+    onChange();
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
@@ -144,23 +155,36 @@ export default function Dashboard({
     !user || !user.id || user.id.startsWith("usr_") || user.id === "user-admin";
   const userRole = useUserRole(user?.id, user?.isAdmin);
   /** Unified workspace switcher (football | rugby | golf | formula1). */
-  const [activeSport, setActiveSport] = useState<SportKey>(
-    () => (user?.preferredSport as SportKey | undefined) ?? "football",
+  const [activeSport, setActiveSport] = useState<SportKey>(() =>
+    coreSportKeyFromPreferred(user?.preferredSport),
   );
   /** Core match-filter sport — kept when browsing Golf/F1 so Football/Rugby hooks stay stable. */
-  const [selectedSport, setSelectedSport] = useState<SportType | null>(user?.preferredSport ?? null);
+  const [selectedSport, setSelectedSport] = useState<SportType | null>(
+    () =>
+      user?.preferredSport === SportType.RUGBY
+        ? SportType.RUGBY
+        : SportType.FOOTBALL,
+  );
   const [desktopMainView, setDesktopMainView] =
     useState<DesktopMainView>("predictions");
   const predictionsAnchorDesktopRef = useRef<HTMLDivElement>(null);
   const predictionsAnchorMobileRef = useRef<HTMLDivElement>(null);
 
-  // Players cannot linger on Golf/F1 if role resolves to non-admin.
+  // Players cannot linger on Golf/F1 (Coming Soon). Guarded writes only.
   useEffect(() => {
-    if (!isSportAccessible(activeSport, userRole)) {
-      const fallback = selectedSport ?? SportType.FOOTBALL;
+    if (isSportAccessible(activeSport, userRole)) return;
+    const fallback = coreSportKeyFromPreferred(
+      selectedSport ?? user.preferredSport,
+    );
+    if (activeSport !== fallback) {
       setActiveSport(fallback);
     }
-  }, [activeSport, userRole, selectedSport]);
+    const fallbackType =
+      fallback === "rugby" ? SportType.RUGBY : SportType.FOOTBALL;
+    if (selectedSport !== fallbackType) {
+      setSelectedSport(fallbackType);
+    }
+  }, [activeSport, userRole, selectedSport, user.preferredSport]);
 
   // Default the consolidated leaderboard to the user's preferred sport so the
   // first thing they see is relevant to them.
@@ -235,7 +259,8 @@ export default function Dashboard({
   // Nav tour first (MainWalkthrough), then Sport Intro waits on that flag.
   useEffect(() => {
     let cancelled = false;
-    let startTimer: ReturnType<typeof setTimeout> | undefined;
+    // Browser timer id (number). Avoid NodeJS.Timeout vs DOM conflict.
+    let startTimer: number | undefined;
     setWalkthroughResolved(false);
     setShowOnboarding(false);
 
@@ -300,14 +325,18 @@ export default function Dashboard({
   useEffect(() => {
     if (!showOnboarding) return;
     if (!selectedSport) {
-      const core = user.preferredSport ?? SportType.FOOTBALL;
-      setSelectedSport(core);
-      setActiveSport(core);
+      const coreKey = coreSportKeyFromPreferred(user.preferredSport);
+      const coreType =
+        coreKey === "rugby" ? SportType.RUGBY : SportType.FOOTBALL;
+      setSelectedSport(coreType);
+      setActiveSport(coreKey);
     }
     if (isMobileLayout) {
-      setMobileNavTab("predictions");
+      setMobileNavTab((tab) => (tab === "predictions" ? tab : "predictions"));
     } else {
-      setDesktopMainView("predictions");
+      setDesktopMainView((view) =>
+        view === "predictions" ? view : "predictions",
+      );
     }
   }, [showOnboarding, selectedSport, user.preferredSport, isMobileLayout]);
 
@@ -433,14 +462,24 @@ export default function Dashboard({
     }
   });
 
-  const { data: dbMatches = [] } = useMatchesQuery();
+  const {
+    data: dbMatches,
+    isPending: matchesPending,
+    isFetching: matchesFetching,
+  } = useMatchesQuery({
+    // Dashboard only mounts for a hydrated user — keep matches gated on that.
+    enabled: !!user?.id,
+  });
   const { data: activeCompetitions = [] } = useActiveCompetitionsQuery();
   const { data: remotePredictions } = usePredictionsQuery(user?.id);
   const { data: leagues = [] } = useLeaguesQuery(user?.id);
   const { data: userLeagues = [] } = useUserLeaguesQuery(user?.id);
 
+  /** True until the first matches payload arrives — never treat [] as "empty feed" yet. */
+  const matchesLoading = matchesPending || (matchesFetching && dbMatches == null);
+
   const allMatches = useMemo(
-    () => filterMatchesToHorizon(mergeMatches(dbMatches, localMatches)),
+    () => filterMatchesToHorizon(mergeMatches(dbMatches ?? [], localMatches)),
     [dbMatches, localMatches],
   );
 
@@ -683,17 +722,44 @@ export default function Dashboard({
     setSelectedSport(sport);
     setGlobalLeaderboardSport(sport);
     const comps = activeCompetitionsToCatalog(activeCompetitions, sport);
-    setSelectedCompId(comps[0]?.id ?? null);
+    setSelectedCompId((prev) => {
+      const next = comps[0]?.id ?? null;
+      // Keep current competition if it still belongs to this sport.
+      if (prev && comps.some((c) => c.id === prev)) return prev;
+      return next;
+    });
   }, [activeCompetitions]);
 
-  /** Workspace switcher: core sports keep match filters; Golf/F1 swap the predictions pane only. */
+  /**
+   * Lightweight sport updates from PredictionsPage filters.
+   * Must NOT call handleSelectSport (that resets competitions and caused update loops).
+   */
+  const syncSportFromPredictions = useCallback((sport: SportType | null) => {
+    if (sport == null) {
+      setSelectedSport(null);
+      return;
+    }
+    setSelectedSport((prev) => (prev === sport ? prev : sport));
+    setActiveSport((prev) => (prev === sport ? prev : sport));
+    setGlobalLeaderboardSport((prev) => (prev === sport ? prev : sport));
+  }, []);
+
+  const syncActiveSportKey = useCallback(
+    (sport: SportKey) => {
+      if (!isSportAccessible(sport, userRole)) return;
+      setActiveSport((prev) => (prev === sport ? prev : sport));
+    },
+    [userRole],
+  );
+
+  /** Workspace switcher: core sports keep match filters; Golf/F1 are blocked. */
   const handleSelectActiveSport = useCallback(
     (sport: SportKey) => {
       if (!isSportAccessible(sport, userRole)) return;
       setActiveLeagueId(null);
       setMobileNavTab("predictions");
       setDesktopMainView("predictions");
-      setActiveSport(sport);
+      setActiveSport((prev) => (prev === sport ? prev : sport));
       if (sport === "football" || sport === "rugby") {
         handleSelectSport(
           sport === "football" ? SportType.FOOTBALL : SportType.RUGBY,
@@ -1318,15 +1384,18 @@ export default function Dashboard({
     [filteredCompetitions, selectedCompId],
   );
 
-  // If the selected chip disappears after a sync/horizon refresh, re-home.
+  // If a selected chip disappears after a sync/horizon refresh, clear to "All".
+  // Do NOT auto-pick filteredCompetitions[0] when selectedCompId is null — null is the
+  // intentional "All subscribed" state for the unified Predictions feed (auto-pick caused
+  // an infinite loop with PredictionsPage clearing unsubscribed ids).
   useEffect(() => {
     if (!selectedSport) return;
-    if (filteredCompetitions.length === 0) {
-      if (selectedCompId) setSelectedCompId(null);
-      return;
-    }
-    if (!selectedCompId || !filteredCompetitions.some((c) => c.id === selectedCompId)) {
-      setSelectedCompId(filteredCompetitions[0].id);
+    if (!selectedCompId) return;
+    if (
+      filteredCompetitions.length === 0 ||
+      !filteredCompetitions.some((c) => c.id === selectedCompId)
+    ) {
+      setSelectedCompId(null);
     }
   }, [selectedSport, filteredCompetitions, selectedCompId]);
 
@@ -1432,18 +1501,39 @@ export default function Dashboard({
     };
   }, [activeLeagueId, leagues, userLeagues, allMatches, activeLeagueMembers, leaderboardList, user.preferredSport]);
 
-  // Statistics summaries
-  const totalPredicted = Object.keys(predictions).filter(
-    (k) => predictions[k].submitted,
-  ).length;
+  // Statistics summaries — settled (completed) picks only for accuracy / perfects.
+  const { accuracyPercent, perfectPredictions } = useMemo(() => {
+    let settled = 0;
+    let basePoints = 0;
+    let perfect = 0;
 
-  const perfectPredictions = Object.keys(predictions).filter((k) => {
-    const pred = predictions[k];
-    if (!pred.submitted) return false;
-    const match = allMatches.find((m) => m.id === k);
-    if (!match || match.status !== "completed") return false;
-    return match.homeScore === pred.home && match.awayScore === pred.away;
-  }).length;
+    for (const [matchId, pred] of Object.entries(predictions)) {
+      if (!pred?.submitted) continue;
+      const match = allMatches.find((m) => m.id === matchId);
+      if (!match || match.status !== "completed") continue;
+      if (match.homeScore == null || match.awayScore == null) continue;
+
+      settled += 1;
+      basePoints += safeNum(
+        calculatePoints(
+          match.sport,
+          pred.home,
+          pred.away,
+          match.homeScore,
+          match.awayScore,
+        ),
+      );
+      // Same perfect count as before: exact scoreline match.
+      if (match.homeScore === pred.home && match.awayScore === pred.away) {
+        perfect += 1;
+      }
+    }
+
+    return {
+      accuracyPercent: formatAccuracy(basePoints, settled),
+      perfectPredictions: perfect,
+    };
+  }, [predictions, allMatches]);
 
   const weeklyStreak = useMemo(() => {
     const lockedTimestamps = Object.keys(predictions)
@@ -1532,8 +1622,10 @@ export default function Dashboard({
           setActiveLeagueId(null);
           setMobileNavTab("predictions");
           setDesktopMainView("predictions");
-          const core = user.preferredSport ?? SportType.FOOTBALL;
-          setSelectedSport(core);
+          const core = coreSportKeyFromPreferred(user.preferredSport);
+          setSelectedSport(
+            core === "rugby" ? SportType.RUGBY : SportType.FOOTBALL,
+          );
           setActiveSport(core);
           setSelectedCompId(null);
         }}
@@ -1587,14 +1679,13 @@ export default function Dashboard({
             onUpdateLeagueSettings={handleHubLeagueSettings}
             triggerToast={triggerToast}
           />
-      ) : (
-        <>
-          {/* Desktop: Predictions workspace (2/3 + 1/3) or full Leaderboards */}
-          <div className="hidden md:block w-full space-y-6 overflow-visible">
+      ) : !isMobileLayout ? (
+          /* Desktop only — never mount mobile Predictions/MatchPredictor in parallel (SportIntro / overlay fight). */
+          <div className="w-full space-y-6 overflow-visible">
             <WelcomeHeader
               user={user}
               userPoints={userPoints}
-              totalPredicted={totalPredicted}
+              accuracyPercent={accuracyPercent}
               perfectPredictions={perfectPredictions}
               weeklyStreak={weeklyStreak}
               isUserInAnyLeague={isUserInAnyLeague}
@@ -1621,43 +1712,6 @@ export default function Dashboard({
                 globalSeasonRows={displayLeaderboard}
                 showEmergingSportTabs
               />
-            ) : activeSport === "formula1" ? (
-              <div
-                ref={predictionsAnchorDesktopRef}
-                id="predictions-workspace-anchor"
-                className="scroll-mt-4 w-full overflow-visible"
-              >
-                <PredictionsPage
-                  user={user}
-                  isUserInAnyLeague={isUserInAnyLeague}
-                  activeSport={activeSport}
-                  setActiveSport={handleSelectActiveSport}
-                  selectedSport={selectedSport}
-                  setSelectedSport={(sport) => {
-                    if (sport) handleSelectSport(sport);
-                    else setSelectedSport(null);
-                  }}
-                  selectedCompId={selectedCompId}
-                  setSelectedCompId={setSelectedCompId}
-                  allMatches={allMatches}
-                  sortedActiveMatches={sortedActiveMatches}
-                  activeMatches={activeMatches}
-                  filteredCompetitions={filteredCompetitions}
-                  selectedCompetition={selectedCompetition}
-                  predictions={predictions}
-                  isEmailVerified={authStatus.isVerified}
-                  seenFeatures={user.seenFeatures}
-                  onFeatureSeen={markFeatureSeen}
-                  onScoreChange={handleScoreChange}
-                  onRugbyPredictionChange={handleRugbyPredictionChange}
-                  onSubmitPrediction={submitPrediction}
-                  onOpenLeagues={() => openLeaguesModal()}
-                  isOffline={isOffline}
-                  hasOfflineDraft={hasOfflineDraft}
-                  onApplyOfflineDraft={applyAndSubmitOfflineDraft}
-                  applyingOfflineDraft={applyingOfflineDraft}
-                />
-              </div>
             ) : (
               <div className="w-full grid grid-cols-1 lg:grid-cols-3 gap-6 items-start overflow-visible">
                 <div
@@ -1669,15 +1723,13 @@ export default function Dashboard({
                     user={user}
                     isUserInAnyLeague={isUserInAnyLeague}
                     activeSport={activeSport}
-                    setActiveSport={handleSelectActiveSport}
+                    setActiveSport={syncActiveSportKey}
                     selectedSport={selectedSport}
-                    setSelectedSport={(sport) => {
-                      if (sport) handleSelectSport(sport);
-                      else setSelectedSport(null);
-                    }}
+                    setSelectedSport={syncSportFromPredictions}
                     selectedCompId={selectedCompId}
                     setSelectedCompId={setSelectedCompId}
                     allMatches={allMatches}
+                    matchesLoading={matchesLoading}
                     sortedActiveMatches={sortedActiveMatches}
                     activeMatches={activeMatches}
                     filteredCompetitions={filteredCompetitions}
@@ -1690,6 +1742,7 @@ export default function Dashboard({
                     onRugbyPredictionChange={handleRugbyPredictionChange}
                     onSubmitPrediction={submitPrediction}
                     onOpenLeagues={() => openLeaguesModal()}
+                    onUserUpdate={onUserUpdate}
                     isOffline={isOffline}
                     hasOfflineDraft={hasOfflineDraft}
                     onApplyOfflineDraft={applyAndSubmitOfflineDraft}
@@ -1723,8 +1776,8 @@ export default function Dashboard({
               </div>
             )}
           </div>
-
-          {/* Mobile: true tab router — swipe + back-gesture shell */}
+      ) : (
+          /* Mobile only — single Predictions/MatchPredictor tree */
           <AppShell
             activeTab={mobileNavTab}
             onSelectTab={handleMobileNavTab}
@@ -1740,15 +1793,13 @@ export default function Dashboard({
                 user={user}
                 isUserInAnyLeague={isUserInAnyLeague}
                 activeSport={activeSport}
-                setActiveSport={handleSelectActiveSport}
+                setActiveSport={syncActiveSportKey}
                 selectedSport={selectedSport}
-                setSelectedSport={(sport) => {
-                  if (sport) handleSelectSport(sport);
-                  else setSelectedSport(null);
-                }}
+                setSelectedSport={syncSportFromPredictions}
                 selectedCompId={selectedCompId}
                 setSelectedCompId={setSelectedCompId}
                 allMatches={allMatches}
+                matchesLoading={matchesLoading}
                 sortedActiveMatches={sortedActiveMatches}
                 activeMatches={activeMatches}
                 filteredCompetitions={filteredCompetitions}
@@ -1761,6 +1812,7 @@ export default function Dashboard({
                 onRugbyPredictionChange={handleRugbyPredictionChange}
                 onSubmitPrediction={submitPrediction}
                 onOpenLeagues={() => handleMobileNavTab("leagues")}
+                onUserUpdate={onUserUpdate}
                 isOffline={isOffline}
                 hasOfflineDraft={hasOfflineDraft}
                 onApplyOfflineDraft={applyAndSubmitOfflineDraft}
@@ -1876,7 +1928,6 @@ export default function Dashboard({
               <RulesInfo user={user} />
             )}
           </AppShell>
-        </>
       )}
 
       {/* Leave / Archive League Confirmation Popup */}

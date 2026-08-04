@@ -105,25 +105,55 @@ export function useSupabaseRealtime(
         }
 
         if (row.user_id === userId) {
+          const matchId = String(row.match_id);
           queryClient.setQueryData<Record<string, PredictionEntry>>(
             queryKeys.predictions(userId),
             (prev) => {
               if (!prev) return prev;
-              const existing = prev[row.match_id] || {
+              const existing = prev[matchId] || {
                 home: 0,
                 away: 0,
                 submitted: false,
               };
+              const predictedHome =
+                typeof row.predicted_home_score === "number"
+                  ? row.predicted_home_score
+                  : existing.home;
+              const predictedAway =
+                typeof row.predicted_away_score === "number"
+                  ? row.predicted_away_score
+                  : existing.away;
+              const submitted =
+                typeof row.submitted === "boolean"
+                  ? row.submitted
+                  : existing.submitted;
               return {
                 ...prev,
-                [row.match_id]: {
-                  home: row.predicted_home_score ?? existing.home,
-                  away: row.predicted_away_score ?? existing.away,
-                  submitted: row.submitted ?? existing.submitted,
-                  lockedAt: row.submitted
-                    ? row.created_at ?? existing.lockedAt
+                [matchId]: {
+                  home: predictedHome,
+                  away: predictedAway,
+                  submitted,
+                  lockedAt: submitted
+                    ? (typeof row.created_at === "string"
+                        ? row.created_at
+                        : existing.lockedAt)
                     : existing.lockedAt,
-                  provisionalPoints: row.provisional_points ?? 0,
+                  provisionalPoints:
+                    row.provisional_points != null
+                      ? Number(row.provisional_points)
+                      : existing.provisionalPoints ?? 0,
+                  pointsWon:
+                    row.points_won != null
+                      ? Number(row.points_won)
+                      : existing.pointsWon ?? null,
+                  appliedPowerupId:
+                    (typeof row.applied_powerup_id === "string"
+                      ? row.applied_powerup_id
+                      : row.applied_powerup_id === null
+                        ? null
+                        : undefined) ??
+                    existing.appliedPowerupId ??
+                    null,
                 },
               };
             },

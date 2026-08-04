@@ -193,7 +193,7 @@ async function ensureTeam(
 
   const { data, error } = await supabase
     .from("teams")
-    .upsert(row, { onConflict: "sport,type,api_sports_id" })
+    .upsert(row as never, { onConflict: "sport,type,api_sports_id" })
     .select("id")
     .maybeSingle();
 
@@ -329,7 +329,8 @@ async function upsertChunks<T extends Record<string, unknown>>(
   if (rows.length === 0) return;
   for (let i = 0; i < rows.length; i += chunkSize) {
     const chunk = rows.slice(i, i + chunkSize);
-    const { error } = await supabase.from(table).upsert(chunk, {
+    // Untyped service client + dynamic table name — cast seed payloads.
+    const { error } = await supabase.from(table).upsert(chunk as never, {
       onConflict,
       ignoreDuplicates: false,
     });

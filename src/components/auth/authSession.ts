@@ -48,7 +48,7 @@ export async function profileFromSession(
   const { data: row } = await supabase
     .from('profiles')
     .select(
-      'id, first_name, surname, email, username, dob, phone, nationality, supported_team, preferred_sport, is_admin, is_profile_public, created_at, seen_features, selected_sports, favorite_f1_team, favorite_golfer, role, golf_mulligans_available, age_confirmed_13, terms_accepted_at, privacy_accepted_at, subscribed_leagues, golf_coverage_tier, preferred_nation',
+      'id, first_name, surname, email, username, dob, phone, nationality, supported_team, preferred_sport, is_admin, is_profile_public, created_at, seen_features, selected_sports, favorite_f1_team, favorite_golfer, role, golf_mulligans_available, age_confirmed_13, terms_accepted_at, privacy_accepted_at, subscribed_leagues, golf_coverage_tier, preferred_nation, favorite_teams, weekly_email_opt_in, push_enabled, email_enabled',
     )
     .eq('id', authUser.id)
     .single();
@@ -101,6 +101,18 @@ export async function profileFromSession(
       supportedTeam: row.supported_team || undefined,
       preferredSport: (row.preferred_sport as SportType) || undefined,
       selectedSports,
+      favoriteTeams: Array.isArray(row.favorite_teams)
+        ? row.favorite_teams.map(String)
+        : row.supported_team
+          ? [String(row.supported_team)]
+          : [],
+      pushEnabled: row.push_enabled === true,
+      emailEnabled:
+        row.email_enabled === true ||
+        (row.email_enabled == null && row.weekly_email_opt_in === true),
+      weeklyEmailOptIn:
+        row.email_enabled === true ||
+        (row.email_enabled == null && row.weekly_email_opt_in !== false),
       favoriteF1Team: row.favorite_f1_team ?? null,
       favoriteGolfer: row.favorite_golfer ?? null,
       role: row.role ?? null,

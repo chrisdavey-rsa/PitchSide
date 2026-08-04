@@ -144,7 +144,7 @@ function PowerUpShowcase() {
 const SLIDES = [
   {
     title: "Predict Scores",
-    body: "Lock in football exact scores and rugby winners + margins before kick-off.",
+    body: "Lock in football Perfect Predictions and rugby winners + margins before kick-off.",
     visual: (
       <div className="flex flex-col gap-3 sm:gap-4 w-full max-w-xl mx-auto">
         <DummyFixture
@@ -189,7 +189,7 @@ const SLIDES = [
   },
   {
     title: "Climb Leaderboards",
-    body: "Track your rank as results land — every exact score moves the needle.",
+    body: "Track your rank as results land — every Perfect Prediction moves the needle.",
     visual: <LeaderboardClimb />,
   },
 ] as const;

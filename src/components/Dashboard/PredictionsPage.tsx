@@ -46,6 +46,8 @@ interface PredictionsPageProps {
   selectedCompId: string | null;
   setSelectedCompId: (id: string | null) => void;
   allMatches: Match[];
+  /** True while the matches query has not produced its first result. */
+  matchesLoading?: boolean;
   sortedActiveMatches: Match[];
   activeMatches: Match[];
   filteredCompetitions: Competition[];
@@ -76,12 +78,14 @@ interface PredictionsPageProps {
 export default function PredictionsPage({
   user,
   isUserInAnyLeague,
+  activeSport,
   setActiveSport,
   selectedSport,
   setSelectedSport,
   selectedCompId,
   setSelectedCompId,
   allMatches,
+  matchesLoading = false,
   filteredCompetitions,
   selectedCompetition,
   predictions,
@@ -98,11 +102,13 @@ export default function PredictionsPage({
   onApplyOfflineDraft,
   applyingOfflineDraft = false,
 }: PredictionsPageProps) {
+  // Initialize synchronously — never start undefined then flip to "all" (avoids filter flush).
   const [sportFilter, setSportFilter] = useState<FeedSportFilter>("all");
   const [onlyUnmade, setOnlyUnmade] = useState(false);
   const [optInOpen, setOptInOpen] = useState(false);
 
   const subscribedLeagues = useMemo(() => {
+    // Profile is already on `user` when Dashboard mounts; empty array → defaults.
     if (user.subscribedLeagues && user.subscribedLeagues.length > 0) {
       return user.subscribedLeagues;
     }
@@ -123,33 +129,50 @@ export default function PredictionsPage({
     [subscribedLeagues],
   );
 
-  useEffect(() => {
-    if (sportFilter === "football") {
-      setSelectedSport(SportType.FOOTBALL);
-      setActiveSport("football");
-    } else if (sportFilter === "rugby") {
-      setSelectedSport(SportType.RUGBY);
-      setActiveSport("rugby");
-    } else if (!selectedSport) {
-      setSelectedSport(user.preferredSport ?? SportType.FOOTBALL);
-    }
-  }, [
-    sportFilter,
-    setSelectedSport,
-    setActiveSport,
-    selectedSport,
-    user.preferredSport,
-  ]);
+  // Stable primitive dep so Set identity never retriggers the cleanup effect.
+  const subscribedCoreKey = useMemo(
+    () =>
+      subscribedLeagues
+        .filter((id) => id && !id.startsWith("g-"))
+        .slice()
+        .sort()
+        .join("|"),
+    [subscribedLeagues],
+  );
 
+  /** One-way sync from feed filter → parent sport. Event-driven only (no useEffect). */
+  const applySportFilter = (filter: FeedSportFilter) => {
+    setSportFilter(filter);
+    if (filter === "football") {
+      if (selectedSport !== SportType.FOOTBALL) setSelectedSport(SportType.FOOTBALL);
+      if (activeSport !== "football") setActiveSport("football");
+      return;
+    }
+    if (filter === "rugby") {
+      if (selectedSport !== SportType.RUGBY) setSelectedSport(SportType.RUGBY);
+      if (activeSport !== "rugby") setActiveSport("rugby");
+      return;
+    }
+    // "all" — leave parent sport alone unless unset
+    if (!selectedSport) {
+      setSelectedSport(
+        user.preferredSport === SportType.RUGBY
+          ? SportType.RUGBY
+          : SportType.FOOTBALL,
+      );
+    }
+  };
+
+  // Drop a selected competition that is no longer subscribed (guarded write).
   useEffect(() => {
-    if (
-      selectedCompId &&
-      selectedCompId !== ALL_LEAGUES_PILL_ID &&
-      !subscribedCoreIds.has(selectedCompId)
-    ) {
+    if (!selectedCompId || selectedCompId === ALL_LEAGUES_PILL_ID) return;
+    const allowed = new Set(
+      subscribedCoreKey ? subscribedCoreKey.split("|") : [],
+    );
+    if (!allowed.has(selectedCompId)) {
       setSelectedCompId(null);
     }
-  }, [selectedCompId, subscribedCoreIds, setSelectedCompId]);
+  }, [selectedCompId, subscribedCoreKey, setSelectedCompId]);
 
   const feedMatches = useMemo(() => {
     const now = Date.now();
@@ -202,17 +225,15 @@ export default function PredictionsPage({
 
   const handlePillSelect = (id: string | null) => {
     if (id == null || id === ALL_LEAGUES_PILL_ID) {
-      setSelectedCompId(null);
-      setSportFilter("all");
+      if (selectedCompId !== null) setSelectedCompId(null);
+      applySportFilter("all");
       return;
     }
-    setSelectedCompId(id);
+    if (selectedCompId !== id) setSelectedCompId(id);
     if (id.startsWith("r-")) {
-      setSportFilter("rugby");
-      setActiveSport("rugby");
+      applySportFilter("rugby");
     } else {
-      setSportFilter("football");
-      setActiveSport("football");
+      applySportFilter("football");
     }
   };
 
@@ -275,13 +296,13 @@ export default function PredictionsPage({
         <div data-tour="tour-filters-sports">
           <PredictionsFeedFilter
             sportFilter={sportFilter}
-            onSportFilterChange={setSportFilter}
+            onSportFilterChange={applySportFilter}
             onlyUnmade={onlyUnmade}
             onOnlyUnmadeChange={setOnlyUnmade}
           />
         </div>
 
-        {subscribedCoreIds.size === 0 && (
+        {subscribedCoreIds.size === 0 && !matchesLoading && (
           <div className="rounded-2xl border border-amber-500/25 bg-amber-950/20 px-4 py-3.5 space-y-2">
             <p className="text-xs text-slate-300 font-sans leading-relaxed">
               No tournaments selected. Opt in to leagues and competitions to see
@@ -351,6 +372,7 @@ export default function PredictionsPage({
           userId={user.id}
           unifiedFeed
           feedSportFilter={sportFilter}
+          matchesLoading={matchesLoading}
         />
       </div>
 

@@ -43,9 +43,13 @@ export const GAME_HISTORY_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
 
 /** Map a raw DB / provider status string into the app domain status. */
 export function normalizeMatchStatus(
-  raw: string | null | undefined,
+  raw: string | null | undefined | Pick<Match, "status">,
 ): Match["status"] {
-  const s = String(raw ?? "")
+  const value =
+    typeof raw === "object" && raw != null && "status" in raw
+      ? raw.status
+      : raw;
+  const s = String(value ?? "")
     .trim()
     .toUpperCase()
     .replace(/_/g, " ");
@@ -61,19 +65,13 @@ export function normalizeMatchStatus(
 export function isLiveMatch(
   match: Pick<Match, "status"> | string | null | undefined,
 ): boolean {
-  if (typeof match === "string" || match == null) {
-    return normalizeMatchStatus(match) === "live";
-  }
-  return normalizeMatchStatus(match.status) === "live";
+  return normalizeMatchStatus(match) === "live";
 }
 
 export function isFinishedMatch(
   match: Pick<Match, "status"> | string | null | undefined,
 ): boolean {
-  if (typeof match === "string" || match == null) {
-    return normalizeMatchStatus(match) === "completed";
-  }
-  return normalizeMatchStatus(match.status) === "completed";
+  return normalizeMatchStatus(match) === "completed";
 }
 
 /** True when kickoff falls on the viewer's local calendar day. */

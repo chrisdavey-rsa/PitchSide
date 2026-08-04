@@ -14,7 +14,12 @@ import {
 } from "./lib/seenFeatures";
 import { normalizeMatchStatus } from "./lib/matchStatus";
 import { formatLiveMatchClock } from "./lib/matchClock";
+import {
+  formatAccuracyFromBasePoints,
+} from "./lib/formatAccuracy";
 import type { SupportedTeamOption, TeamSport } from "./data/supportedTeams";
+
+export { formatAccuracyPercent } from "./lib/formatAccuracy";
 
 // Retrieve environment variables and clean them of common copy-paste errors
 const metaEnv = (import.meta as any).env || {};
@@ -357,8 +362,15 @@ export type LeagueSubmittedPredictionRow = {
   home: number;
   away: number;
   submitted: boolean;
+  /** Settled / power-up-adjusted points (0 is valid). */
   pointsWon: number | null;
+  powerupType?: string | null;
 };
+
+function mapPowerupType(raw: unknown): string | null {
+  if (typeof raw !== "string" || !raw) return null;
+  return raw;
+}
 
 export async function dbFetchLeagueSubmittedPredictions(
   userIds: string[],
@@ -369,7 +381,7 @@ export async function dbFetchLeagueSubmittedPredictions(
   const { data, error } = await supabase
     .from("predictions")
     .select(
-      "user_id, match_id, sport, predicted_home_score, predicted_away_score, submitted, points_won",
+      "user_id, match_id, sport, predicted_home_score, predicted_away_score, submitted, points_won, applied_powerup_id",
     )
     .in("user_id", userIds)
     .eq("submitted", true);
@@ -384,12 +396,15 @@ export async function dbFetchLeagueSubmittedPredictions(
     away: Number(p.predicted_away_score) || 0,
     submitted: true,
     pointsWon: p.points_won != null ? Number(p.points_won) : null,
+    powerupType: null,
   }));
 }
 
 /**
  * Submitted predictions for every member of a league (SECURITY DEFINER RPC).
  * Required because predictions RLS is own-row only.
+ * `points_won` is settle+power-up earned points for completed fixtures
+ * (same engine as get_global_leaderboard).
  */
 export async function dbFetchLeagueMemberPredictions(
   leagueId: string,
@@ -405,6 +420,12 @@ export async function dbFetchLeagueMemberPredictions(
 
   if (error) throw error;
 
+  // Temporary diagnostics for league points vs global discrepancy.
+  const metaEnv = (import.meta as { env?: { DEV?: boolean } }).env;
+  if (metaEnv?.DEV) {
+    console.log("League Data Payload:", data);
+  }
+
   return (data || []).map((p: any) => ({
     userId: String(p.user_id),
     matchId: String(p.match_id),
@@ -412,7 +433,9 @@ export async function dbFetchLeagueMemberPredictions(
     home: Number(p.predicted_home_score) || 0,
     away: Number(p.predicted_away_score) || 0,
     submitted: p.submitted !== false,
+    // Include 0 — do not treat as missing.
     pointsWon: p.points_won != null ? Number(p.points_won) : null,
+    powerupType: mapPowerupType(p.powerup_type),
   }));
 }
 
@@ -1602,10 +1625,7 @@ export function formatAccuracy(
   basePoints: number,
   settledPredictions: number,
 ): string {
-  const base = safeNum(basePoints);
-  const settled = safeNum(settledPredictions);
-  if (settled <= 0) return "0%";
-  return `${Math.round((base / (settled * 5)) * 100)}%`;
+  return formatAccuracyFromBasePoints(basePoints, settledPredictions);
 }
 
 /** Strike Rate = total_points / settled_predictions (includes power-up scoring). */

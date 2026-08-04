@@ -545,9 +545,31 @@ export default function LeagueManagementPanel({
               {/* League list (scrolls; hub itself stays fixed height) */}
               <div className="flex-1 min-h-0 overflow-y-auto pr-1 mt-1.5 space-y-1.5">
                 {filteredLeagues.length === 0 ? (
-                  <p className="text-center text-[10px] md:text-[11px] text-slate-500 font-mono py-8">
-                    No leagues found.
-                  </p>
+                  <div className="flex flex-col items-center justify-center text-center py-10 px-4 gap-3">
+                    <p className="text-sm font-display font-bold text-white">
+                      No leagues here yet
+                    </p>
+                    <p className="text-[11px] text-slate-400 font-sans max-w-xs leading-relaxed">
+                      Create a private league for your group, or join one with a
+                      code and password.
+                    </p>
+                    <div className="flex flex-wrap items-center justify-center gap-2 mt-1">
+                      <button
+                        type="button"
+                        onClick={() => setLeagueTab("create")}
+                        className="text-[10px] font-mono font-bold uppercase tracking-wider bg-emerald-500 hover:bg-emerald-600 px-3 py-2 rounded-lg text-white cursor-pointer transition-colors"
+                      >
+                        Create a League
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLeagueTab("join")}
+                        className="text-[10px] font-mono font-bold uppercase tracking-wider bg-blue-500 hover:bg-blue-600 px-3 py-2 rounded-lg text-white cursor-pointer transition-colors"
+                      >
+                        Join a League
+                      </button>
+                    </div>
+                  </div>
                 ) : (
                   filteredLeagues.map((league) => {
                     const comp = competitions.find((c) => c.id === league.competitionId);

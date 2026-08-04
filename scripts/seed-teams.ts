@@ -17,7 +17,7 @@
 import dotenv from "dotenv";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 // Always load project-root .env (not cwd), so `npm.cmd run seed:teams` works on Windows.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -212,11 +212,12 @@ async function fetchLeagueClubs(
 }
 
 async function upsertChunk(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   chunk: TeamRow[],
   onConflict: string,
 ): Promise<void> {
-  const { error } = await supabase.from("teams").upsert(chunk, {
+  // Scripts use an untyped service client; cast for dynamic seed rows.
+  const { error } = await supabase.from("teams").upsert(chunk as never, {
     onConflict,
     ignoreDuplicates: false,
   });
@@ -224,7 +225,7 @@ async function upsertChunk(
 }
 
 async function upsertTeams(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   rows: TeamRow[],
 ): Promise<void> {
   // Deduplicate by sport+type+name (last write wins).

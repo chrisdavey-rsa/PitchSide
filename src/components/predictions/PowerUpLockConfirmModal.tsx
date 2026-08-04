@@ -30,9 +30,9 @@ export default function PowerUpLockConfirmModal({
 
   const contextualNote =
     powerUpId === "banker"
-      ? "Note: Exact scores achieved via Banker chips do not count toward Precision Boost unlock progress."
+      ? "Note: Perfect Predictions achieved via Banker chips do not count toward Precision Boost unlock progress."
       : powerUpId === "sniper"
-        ? "Note: You must predict the exact score to earn the +50% bonus."
+        ? "Note: You must land a Perfect Prediction to earn the +50% bonus."
         : null;
 
   return (

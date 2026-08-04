@@ -4,8 +4,10 @@
  */
 
 import { Match, SportType } from "../types";
-import { calculatePoints } from "../utils";
 import { BASE_SEASON_YEAR, getLatestSeason } from "../seasons";
+import { outcomeOf, settlePredictionPoints } from "../services/scoringEngine";
+import type { AppliedPowerUp } from "../services/scoringEngine";
+import { formatAccuracyPercent } from "./formatAccuracy";
 
 export type StandingsHorizon = "season" | "month" | "week";
 
@@ -16,7 +18,10 @@ export type LeaguePredictionRow = {
   home: number;
   away: number;
   submitted: boolean;
+  /** Settled / power-up-adjusted points from RPC (may be 0). */
   pointsWon?: number | null;
+  /** Power-up type used at settle — mirrors global leaderboard JOIN. */
+  powerupType?: AppliedPowerUp;
 };
 
 export type LeagueStandingRow = {
@@ -62,26 +67,85 @@ export function isMatchInHorizon(
   return settled.getTime() >= weekAgo && settled.getTime() <= now.getTime();
 }
 
+/**
+ * Points for a standings row — NEVER recalculate base-only when settled
+ * earned points are present (including 0). Global leaderboard uses
+ * pitchside_settle_prediction_points; private boards must match.
+ */
 function pointsForPrediction(
   row: LeaguePredictionRow,
   match: Match | undefined,
 ): number {
+  // Strict: a finite pointsWon from the settle RPC / column wins, including 0.
+  if (typeof row.pointsWon === "number" && Number.isFinite(row.pointsWon)) {
+    return row.pointsWon;
+  }
+
+  // Fallback only when payload omitted settle (legacy RPC / optimistic merge):
+  // recompute with power-up, same as global — never bare calculatePoints.
   if (
     match &&
     match.status === "completed" &&
     match.homeScore !== undefined &&
     match.awayScore !== undefined
   ) {
-    return calculatePoints(
+    return settlePredictionPoints(
       match.sport,
       row.home,
       row.away,
       match.homeScore,
       match.awayScore,
-    );
+      row.powerupType,
+    ).earnedPoints;
   }
-  if (typeof row.pointsWon === "number") return row.pointsWon;
+
   return 0;
+}
+
+function isPerfectHit(
+  row: LeaguePredictionRow,
+  match: Match | undefined,
+): boolean {
+  if (
+    !match ||
+    match.status !== "completed" ||
+    match.homeScore === undefined ||
+    match.awayScore === undefined
+  ) {
+    // Fallback without scores: treat base exact (5 pts) as perfect.
+    return row.pointsWon === 5;
+  }
+  if (match.sport === SportType.FOOTBALL || row.sport === SportType.FOOTBALL) {
+    return row.home === match.homeScore && row.away === match.awayScore;
+  }
+  // Rugby perfect = correct outcome + exact margin.
+  if (
+    outcomeOf(row.home, row.away) !==
+    outcomeOf(match.homeScore, match.awayScore)
+  ) {
+    return false;
+  }
+  const predMargin = Math.abs(row.home - row.away);
+  const actualMargin = Math.abs(match.homeScore - match.awayScore);
+  return predMargin === actualMargin;
+}
+
+function isCorrectOutcome(
+  row: LeaguePredictionRow,
+  match: Match | undefined,
+): boolean {
+  if (
+    !match ||
+    match.status !== "completed" ||
+    match.homeScore === undefined ||
+    match.awayScore === undefined
+  ) {
+    return typeof row.pointsWon === "number" && row.pointsWon > 0;
+  }
+  return (
+    outcomeOf(row.home, row.away) ===
+    outcomeOf(match.homeScore, match.awayScore)
+  );
 }
 
 /**
@@ -164,8 +228,8 @@ export function buildLeagueSportStandings(options: {
     if (!bucket) continue;
     bucket.made += 1;
     bucket.points += pts;
-    if (pts > 0) bucket.correct += 1;
-    if (pts === 5) bucket.perfect += 1;
+    if (isCorrectOutcome(row, match)) bucket.correct += 1;
+    if (isPerfectHit(row, match)) bucket.perfect += 1;
   }
 
   const rows: LeagueStandingRow[] = [];
@@ -174,7 +238,7 @@ export function buildLeagueSportStandings(options: {
     if (stats.made === 0) continue; // unlock / cross-pollination: hide zero-pick members
     const accuracy =
       stats.made > 0
-        ? `${Math.round((stats.correct / stats.made) * 100)}%`
+        ? formatAccuracyPercent((stats.correct / stats.made) * 100)
         : "0%";
     rows.push({
       playerId,

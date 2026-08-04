@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { ShieldCheck, Globe, Calendar, ChevronRight, ChevronDown, User } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { ShieldCheck, Globe, Calendar, ChevronRight, ChevronDown, User, Bell } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SportType, UserProfile } from '../../types';
 import { supabase } from '../../supabase';
@@ -7,6 +7,7 @@ import { NATIONS_LIST } from './data';
 import CountryFlag from '../CountryFlag';
 import { filterTeams } from '../../data/supportedTeams';
 import { useTeamsCatalogQuery } from '../../hooks/usePitchsideQueries';
+import { usePushNotifications } from '../../hooks/usePushNotifications';
 
 interface GeneralSettingsProps {
   user: UserProfile;
@@ -21,22 +22,137 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ user, onUpdate
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isProfilePublic, setIsProfilePublic] = useState<boolean>(user.isProfilePublic ?? true);
   const [supportedTeam, setSupportedTeam] = useState(user.supportedTeam || '');
+  const [emailEnabled, setEmailEnabled] = useState<boolean>(
+    user.emailEnabled ?? user.weeklyEmailOptIn ?? false,
+  );
+  const [pushEnabledPref, setPushEnabledPref] = useState<boolean>(
+    user.pushEnabled ?? false,
+  );
+  const [prefsLoading, setPrefsLoading] = useState(true);
+  const [emailBusy, setEmailBusy] = useState(false);
   const [teamSearch, setTeamSearch] = useState('');
   const [isTeamDropdownOpen, setIsTeamDropdownOpen] = useState(false);
   const { data: teamCatalog = [] } = useTeamsCatalogQuery();
+  const push = usePushNotifications(user.id, pushEnabledPref);
+
+  const isLocalProfile =
+    !supabase ||
+    !user?.id ||
+    user.id === 'user-admin' ||
+    user.id.startsWith('usr_local_');
+
+  // Hydrate notification prefs from profiles on mount / user change.
+  useEffect(() => {
+    let cancelled = false;
+    const loadPrefs = async () => {
+      if (isLocalProfile || !supabase) {
+        setEmailEnabled(user.emailEnabled ?? user.weeklyEmailOptIn ?? false);
+        setPushEnabledPref(user.pushEnabled ?? false);
+        setPrefsLoading(false);
+        return;
+      }
+      setPrefsLoading(true);
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('push_enabled, email_enabled, weekly_email_opt_in')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error) {
+        console.warn('[GeneralSettings] notification prefs load failed', error.message);
+        setEmailEnabled(user.emailEnabled ?? false);
+        setPushEnabledPref(user.pushEnabled ?? false);
+      } else {
+        const emailOn =
+          data?.email_enabled === true ||
+          (data?.email_enabled == null && data?.weekly_email_opt_in === true);
+        const pushOn = data?.push_enabled === true;
+        setEmailEnabled(!!emailOn);
+        setPushEnabledPref(!!pushOn);
+        onUpdateUser({
+          ...user,
+          emailEnabled: !!emailOn,
+          weeklyEmailOptIn: !!emailOn,
+          pushEnabled: !!pushOn,
+        });
+      }
+      setPrefsLoading(false);
+    };
+    void loadPrefs();
+    return () => {
+      cancelled = true;
+    };
+    // Intentionally keyed on user.id only — avoid loops from onUpdateUser identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user.id, isLocalProfile]);
 
   const teamSport =
     user.preferredSport === SportType.RUGBY ? 'Rugby' : 'Football';
+
+  const handleEmailToggle = async (next: boolean) => {
+    setEmailEnabled(next);
+    setEmailBusy(true);
+    try {
+      if (!isLocalProfile && supabase) {
+        const { error } = await supabase
+          .from('profiles')
+          .update({
+            email_enabled: next,
+            weekly_email_opt_in: next,
+          })
+          .eq('id', user.id);
+        if (error) throw error;
+      }
+      onUpdateUser({
+        ...user,
+        emailEnabled: next,
+        weeklyEmailOptIn: next,
+      });
+    } catch (err) {
+      console.warn('[GeneralSettings] email_enabled update failed', err);
+      setEmailEnabled(!next);
+      setStatusMsg({
+        text: 'Could not update email preference. Try again.',
+        mode: 'error',
+      });
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
+  const handlePushToggle = async () => {
+    if (push.enabled) {
+      const ok = await push.disable();
+      if (ok) {
+        setPushEnabledPref(false);
+        onUpdateUser({ ...user, pushEnabled: false });
+      }
+      return;
+    }
+    const ok = await push.enable();
+    if (ok) {
+      setPushEnabledPref(true);
+      onUpdateUser({ ...user, pushEnabled: true });
+    }
+  };
 
   const handleSaveChanges = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatusMsg({ text: '', mode: 'none' });
 
     const trimmedTeam = supportedTeam.trim();
+    const favoriteTeams = trimmedTeam
+      ? Array.from(
+          new Set([
+            ...(user.favoriteTeams || []).filter(
+              (t) => t && t.toLowerCase() !== trimmedTeam.toLowerCase(),
+            ),
+            trimmedTeam,
+          ]),
+        )
+      : user.favoriteTeams || [];
 
     try {
-      const isLocalProfile = !supabase || !user || !user.id || user.id === 'user-admin' || user.id.startsWith('usr_local_');
-
       if (supabase && !isLocalProfile) {
         const { error: dbErr } = await supabase
           .from('profiles')
@@ -44,6 +160,10 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ user, onUpdate
             nationality: selectedNationality,
             is_profile_public: isProfilePublic,
             supported_team: trimmedTeam,
+            favorite_teams: favoriteTeams,
+            email_enabled: emailEnabled,
+            weekly_email_opt_in: emailEnabled,
+            push_enabled: push.enabled || pushEnabledPref,
           })
           .eq('id', user.id);
 
@@ -55,6 +175,10 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ user, onUpdate
         nationality: selectedNationality,
         isProfilePublic,
         supportedTeam: trimmedTeam,
+        favoriteTeams,
+        emailEnabled,
+        weeklyEmailOptIn: emailEnabled,
+        pushEnabled: push.enabled || pushEnabledPref,
       });
       setStatusMsg({
         text: 'Success! Your settings have been saved to your account permanently.',
@@ -67,6 +191,10 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ user, onUpdate
         nationality: selectedNationality,
         isProfilePublic,
         supportedTeam: trimmedTeam,
+        favoriteTeams,
+        emailEnabled,
+        weeklyEmailOptIn: emailEnabled,
+        pushEnabled: push.enabled || pushEnabledPref,
       });
       setStatusMsg({
         text: 'Settings updated locally for your current session state.',
@@ -386,6 +514,70 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ user, onUpdate
               </>
             )}
           </AnimatePresence>
+        </div>
+
+        <div className="bg-slate-950/40 p-5 rounded-2xl border border-slate-800/80 space-y-4">
+          <span className="text-[10px] font-bold text-slate-400 font-mono uppercase tracking-widest flex items-center gap-1.5 border-b border-slate-900 pb-2">
+            <Bell className="w-4 h-4 text-amber-400" /> Notifications
+          </span>
+
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h4 className="text-xs font-bold text-slate-200">24h match reminders</h4>
+              <p className="text-[10px] text-slate-400 mt-1">
+                Get a browser push when a fixture is about 24 hours away and you still need a pick.
+              </p>
+              {push.error ? (
+                <p className="text-[10px] text-rose-400 mt-1">{push.error}</p>
+              ) : null}
+              {push.state === "unsupported" ? (
+                <p className="text-[10px] text-slate-500 mt-1">Not supported in this browser.</p>
+              ) : null}
+              {push.state === "denied" ? (
+                <p className="text-[10px] text-amber-400/90 mt-1">
+                  Permission blocked — enable notifications in browser settings.
+                </p>
+              ) : null}
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                className="sr-only peer"
+                checked={push.enabled}
+                disabled={
+                  push.busy ||
+                  prefsLoading ||
+                  push.state === "unsupported" ||
+                  push.state === "denied"
+                }
+                onChange={() => {
+                  void handlePushToggle();
+                }}
+              />
+              <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500 peer-disabled:opacity-40"></div>
+            </label>
+          </div>
+
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h4 className="text-xs font-bold text-slate-200">Weekly fixture email</h4>
+              <p className="text-[10px] text-slate-400 mt-1">
+                Monday digest of the next 7 days — your favourite teams listed first.
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                className="sr-only peer"
+                checked={emailEnabled}
+                disabled={emailBusy || prefsLoading}
+                onChange={(e) => {
+                  void handleEmailToggle(e.target.checked);
+                }}
+              />
+              <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500 peer-disabled:opacity-40"></div>
+            </label>
+          </div>
         </div>
 
         <div className="bg-slate-950/40 p-5 rounded-2xl border border-slate-800/80 space-y-4">

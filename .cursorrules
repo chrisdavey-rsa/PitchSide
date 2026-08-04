@@ -1,0 +1,4 @@
+# React Architecture & Memory Management
+* STABLE REFERENCES: Anytime a parent component passes a function or state-setter down to a child component as a prop, it MUST be wrapped in a `useCallback` hook to maintain referential equality across renders.
+* NO DERIVED STATE IN EFFECTS: You are strictly forbidden from using `useEffect` to synchronize internal component state if that state can be synchronously updated directly inside an event handler (e.g., `onClick`, `onChange`). Calculate the next state during the user interaction event, not as a side-effect.
+* DEPENDENCY ARRAYS: Never suppress or ignore `exhaustive-deps` warnings. All dependencies must be stable. If an object or array causes an update loop, memoize it with `useMemo` or destructure its primitives to use in the dependency array instead.

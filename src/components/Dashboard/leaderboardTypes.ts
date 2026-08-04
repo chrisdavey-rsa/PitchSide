@@ -7,9 +7,13 @@ export interface LeaderboardItem {
   firstName?: string;
   surname?: string;
   nationality: string;
+  /** Raw submitted predictions (engagement). */
   displayPredictions: number;
+  /** Completed (FT) predictions — accuracy & Strike Rate denominator. */
+  displaySettledPredictions: number;
   displayAccuracy: string;
   displayPoints: number;
+  displayPerfectHits: number;
   displayGhostPoints: number;
   displayDropsUsed: number;
   displayDropsAllowed: number;

@@ -27,7 +27,7 @@ export interface SettleResult {
   basePoints: number;
 }
 
-function outcomeOf(home: number, away: number): "home" | "away" | "draw" {
+export function outcomeOf(home: number, away: number): "home" | "away" | "draw" {
   if (home > away) return "home";
   if (home < away) return "away";
   return "draw";
@@ -111,7 +111,7 @@ export function applyPowerUpModifiers(
 }
 
 export function settlePredictionPoints(
-  sport: "football" | "rugby" | SportType,
+  sport: SportType | string,
   predictedHome: number,
   predictedAway: number,
   actualHome: number,

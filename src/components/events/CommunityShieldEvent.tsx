@@ -168,7 +168,7 @@ export default function CommunityShieldEvent({
 
           <h2 className="font-display text-2xl font-extrabold text-white">Football is back.</h2>
           <p className="mx-auto mt-2 max-w-xs text-sm text-slate-300">
-            Predict the <span className="font-bold text-amber-200">exact score</span> of the
+            Make a <span className="font-bold text-amber-200">Perfect Prediction</span> for the
             Community Shield to win a <span className="font-bold text-amber-200">Golden Ticket</span>.
           </p>
 

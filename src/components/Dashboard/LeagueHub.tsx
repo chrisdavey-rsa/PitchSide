@@ -13,6 +13,7 @@ import LeagueSettingsModal, {
 import { isGlobalLeague } from "../../lib/leaguesConfig";
 import LeagueHubStandings from "./LeagueHubStandings";
 import LeaderboardPlayerLabel from "./LeaderboardPlayerLabel";
+import { useLeagueFixturePredictionsQuery } from "../../hooks/usePitchsideQueries";
 
 type LeagueMemberDisplay = LeaderboardRecord & {
   displayPoints: number;
@@ -53,7 +54,6 @@ function LeagueDetailView({
   registeredUsers,
   leagueMembersMemoized,
   sortedActiveLeagueMatches,
-  activeLeagueMatches,
   allMatches,
   activeLeagueMembers,
   predictions,
@@ -75,6 +75,47 @@ function LeagueDetailView({
   const isMember = activeLeagueMembers.includes(user.id);
   const isPrivate = !!activeLeague.isPrivate || activeLeague.isPublic === false;
   const canLeaveOrDelete = isMember && !isGlobalLeague(activeLeague.id);
+
+  const { data: fixturePredictionRows = [] } = useLeagueFixturePredictionsQuery(
+    isMember ? activeLeague.id : null,
+  );
+
+  /** userId → matchId → pick */
+  const memberPicksByMatch = useMemo(() => {
+    const map: Record<
+      string,
+      Record<string, { home: number; away: number; submitted: boolean }>
+    > = {};
+    for (const row of fixturePredictionRows) {
+      if (!row.submitted) continue;
+      (map[row.userId] ??= {})[row.matchId] = {
+        home: row.home,
+        away: row.away,
+        submitted: true,
+      };
+    }
+    // Ensure current user's local/cached picks win for instant UI.
+    for (const [matchId, pred] of Object.entries(predictions)) {
+      if (!pred.submitted) continue;
+      (map[user.id] ??= {})[matchId] = {
+        home: pred.home,
+        away: pred.away,
+        submitted: true,
+      };
+    }
+    return map;
+  }, [fixturePredictionRows, predictions, user.id]);
+
+  const matchesWithActivity = useMemo(() => {
+    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    return sortedActiveLeagueMatches.filter((match) => {
+      const kickoff = new Date(match.matchDate).getTime();
+      if (Number.isNaN(kickoff) || kickoff < weekAgo) return false;
+      return activeLeagueMembers.some(
+        (memberId) => memberPicksByMatch[memberId]?.[match.id]?.submitted,
+      );
+    });
+  }, [sortedActiveLeagueMatches, activeLeagueMembers, memberPicksByMatch]);
 
   /** Live predictor rows: strictly this league's members (never global bleed). */
   const scopedMembers = useMemo(() => {
@@ -258,14 +299,14 @@ function LeagueDetailView({
             scores across every participant:
           </p>
 
-          {activeLeagueMatches.length === 0 ? (
+          {matchesWithActivity.length === 0 ? (
             <div className="text-center py-10 text-slate-500 font-sans text-xs">
-              No matches registered for {compName} right now. Select leagues with
-              scheduled match days.
+              No recent league activity. Fixtures from the last 7 days with at
+              least one member pick will appear here.
             </div>
           ) : (
             <div className="space-y-4">
-              {sortedActiveLeagueMatches.map((match, index) => {
+              {matchesWithActivity.map((match, index) => {
                 const matchDate = new Date(match.matchDate);
                 const dateKey = matchDate.toLocaleDateString(undefined, {
                   weekday: "long",
@@ -279,7 +320,7 @@ function LeagueDetailView({
                 });
 
                 const prevMatch =
-                  index > 0 ? sortedActiveLeagueMatches[index - 1] : null;
+                  index > 0 ? matchesWithActivity[index - 1] : null;
                 const prevDateKey = prevMatch
                   ? new Date(prevMatch.matchDate).toLocaleDateString(undefined, {
                       weekday: "long",
@@ -350,8 +391,14 @@ function LeagueDetailView({
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
                           {scopedMembers.map((member) => {
-                            const memberPred = member.predictions?.[match.id];
-                            const hasPred = memberPred && memberPred.submitted;
+                            const memberPred =
+                              memberPicksByMatch[member.playerId]?.[match.id] ??
+                              (member.playerId === user.id
+                                ? predictions[match.id]
+                                : undefined);
+                            const hasPred = Boolean(
+                              memberPred && memberPred.submitted,
+                            );
                             const isMe = member.playerId === user.id;
 
                             const actualHome =

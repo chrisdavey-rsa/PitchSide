@@ -9,12 +9,18 @@ import {
   Eye,
   EyeOff,
 } from 'lucide-react';
-import { supabase, dbSaveMatch, dbSetMatchVisibility } from '../../supabase';
+import {
+  supabase,
+  dbSaveMatch,
+  dbSetMatchVisibility,
+  dbForceResettleFixture,
+} from '../../supabase';
 import { SportType, Match } from '../../types';
 import { getCompetitions } from '../../competitions';
 import { calculatePoints, settlePredictionWithPowerUp } from '../../utils';
 import type { PowerUpId } from '../../constants/powerups';
 import { getAvailableSeasons, getLatestSeason } from '../../seasons';
+import AdminOverrideGate from './AdminOverrideGate';
 
 interface FixturesManagerProps {
   initialFixtures: Match[];
@@ -279,81 +285,18 @@ export default function FixturesManager({
     setLoadingMatches((prev) => ({ ...prev, [fixture.id]: true }));
 
     try {
-      const updatedFixture = { ...fixture, status: 'completed' as const, homeScore, awayScore };
-      await dbSaveMatch(updatedFixture);
-      setGroupFixtures((prev) => prev.map((f) => (f.id === fixture.id ? updatedFixture : f)));
+      const result = await dbForceResettleFixture(fixture.id, homeScore, awayScore);
+      const updatedFixture = {
+        ...fixture,
+        status: 'completed' as const,
+        homeScore,
+        awayScore,
+      };
+      setGroupFixtures((prev) =>
+        prev.map((f) => (f.id === fixture.id ? updatedFixture : f)),
+      );
 
-      if (supabase) {
-        const { data: predsData } = await supabase
-          .from('predictions')
-          .select(
-            'id, predicted_home_score, predicted_away_score, user_id, match_id, applied_powerup_id',
-          )
-          .eq('match_id', fixture.id);
-
-        if (predsData) {
-          const powerupIds = [
-            ...new Set(
-              predsData
-                .map((p) => p.applied_powerup_id as string | null)
-                .filter((id): id is string => !!id),
-            ),
-          ];
-          const powerupTypeById = new Map<string, PowerUpId>();
-          if (powerupIds.length > 0) {
-            const { data: chips } = await supabase
-              .from('user_powerups')
-              .select('id, powerup_type')
-              .in('id', powerupIds);
-            for (const chip of chips ?? []) {
-              powerupTypeById.set(chip.id, chip.powerup_type as PowerUpId);
-            }
-          }
-
-          for (const predRow of predsData) {
-            const settled = settlePredictionWithPowerUp(
-              fixture.sport,
-              predRow.predicted_home_score,
-              predRow.predicted_away_score,
-              homeScore,
-              awayScore,
-              predRow.applied_powerup_id
-                ? powerupTypeById.get(predRow.applied_powerup_id) ?? null
-                : null,
-            );
-            await supabase
-              .from('predictions')
-              .update({
-                submitted: true,
-                points_won: settled.earnedPoints,
-                is_banker_exact: settled.isBankerExact,
-              })
-              .eq('id', predRow.id);
-
-            if (predRow.applied_powerup_id) {
-              await supabase
-                .from('user_powerups')
-                .update({
-                  status: 'used',
-                  used_at: new Date().toISOString(),
-                  applied_fixture_id: fixture.id,
-                })
-                .eq('id', predRow.applied_powerup_id)
-                .eq('status', 'available');
-            }
-
-            if (predRow.user_id) {
-              await supabase.rpc('evaluate_powerup_unlocks', {
-                p_user_id: predRow.user_id,
-                p_sport_type: fixture.sport,
-                p_season_id: null,
-              });
-            }
-          }
-        }
-      }
-
-      // Update localStorage predictions for sandbox support
+      // Sandbox / offline mirror (non-authoritative).
       Object.keys(localStorage).forEach((key) => {
         if (key.startsWith('predictions_')) {
           try {
@@ -364,23 +307,28 @@ export default function FixturesManager({
                 preds[fixture.id].home,
                 preds[fixture.id].away,
                 homeScore,
-                awayScore
+                awayScore,
               );
               const simKey = key.replace('predictions_', 'simulated_');
               const simulated = JSON.parse(localStorage.getItem(simKey) || '{}');
-              simulated[fixture.id] = { home: homeScore, away: awayScore, played: true, pointsWon };
+              simulated[fixture.id] = {
+                home: homeScore,
+                away: awayScore,
+                played: true,
+                pointsWon,
+              };
               localStorage.setItem(simKey, JSON.stringify(simulated));
-              const userId = key.replace('predictions_', '');
-              const prev = parseInt(localStorage.getItem(`points_${userId}`) || '0', 10);
-              localStorage.setItem(`points_${userId}`, (prev + pointsWon).toString());
             }
           } catch (_) {}
         }
       });
 
-      onSuccess(`🎯 Completed score registration for ${fixture.id}! Points distributed.`);
+      onSuccess(
+        `FT override saved for ${fixture.homeTeam} vs ${fixture.awayTeam}. Resettled ${result.updatedPredictions} Completed Picks.`,
+      );
+      onRefresh();
     } catch (err: any) {
-      console.error('Fixture score outcomes write back discrepancy:', err);
+      console.error('force_resettle_fixture failed:', err);
       onError(`Failed to update score: ${err.message || 'Database error'}`);
     } finally {
       setLoadingMatches((prev) => ({ ...prev, [fixture.id]: false }));
@@ -686,6 +634,7 @@ export default function FixturesManager({
 
       {/* SUB-TAB: MANAGE SCORES */}
       {fixtureSubTab === 'manage' && (
+        <AdminOverrideGate title="Post-match score override">
         <div className="space-y-4 animate-fade-in">
           <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
             <div>
@@ -693,7 +642,8 @@ export default function FixturesManager({
                 Matches Outcome Supervisor
               </h4>
               <p className="text-[10px] text-slate-500 font-sans">
-                Record final score outcomes of scheduled fixtures. PitchSide engines auto-evaluate predictions sheets.
+                Overwrite FT scores and force-resettle Completed Picks via{' '}
+                <span className="text-slate-400 font-mono">force_resettle_fixture</span>.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -780,7 +730,16 @@ export default function FixturesManager({
           ) : (
             <div className="grid grid-cols-1 gap-4">
               {allCurrentFixtures.map((fixture) => {
-                const scores = scoreInputs[fixture.id] || { home: '', away: '' };
+                const scores = scoreInputs[fixture.id] || {
+                  home:
+                    fixture.homeScore !== undefined && fixture.homeScore !== null
+                      ? String(fixture.homeScore)
+                      : '',
+                  away:
+                    fixture.awayScore !== undefined && fixture.awayScore !== null
+                      ? String(fixture.awayScore)
+                      : '',
+                };
                 const isLoading = !!loadingMatches[fixture.id];
                 const isCompleted = fixture.status === 'completed';
                 const isVisible = fixture.isVisible !== false;
@@ -874,12 +833,64 @@ export default function FixturesManager({
                       </label>
 
                       {isCompleted ? (
-                        <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 px-4 py-2.5 rounded-lg text-center font-display min-w-[140px] justify-center">
-                          <div>
-                            <span className="text-slate-500 text-[8px] uppercase font-mono block">Actual Outcome</span>
-                            <span className="text-[15px] font-black tracking-widest text-emerald-400">
-                              {fixture.homeScore} - {fixture.awayScore}
-                            </span>
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                          <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 px-3 py-2 rounded-lg text-center font-display min-w-[120px] justify-center">
+                            <div>
+                              <span className="text-slate-500 text-[8px] uppercase font-mono block">
+                                Current FT
+                              </span>
+                              <span className="text-[15px] font-black tracking-widest text-emerald-400">
+                                {fixture.homeScore} - {fixture.awayScore}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2.5">
+                            <div className="flex items-center gap-1">
+                              <input
+                                id={`admin-home-score-${fixture.id}`}
+                                type="number"
+                                min={0}
+                                placeholder="H"
+                                value={scores.home}
+                                onChange={(e) =>
+                                  setScoreInputs((prev) => ({
+                                    ...prev,
+                                    [fixture.id]: { ...scores, home: e.target.value },
+                                  }))
+                                }
+                                className="w-10 text-center font-display font-black text-white bg-slate-900 border border-slate-800 focus:border-amber-500 rounded-lg py-1.5"
+                              />
+                              <span className="text-slate-500 font-mono text-[10px]">:</span>
+                              <input
+                                id={`admin-away-score-${fixture.id}`}
+                                type="number"
+                                min={0}
+                                placeholder="A"
+                                value={scores.away}
+                                onChange={(e) =>
+                                  setScoreInputs((prev) => ({
+                                    ...prev,
+                                    [fixture.id]: { ...scores, away: e.target.value },
+                                  }))
+                                }
+                                className="w-10 text-center font-display font-black text-white bg-slate-900 border border-slate-800 focus:border-amber-500 rounded-lg py-1.5"
+                              />
+                            </div>
+                            <button
+                              id={`btn-save-score-${fixture.id}`}
+                              disabled={isLoading}
+                              onClick={() => handleUpdateScore(fixture)}
+                              className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-[10px] font-mono px-3.5 py-2 rounded-lg cursor-pointer transition-colors shadow-sm flex items-center justify-center gap-1 uppercase tracking-wide"
+                            >
+                              {isLoading ? (
+                                <RefreshCw className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <>
+                                  <Play className="w-2.5 h-2.5" />
+                                  <span>Override &amp; Resettle</span>
+                                </>
+                              )}
+                            </button>
                           </div>
                         </div>
                       ) : (
@@ -939,6 +950,7 @@ export default function FixturesManager({
             </div>
           )}
         </div>
+        </AdminOverrideGate>
       )}
     </div>
   );

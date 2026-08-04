@@ -28,7 +28,7 @@ interface ScoringRow {
 const FOOTBALL_ROWS: ScoringRow[] = [
   {
     points: "5",
-    title: "Exact Score",
+    title: "Perfect Prediction",
     desc: "Nail the precise final scoreline.",
     icon: <Target className="h-4 w-4" />,
     accent: "text-emerald-400 bg-emerald-500/15",
@@ -52,7 +52,7 @@ const FOOTBALL_ROWS: ScoringRow[] = [
 const RUGBY_ROWS: ScoringRow[] = [
   {
     points: "5",
-    title: "Exact Margin",
+    title: "Perfect Prediction",
     desc: "Correct winner and exact winning margin.",
     icon: <Target className="h-4 w-4" />,
     accent: "text-emerald-400 bg-emerald-500/15",
@@ -142,7 +142,7 @@ export default function SportIntroModal({ sport, onDismiss }: SportIntroModalPro
             </h2>
             <p className="mt-1 text-xs text-slate-400 leading-relaxed">
               {isFootball
-                ? "Points reward how close you get — from the exact score down to just the winner."
+                ? "Points reward how close you get — from a Perfect Prediction down to just the winner."
                 : "Pick the winner, then get as close to the winning margin as you can."}
             </p>
           </div>

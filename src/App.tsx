@@ -90,9 +90,17 @@ function AppShell() {
       return;
     }
 
+    // Already showing this user — avoid spinner / gate flicker on token refresh
+    // or duplicate INITIAL_SESSION after boot.
+    const alreadyHydrated =
+      session.user.id === sessionUserIdRef.current &&
+      session.user.id === currentUserIdRef.current;
+
     sessionUserIdRef.current = session.user.id;
     setSessionUserId(session.user.id);
-    setIsLoadingProfile(true);
+    if (!alreadyHydrated) {
+      setIsLoadingProfile(true);
+    }
     try {
       const profile = await profileFromSession(session.user);
       currentUserIdRef.current = profile.id;
@@ -103,8 +111,12 @@ function AppShell() {
       );
     } catch (err) {
       console.error('[auth] profile load failed', err);
-      currentUserIdRef.current = null;
-      setCurrentUser(null);
+      // Keep an existing same-user session on screen; only clear on hard failure
+      // when we never had a profile for this session.
+      if (!alreadyHydrated) {
+        currentUserIdRef.current = null;
+        setCurrentUser(null);
+      }
     } finally {
       setIsLoadingProfile(false);
     }
@@ -320,9 +332,9 @@ function AppShell() {
           skipSplashForAuthRedirect();
         }
 
-        // Avoid redundant profile reloads on token refresh when already hydrated.
+        // Avoid redundant profile reloads when already hydrated for this user.
         if (
-          event === 'TOKEN_REFRESHED' &&
+          (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') &&
           session.user.id === sessionUserIdRef.current &&
           currentUserIdRef.current === session.user.id
         ) {

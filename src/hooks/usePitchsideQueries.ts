@@ -5,6 +5,7 @@ import {
   dbFetchActiveCompetitions,
   dbFetchPredictions,
   dbFetchLeagueSubmittedPredictions,
+  dbFetchLeagueMemberPredictions,
   dbFetchLeagues,
   dbFetchUserLeagues,
   dbFetchLeagueMembers,
@@ -20,6 +21,7 @@ import { queryKeys } from '../lib/queryKeys';
 import { acquireMatchesRealtime } from '../lib/matchesRealtime';
 import { Match, SportType, Competition, ActiveCompetition } from '../types';
 import { resolveTeamCatalog, SUPPORTED_TEAMS } from '../data/supportedTeams';
+import { BASE_SEASON_YEAR } from '../seasons';
 
 /**
  * Silent Realtime → React Query bridge for live scores.
@@ -60,13 +62,14 @@ function useForegroundMatchesRefetch() {
   }, [queryClient]);
 }
 
-export function useMatchesQuery() {
+export function useMatchesQuery(options?: { enabled?: boolean }) {
   useMatchesRealtimeSync();
   useForegroundMatchesRefetch();
 
   return useQuery({
     queryKey: queryKeys.matches,
     queryFn: () => dbFetchMatches({ horizonDays: MATCH_HORIZON_DAYS }),
+    enabled: options?.enabled !== false,
     // Short stale window so focus/visibility refetches actually hit the network
     // while Realtime still patches live ticks in between.
     staleTime: 15_000,
@@ -113,10 +116,36 @@ export function useLeagueStandingsPredictionsQuery(
   memberIds: string[],
 ) {
   const key = [...memberIds].sort().join(',');
+  const seasonStart = new Date(Date.UTC(BASE_SEASON_YEAR, 0, 1)).toISOString();
   return useQuery({
     queryKey: [...queryKeys.leagueStandingsPredictions(leagueId || 'none'), key] as const,
-    queryFn: () => dbFetchLeagueSubmittedPredictions(memberIds),
+    queryFn: async () => {
+      if (!leagueId) return [] as Awaited<ReturnType<typeof dbFetchLeagueMemberPredictions>>;
+      try {
+        return await dbFetchLeagueMemberPredictions(leagueId, seasonStart);
+      } catch {
+        // Fallback for older backends / non-members preview: own-row RLS only.
+        return dbFetchLeagueSubmittedPredictions(memberIds);
+      }
+    },
     enabled: !!leagueId && memberIds.length > 0,
+  });
+}
+
+/** League fixture matrix: member picks for the last 7 days. */
+export function useLeagueFixturePredictionsQuery(
+  leagueId: string | null | undefined,
+  enabled = true,
+) {
+  const sinceIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  return useQuery({
+    queryKey: ['leagueFixturePredictions', leagueId || 'none', sinceIso.slice(0, 10)] as const,
+    queryFn: () =>
+      leagueId
+        ? dbFetchLeagueMemberPredictions(leagueId, sinceIso)
+        : Promise.resolve([]),
+    enabled: !!leagueId && enabled,
+    staleTime: 30_000,
   });
 }
 
@@ -194,18 +223,47 @@ export function mapLeaderboardForSport(
   const isFootball = sport === SportType.FOOTBALL;
 
   return records
-    .filter((item) => (isFootball ? item.predictionsFootball > 0 : item.predictionsRugby > 0))
-    .sort((a, b) =>
-      isFootball ? b.pointsFootball - a.pointsFootball : b.pointsRugby - a.pointsRugby,
+    .filter((item) =>
+      isFootball
+        ? item.predictionsFootball > 0 || item.settledPredictionsFootball > 0
+        : item.predictionsRugby > 0 || item.settledPredictionsRugby > 0,
     )
+    .sort((a, b) => {
+      const aPts = isFootball ? a.pointsFootball : a.pointsRugby;
+      const bPts = isFootball ? b.pointsFootball : b.pointsRugby;
+      if (aPts !== bPts) return bPts - aPts;
+      const aPerfect = isFootball ? a.perfectHitsFootball : a.perfectHitsRugby;
+      const bPerfect = isFootball ? b.perfectHitsFootball : b.perfectHitsRugby;
+      if (aPerfect !== bPerfect) return bPerfect - aPerfect;
+      const aSettled = isFootball
+        ? a.settledPredictionsFootball
+        : a.settledPredictionsRugby;
+      const bSettled = isFootball
+        ? b.settledPredictionsFootball
+        : b.settledPredictionsRugby;
+      const aStrike = aSettled > 0 ? aPts / aSettled : 0;
+      const bStrike = bSettled > 0 ? bPts / bSettled : 0;
+      if (aStrike !== bStrike) return bStrike - aStrike;
+      return a.nickname.localeCompare(b.nickname);
+    })
     .map((item, index) => ({
       ...item,
       displayPoints: isFootball ? item.pointsFootball : item.pointsRugby,
-      displayPredictions: isFootball ? item.predictionsFootball : item.predictionsRugby,
+      displayPredictions: isFootball
+        ? item.predictionsFootball
+        : item.predictionsRugby,
+      displaySettledPredictions: isFootball
+        ? item.settledPredictionsFootball
+        : item.settledPredictionsRugby,
       displayAccuracy: isFootball ? item.accuracyFootball : item.accuracyRugby,
+      displayPerfectHits: isFootball
+        ? item.perfectHitsFootball
+        : item.perfectHitsRugby,
       displayGhostPoints: isFootball ? item.ghostPointsFootball : item.ghostPointsRugby,
       displayDropsUsed: isFootball ? item.dropsUsedFootball : item.dropsUsedRugby,
-      displayDropsAllowed: isFootball ? item.dropsAllowedFootball : item.dropsAllowedRugby,
+      displayDropsAllowed: isFootball
+        ? item.dropsAllowedFootball
+        : item.dropsAllowedRugby,
       /** Amber "As It Stands" live points — distinct from locked displayPoints. */
       displayProvisionalPoints: provisionalByUser[item.playerId] || 0,
       rank: index + 1,

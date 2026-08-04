@@ -7,6 +7,8 @@ import {
   usePredictionsQuery,
 } from "../../hooks/usePitchsideQueries";
 import { calculatePoints } from "../../utils";
+import type { PredictionEntry } from "../../supabase";
+import { formatAccuracyPercent } from "../../lib/formatAccuracy";
 
 interface HistoricScoresProps {
   user: UserProfile;
@@ -39,7 +41,7 @@ function startOfWeek(d: Date): Date {
 
 function formatPct(hits: number, total: number): string {
   if (total <= 0) return "—";
-  return `${Math.round((hits / total) * 100)}%`;
+  return formatAccuracyPercent((hits / total) * 100);
 }
 
 export const HistoricScores: React.FC<HistoricScoresProps> = ({
@@ -50,12 +52,15 @@ export const HistoricScores: React.FC<HistoricScoresProps> = ({
   const seasons = getAvailableSeasons();
   const multiSeason = seasons.length > 1;
   const { data: matches = [] } = useMatchesQuery();
-  const { data: predictions = {} } = usePredictionsQuery(user.id);
+  const { data: predictionsData } = usePredictionsQuery(user.id);
+  const predictions: Record<string, PredictionEntry> = predictionsData ?? {};
 
   const historyRows = useMemo<HistoryRow[]>(() => {
     const rows: HistoryRow[] = [];
 
-    for (const [matchId, pred] of Object.entries(predictions)) {
+    for (const [matchId, pred] of Object.entries(predictions) as Array<
+      [string, PredictionEntry]
+    >) {
       if (!pred.submitted) continue;
       const match = matches.find((m) => m.id === matchId);
       if (!match) continue;
@@ -114,7 +119,9 @@ export const HistoricScores: React.FC<HistoricScoresProps> = ({
 
     let allTimeTotal = 0;
     let allTimeHits = 0;
-    for (const [matchId, pred] of Object.entries(predictions)) {
+    for (const [matchId, pred] of Object.entries(predictions) as Array<
+      [string, PredictionEntry]
+    >) {
       if (!pred.submitted) continue;
       const match = matches.find((m) => m.id === matchId);
       if (

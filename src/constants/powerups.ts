@@ -78,7 +78,7 @@ export interface UserPowerUpInstance {
   /** Whether the player has unlocked this chip for the season. */
   unlocked: boolean;
   status: "available" | "armed" | "consumed" | "expired" | "locked";
-  /** Progress copy for locked chips, e.g. "1 more exact score needed…". */
+  /** Progress copy for locked chips, e.g. "1 more Perfect Prediction needed…". */
   progressHint?: string;
   /** Fixture currently armed (if any). */
   armedMatchId?: string | null;
@@ -107,7 +107,7 @@ export const POWER_UPS: PowerUpDefinition[] = [
     howToUse:
       "Open your Power-Up wallet, tap Double Bubble, then assign it to an unlocked fixture before kick-off. Once armed, it locks with that prediction.",
     gameImpact:
-      "All points earned on the selected fixture are doubled (exact score, margin, and outcome bands).",
+      "All points earned on the selected fixture are doubled (Perfect Prediction, margin, and outcome bands).",
     allocation: "baseline",
     unlockCriteria: "Granted at season start (baseline allocation).",
     icon: DoubleBubbleIcon,
@@ -144,19 +144,19 @@ export const POWER_UPS: PowerUpDefinition[] = [
   {
     id: "sniper",
     name: "Precision Boost",
-    tagline: "+50% bonus on exact score / margin hits.",
+    tagline: "+50% bonus on Perfect Predictions.",
     description:
-      "Precision Boost adds a +50% bonus on top of points from exact scoreline or exact margin hits on the armed fixture.",
+      "Precision Boost adds a +50% bonus on top of points from Perfect Predictions on the armed fixture.",
     howToEarn:
-      "Land 3 exact predictions within a rolling 10-week window. Exact scores achieved via a Banker do NOT count toward this requirement.",
+      "Land 3 Perfect Predictions within a rolling 10-week window. Perfect Predictions achieved via a Banker do NOT count toward this requirement.",
     howToUse:
-      "Assign Precision Boost to a fixture you expect to nail exactly. The +50% applies only if you hit the exact band.",
+      "Assign Precision Boost to a fixture you expect to nail exactly. The +50% applies only if you land a Perfect Prediction.",
     gameImpact:
-      "Exact hits pay 1.5× their normal exact-score points on the selected fixture.",
+      "Perfect Predictions pay 1.5× their normal points on the selected fixture.",
     allocation: "earned",
-    unlockCriteria: "3 exact predictions in a rolling 10-week window (Banker exacts excluded).",
+    unlockCriteria: "3 Perfect Predictions in a rolling 10-week window (Banker excluded).",
     notes:
-      "Exact scores achieved via a Banker do not count toward unlocking or progressing Precision Boost.",
+      "Perfect Predictions achieved via a Banker do not count toward unlocking or progressing Precision Boost.",
     icon: Crosshair,
     theme: {
       accentText: "text-rose-300",
@@ -169,19 +169,19 @@ export const POWER_UPS: PowerUpDefinition[] = [
   {
     id: "banker",
     name: "Banker",
-    tagline: "Max exact points if you get the outcome right.",
+    tagline: "Max Perfect Prediction points if you get the outcome right.",
     description:
-      "Banker automatically awards the maximum exact-score points for a selected fixture as long as you predict the correct match outcome (winner or draw) — even if the scoreline / margin is wrong.",
+      "Banker automatically awards Perfect Prediction points for a selected fixture as long as you predict the correct match outcome (winner or draw) — even if the scoreline / margin is wrong.",
     howToEarn:
       "Earned through season milestones published per competition. Check your wallet progress for the current sport season.",
     howToUse:
-      "Arm Banker on a fixture before kick-off. Predict the correct winner or draw; if the outcome is right, you receive full exact-score points.",
+      "Arm Banker on a fixture before kick-off. Predict the correct winner or draw; if the outcome is right, you receive Perfect Prediction points.",
     gameImpact:
-      "Correct outcome → maximum exact-score points. Incorrect outcome → normal scoring (no Banker benefit).",
+      "Correct outcome → Perfect Prediction points. Incorrect outcome → normal scoring (no Banker benefit).",
     allocation: "earned",
     unlockCriteria: "Season milestone unlock (see wallet progress).",
     notes:
-      "Exact scores awarded via Banker do NOT count toward the Precision Boost 3-exact earning requirement.",
+      "Perfect Predictions awarded via Banker do NOT count toward the Precision Boost 3-Perfect Prediction earning requirement.",
     icon: Landmark,
     theme: {
       accentText: "text-slate-200",
@@ -271,7 +271,7 @@ export function buildSeasonWallet(options: {
     sniper: {
       unlocked: false,
       status: "locked",
-      progressHint: "1 more exact score needed in the next 4 weeks.",
+      progressHint: "1 more Perfect Prediction needed in the next 4 weeks.",
     },
     banker: {
       unlocked: false,
@@ -287,7 +287,12 @@ export function buildSeasonWallet(options: {
 
   return POWER_UP_IDS.map((powerUpId) => {
     const base = defaults[powerUpId];
-    const over = overrides[powerUpId] ?? {};
+    const over: Partial<
+      Pick<
+        UserPowerUpInstance,
+        "unlocked" | "status" | "progressHint" | "armedMatchId"
+      >
+    > = overrides[powerUpId] ?? {};
     const unlocked = over.unlocked ?? base.unlocked;
     let status = over.status ?? base.status;
 

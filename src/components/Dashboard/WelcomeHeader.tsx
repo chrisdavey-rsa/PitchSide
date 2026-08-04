@@ -6,7 +6,8 @@ import { UserProfile } from "../../types";
 interface WelcomeHeaderProps {
   user: UserProfile;
   userPoints: number;
-  totalPredicted: number;
+  /** Base-points accuracy, e.g. "45%". */
+  accuracyPercent: string;
   perfectPredictions: number;
   weeklyStreak: number;
   isUserInAnyLeague: boolean;
@@ -22,7 +23,7 @@ function weeklyStreakClasses(streak: number): string {
 export default function WelcomeHeader({
   user,
   userPoints,
-  totalPredicted,
+  accuracyPercent,
   perfectPredictions,
   weeklyStreak,
   isUserInAnyLeague,
@@ -112,10 +113,10 @@ export default function WelcomeHeader({
         </div>
         <div className="p-2.5 bg-slate-950/40 rounded-xl border border-slate-800/60 flex flex-col justify-center">
           <span className="text-2xl font-black font-display text-blue-400">
-            {totalPredicted}
+            {accuracyPercent}
           </span>
           <p className="text-[9px] text-slate-500 uppercase font-mono tracking-widest mt-0.5">
-            Guesses Locked
+            Accuracy %
           </p>
         </div>
         <div className="p-2.5 bg-slate-950/40 rounded-xl border border-slate-800/60 flex flex-col justify-center">
@@ -123,7 +124,7 @@ export default function WelcomeHeader({
             {perfectPredictions}
           </span>
           <p className="text-[9px] text-slate-500 uppercase font-mono tracking-widest mt-0.5">
-            Perfect Hits
+            Perfect Predictions
           </p>
         </div>
       </div>

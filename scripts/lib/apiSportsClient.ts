@@ -18,6 +18,14 @@ export const DAILY_BUDGET_CAP = 90;
 export const FOOTBALL_HOST = "https://v3.football.api-sports.io";
 export const RUGBY_HOST = "https://v1.rugby.api-sports.io";
 
+export type ApiSportsFailureReason =
+  | "budget_exhausted"
+  | "network"
+  | "http"
+  | "plan_blocked"
+  | "validation_error";
+
+/** Discriminated by `ok`. Failure fields are also optional on success for defensive access. */
 export type ApiSportsResult =
   | {
       ok: true;
@@ -26,15 +34,12 @@ export type ApiSportsResult =
       rateLimit: { limit: number | null; remaining: number | null };
       callsMadeToday: number;
       remainingBudget: number;
+      reason?: ApiSportsFailureReason;
+      message?: string;
     }
   | {
       ok: false;
-      reason:
-        | "budget_exhausted"
-        | "network"
-        | "http"
-        | "plan_blocked"
-        | "validation_error";
+      reason: ApiSportsFailureReason;
       message: string;
       callsMadeToday?: number;
       remainingBudget?: number;
@@ -390,7 +395,7 @@ export class ApiSportsClient {
         checked_on: utcDay(),
         fixtures_found: fixturesFound,
         updated_at: new Date().toISOString(),
-      },
+      } as never,
       { onConflict: "sport,league_id,fixture_date,checked_on" },
     );
     if (error) {

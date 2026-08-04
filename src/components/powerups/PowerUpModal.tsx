@@ -134,7 +134,7 @@ export default function PowerUpModal({ powerUpId, onClose }: PowerUpModalProps) 
                 </span>
               </div>
               <p className="text-xs leading-relaxed text-slate-400">
-                Power-ups are scoped to a sport season. When that season is no longer active,
+                Power-Ups are scoped to a sport season. When that season is no longer active,
                 remaining chips expire automatically and cannot be carried over.
               </p>
             </div>
