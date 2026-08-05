@@ -47,7 +47,7 @@ import {
   isLiveMatch,
   isSameLocalDay,
 } from "../../lib/matchStatus";
-import { usePersistedCompetitionFilter } from "../predictions/CompetitionFilterRail";
+import { usePersistedCompetitionFilter } from "../../hooks/usePersistedCompetitionFilter";
 import { settlePredictionWithPowerUp } from "../../utils";
 import LockGuessButton from "./LockGuessButton";
 import PowerUpPerimeterBeam from "./PowerUpPerimeterBeam";

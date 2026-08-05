@@ -4,7 +4,7 @@
 
 import { useCallback, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '../../../supabase';
+import { supabase, type Tables } from '../../../supabase';
 import { normalizeRole, roleFromIsAdmin } from '../featureFlags';
 import {
   displayConstructorName,
@@ -18,6 +18,10 @@ import type {
   SportKey,
   UserRole,
 } from '../types';
+
+type DbF1Constructor = Tables<'f1_constructors'>;
+type DbF1Driver = Tables<'f1_drivers'>;
+type DbGolfPlayer = Tables<'golf_players'>;
 
 export const emergingQueryKeys = {
   profile: (userId: string) => ['emerging', 'profile', userId] as const,
@@ -78,32 +82,43 @@ const FALLBACK_GOLFERS: GolfPlayer[] = [
 const OUTDATED_F1_DRIVER_IDS = new Set(['doohan', 'tsunoda', 'drugovich']);
 
 
-function mapConstructor(row: Record<string, unknown>): F1Constructor {
+function mapConstructor(row: Pick<
+  DbF1Constructor,
+  'id' | 'name' | 'nationality' | 'country_code' | 'team_color_hex'
+>): F1Constructor {
   return {
-    id: String(row.id),
-    name: String(row.name ?? ''),
-    nationality: (row.nationality as string) ?? null,
-    countryCode: (row.country_code as string) ?? null,
-    teamColorHex: (row.team_color_hex as string) ?? null,
+    id: row.id,
+    name: row.name ?? '',
+    nationality: row.nationality ?? null,
+    countryCode: row.country_code ?? null,
+    teamColorHex: row.team_color_hex ?? null,
   };
 }
 
 function mapDriver(
-  row: Record<string, unknown>,
+  row: Pick<
+    DbF1Driver,
+    | 'id'
+    | 'name'
+    | 'permanent_number'
+    | 'constructor_id'
+    | 'nationality'
+    | 'country_code'
+    | 'helmet_image_url'
+  >,
   constructorsById: Map<string, F1Constructor>,
 ): F1Driver {
-  const constructorId = (row.constructor_id as string) ?? null;
+  const constructorId = row.constructor_id ?? null;
   const ctor = constructorId ? constructorsById.get(constructorId) : undefined;
   return {
-    id: String(row.id),
-    name: String(row.name ?? ''),
-    permanentNumber:
-      row.permanent_number != null ? Number(row.permanent_number) : null,
+    id: row.id,
+    name: row.name ?? '',
+    permanentNumber: row.permanent_number ?? null,
     constructorId,
-    nationality: (row.nationality as string) ?? null,
-    countryCode: (row.country_code as string) ?? null,
+    nationality: row.nationality ?? null,
+    countryCode: row.country_code ?? null,
     helmetImageUrl:
-      (row.helmet_image_url as string) ||
+      row.helmet_image_url ||
       helmetSrcForConstructor(constructorId) ||
       null,
     teamColorHex: ctor?.teamColorHex ?? null,
@@ -111,15 +126,24 @@ function mapDriver(
   };
 }
 
-function mapGolfer(row: Record<string, unknown>): GolfPlayer {
+function mapGolfer(
+  row: Pick<
+    DbGolfPlayer,
+    | 'id'
+    | 'name'
+    | 'nationality'
+    | 'country_code'
+    | 'pga_world_ranking'
+    | 'profile_image_url'
+  >,
+): GolfPlayer {
   return {
-    id: String(row.id),
-    name: String(row.name ?? ''),
-    nationality: (row.nationality as string) ?? null,
-    countryCode: (row.country_code as string) ?? null,
-    pgaWorldRanking:
-      row.pga_world_ranking != null ? Number(row.pga_world_ranking) : null,
-    profileImageUrl: (row.profile_image_url as string) ?? null,
+    id: row.id,
+    name: row.name ?? '',
+    nationality: row.nationality ?? null,
+    countryCode: row.country_code ?? null,
+    pgaWorldRanking: row.pga_world_ranking ?? null,
+    profileImageUrl: row.profile_image_url ?? null,
   };
 }
 
@@ -195,7 +219,7 @@ export function useF1ConstructorsQuery() {
         .select('id, name, nationality, country_code, team_color_hex')
         .order('name');
       if (error) throw error;
-      const rows = (data || []).map((r) => mapConstructor(r as Record<string, unknown>));
+      const rows = (data || []).map((r) => mapConstructor(r));
       return rows.length > 0 ? rows : FALLBACK_CONSTRUCTORS;
     },
     staleTime: 60 * 60_000,
@@ -220,7 +244,7 @@ export function useF1DriversQuery() {
         (constructorsQuery.data || []).map((c) => [c.id, c] as const),
       );
       const mapped = (data || [])
-        .map((r) => mapDriver(r as Record<string, unknown>, byId))
+        .map((r) => mapDriver(r, byId))
         .filter((d) => !OUTDATED_F1_DRIVER_IDS.has(d.id));
       return mapped.length > 0 ? mapped : FALLBACK_DRIVERS;
     },
@@ -241,7 +265,7 @@ export function useGolfPlayersQuery() {
         )
         .order('pga_world_ranking', { ascending: true, nullsFirst: false });
       if (error) throw error;
-      const rows = (data || []).map((r) => mapGolfer(r as Record<string, unknown>));
+      const rows = (data || []).map((r) => mapGolfer(r));
       return rows.length > 0 ? rows : FALLBACK_GOLFERS;
     },
     staleTime: 60 * 60_000,

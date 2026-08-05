@@ -10,7 +10,12 @@
 
 import type { QueryClient } from '@tanstack/react-query';
 import type { RealtimeChannel } from '@supabase/supabase-js';
-import { supabase, mapMatchRow, type LiveProvisionalMatrix } from '../supabase';
+import {
+  supabase,
+  mapMatchRow,
+  type LiveProvisionalMatrix,
+  type DbMatch,
+} from '../supabase';
 import { queryKeys } from './queryKeys';
 import type { Match } from '../types';
 
@@ -30,7 +35,7 @@ let channel: RealtimeChannel | null = null;
 let subscriberCount = 0;
 let boundClient: QueryClient | null = null;
 
-function toLivePatch(row: Record<string, unknown>): LivePatch {
+function toLivePatch(row: Partial<DbMatch> | Record<string, unknown>): LivePatch {
   const mapped = mapMatchRow(row);
   return {
     status: mapped.status,
@@ -85,7 +90,7 @@ function applyCompletedCleanup(
 /** Apply a matches UPDATE payload to the React Query cache (silent). */
 export function patchMatchesQueryCache(
   queryClient: QueryClient,
-  row: Record<string, unknown> | null | undefined,
+  row: Partial<DbMatch> | Record<string, unknown> | null | undefined,
 ) {
   if (!row) return;
 
@@ -173,7 +178,7 @@ function ensureChannel(queryClient: QueryClient) {
         // sync-live ticks land here — patch live score / status without refetch.
         patchMatchesQueryCache(
           client,
-          payload.new as Record<string, unknown> | null,
+          payload.new as Partial<DbMatch> | null,
         );
       },
     )

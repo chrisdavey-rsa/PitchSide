@@ -7,9 +7,10 @@ import {
   FileJson,
   Mail,
 } from 'lucide-react';
+import type { ArchivedPlayerBackup } from '../../supabase';
 
 interface ArchivesManagerProps {
-  archivedUsers: any[];
+  archivedUsers: ArchivedPlayerBackup[];
   loadingArchives: boolean;
   onRefresh: () => void;
   onSuccess: (msg: string) => void;
@@ -42,11 +43,12 @@ export default function ArchivesManager({
 
   const filteredArchives = archivedUsers.filter((b) => {
     const search = archiveSearch.toLowerCase();
+    const deleted = b.deletedUser || {};
     return (
-      (b.deletedUser?.nickname || '').toLowerCase().includes(search) ||
-      (b.deletedUser?.email || '').toLowerCase().includes(search) ||
-      (b.deletedUser?.firstName || '').toLowerCase().includes(search) ||
-      (b.deletedUser?.surname || '').toLowerCase().includes(search)
+      String(deleted.nickname || '').toLowerCase().includes(search) ||
+      String(deleted.email || '').toLowerCase().includes(search) ||
+      String(deleted.firstName || '').toLowerCase().includes(search) ||
+      String(deleted.surname || '').toLowerCase().includes(search)
     );
   });
 
@@ -144,7 +146,7 @@ export default function ArchivesManager({
                     </span>
                   </td>
                   <td className="py-3 px-4 font-semibold text-sky-400">
-                    📊 {b.predictions?.length || 0} predictions retained
+                    📊 {Array.isArray(b.predictions) ? b.predictions.length : 0} predictions retained
                   </td>
                   <td className="py-3 px-4 text-slate-400 text-[10px]">
                     {new Date(b.deletedUser?.deletedAt || b.deletedAt || Date.now()).toLocaleString()}

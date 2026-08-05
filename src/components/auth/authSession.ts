@@ -219,7 +219,7 @@ export async function performLogin(
 export async function requestPasswordReset(email: string): Promise<void> {
   if (!supabase) throw 'Database not connected. Cannot send reset link.';
   const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
-    redirectTo: window.location.origin,
+    redirectTo: `${window.location.origin}/update-password`,
   });
   if (error) throw error.message;
 }

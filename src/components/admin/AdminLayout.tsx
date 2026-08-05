@@ -8,10 +8,12 @@ import {
   CheckCircle2,
   X,
   BarChart3,
+  Megaphone,
 } from 'lucide-react';
 
 export type AdminTab =
   | 'dashboard'
+  | 'broadcast'
   | 'analytics'
   | 'players'
   | 'fixtures'
@@ -34,6 +36,7 @@ interface AdminLayoutProps {
 
 const TABS: { id: AdminTab; label: (counts: { fixture: number; player: number; archive: number }) => string; icon: React.FC<any>; color: 'purple' | 'blue' | 'emerald' | 'cyan' }[] = [
   { id: 'dashboard',      label: () => 'Game Health Analytics',                    icon: AlertTriangle, color: 'purple' },
+  { id: 'broadcast',      label: () => 'Admin Broadcast',                          icon: Megaphone,     color: 'purple' },
   { id: 'analytics',      label: () => 'Analytics & Insights',                     icon: BarChart3,     color: 'cyan' },
   { id: 'players',        label: ({ player }) => `Players (${player})`,            icon: Users,         color: 'purple' },
   { id: 'fixtures',       label: ({ fixture }) => `Fixtures & Scoring (${fixture})`, icon: Trophy,      color: 'blue' },

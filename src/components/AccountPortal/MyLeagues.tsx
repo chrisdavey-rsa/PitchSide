@@ -133,7 +133,7 @@ export const MyLeagues: React.FC<MyLeaguesProps> = ({
         <div
           role="tablist"
           aria-label="League seasons"
-          className={`flex flex-row gap-2 ${multiSeason ? 'flex-wrap sm:flex-nowrap' : ''}`}
+          className={`flex flex-row gap-2 overflow-x-auto ${multiSeason ? 'flex-wrap sm:flex-nowrap' : ''}`}
         >
           {seasons.map((season) => {
             const isActive = selectedSeason === season;

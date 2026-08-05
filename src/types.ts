@@ -45,8 +45,10 @@ export interface UserProfile {
   emailEnabled?: boolean;
   /** @deprecated Prefer emailEnabled */
   weeklyEmailOptIn?: boolean;
+  /** Client-only legacy field — never stored on profiles. Prefer Supabase Auth. */
   password?: string;
   isProfilePublic?: boolean;
+  /** Client-only placeholder — not a profiles column. */
   suspendedUntil?: string;
   /**
    * Persistent feature-tour map from profiles.seen_features (JSONB).

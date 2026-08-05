@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Routes, Route, useNavigate, Link } from 'react-router-dom';
+import { Routes, Route, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'motion/react';
 import { Award, Lock, Star, Loader2 } from 'lucide-react';
@@ -29,6 +29,9 @@ import ProductTour from './components/onboarding/ProductTour';
 import JoinLeague from './pages/JoinLeague';
 import TermsOfService from './pages/TermsOfService';
 import PrivacyPolicy from './pages/PrivacyPolicy';
+import LoginPage from './pages/Login';
+import UpdatePassword from './pages/UpdatePassword';
+import AdminDashboardPage from './pages/AdminDashboard';
 import { RadialOrigin } from './radial';
 import { useBodyScrollLock } from './hooks/useBodyScrollLock';
 import { useSupabaseRealtime } from './hooks/useSupabaseRealtime';
@@ -52,6 +55,7 @@ export default function App() {
 
 function AppShell() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   /** Supabase auth user id — sole source of truth for “is logged in”. */
@@ -66,6 +70,22 @@ function AppShell() {
   const [guestAuthView, setGuestAuthView] = useState<GuestAuthView>('login');
   const [showProductTour, setShowProductTour] = useState(false);
   const [loginSuccessMessage, setLoginSuccessMessage] = useState<string | undefined>();
+
+  // Honor /?auth=signup (and /login → /?auth=signup) for guest signup handoff.
+  useEffect(() => {
+    const authMode = searchParams.get('auth');
+    if (authMode === 'signup') {
+      setGuestAuthView('signup');
+      const next = new URLSearchParams(searchParams);
+      next.delete('auth');
+      setSearchParams(next, { replace: true });
+    } else if (authMode === 'login') {
+      setGuestAuthView('login');
+      const next = new URLSearchParams(searchParams);
+      next.delete('auth');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     const onReplay = () => setShowProductTour(true);
@@ -296,6 +316,7 @@ function AppShell() {
       setSessionUserId(null);
       setCurrentUser(null);
       localStorage.removeItem('pitchside_logged_in');
+      navigate('/update-password', { replace: true });
     }
 
     const {
@@ -309,6 +330,7 @@ function AppShell() {
         localStorage.removeItem('pitchside_logged_in');
         clearAuthHash();
         setAuthHydrated(true);
+        navigate('/update-password', { replace: true });
         return;
       }
 
@@ -555,6 +577,22 @@ function AppShell() {
             <Routes>
               <Route path="/terms" element={<TermsOfService />} />
               <Route path="/privacy" element={<PrivacyPolicy />} />
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/update-password" element={<UpdatePassword />} />
+              <Route
+                path="/admin"
+                element={
+                  currentUser?.isAdmin ? (
+                    <div className="flex-1 py-4">
+                      <AdminDashboardPage isAdmin />
+                    </div>
+                  ) : (
+                    <div className="flex-1 flex items-center justify-center py-16 text-sm text-rose-300">
+                      Admin access required.
+                    </div>
+                  )
+                }
+              />
               <Route
                 path="/join/:leagueId"
                 element={

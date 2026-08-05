@@ -51,6 +51,8 @@ export function SportIcon({
       aria-hidden={alt ? undefined : true}
       className={`object-contain object-center shrink-0 select-none ${className}`}
       draggable={false}
+      loading="lazy"
+      decoding="async"
     />
   );
 }

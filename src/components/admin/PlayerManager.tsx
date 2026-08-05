@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { supabase } from '../../supabase';
+import type { DbMatch, DbPrediction } from '../../supabase';
 import { UserProfile } from '../../types';
 
 interface PlayerManagerProps {
@@ -24,6 +25,30 @@ interface PlayerManagerProps {
   onArchivesRefresh: () => void;
   refreshing: boolean;
 }
+
+type LedgerMatchSnippet = Pick<
+  DbMatch,
+  | 'id'
+  | 'home_team'
+  | 'away_team'
+  | 'kickoff_time'
+  | 'actual_home_score'
+  | 'actual_away_score'
+  | 'status'
+  | 'sport'
+>;
+
+type LedgerPrediction = Pick<
+  DbPrediction,
+  | 'id'
+  | 'match_id'
+  | 'predicted_home_score'
+  | 'predicted_away_score'
+  | 'points_won'
+  | 'created_at'
+> & {
+  matches: LedgerMatchSnippet | null;
+};
 
 function HighlightMatch({ text, query }: { text: string; query: string }) {
   if (!query || !text) return <>{text}</>;
@@ -54,7 +79,7 @@ export default function PlayerManager({
   const [playerSearchQuery, setPlayerSearchQuery] = useState('');
   const [editingPlayer, setEditingPlayer] = useState<UserProfile | null>(null);
   const [auditTab, setAuditTab] = useState<'identity' | 'security' | 'ledger'>('identity');
-  const [playerLedger, setPlayerLedger] = useState<any[]>([]);
+  const [playerLedger, setPlayerLedger] = useState<LedgerPrediction[]>([]);
   const [loadingLedger, setLoadingLedger] = useState(false);
   const [predFilterType, setPredFilterType] = useState<'upcoming' | 'completed'>('upcoming');
   const [predSportFilter, setPredSportFilter] = useState<string | null>(null);
@@ -77,6 +102,7 @@ export default function PlayerManager({
     setLoadingLedger(true);
     setPlayerLedger([]);
     try {
+      if (!supabase) throw new Error('Database not connected.');
       // predictions.match_id has no FK to matches.id, so a PostgREST embed
       // (`matches:match_id(*)`) fails. Fetch predictions, then hydrate the
       // related matches in a second query and merge client-side.
@@ -88,19 +114,28 @@ export default function PlayerManager({
       if (error) throw error;
 
       const preds = predRows || [];
-      const matchIds = Array.from(new Set(preds.map((p: any) => p.match_id).filter(Boolean)));
-      const matchMap: Record<string, any> = {};
+      const matchIds = Array.from(new Set(preds.map((p) => p.match_id).filter(Boolean)));
+      const matchMap: Record<string, LedgerMatchSnippet> = {};
       if (matchIds.length > 0) {
         const { data: matchRows } = await supabase
           .from('matches')
           .select('id, home_team, away_team, kickoff_time, actual_home_score, actual_away_score, status, sport')
           .in('id', matchIds);
-        (matchRows || []).forEach((m: any) => { matchMap[m.id] = m; });
+        (matchRows || []).forEach((m) => {
+          matchMap[m.id] = m;
+        });
       }
 
-      setPlayerLedger(preds.map((p: any) => ({ ...p, matches: matchMap[p.match_id] || null })));
-    } catch (err: any) {
-      onError(`Failed to fetch player ledger: ${err.message || 'Unknown error'}`);
+      setPlayerLedger(
+        preds.map((p) => ({
+          ...p,
+          matches: matchMap[p.match_id] || null,
+        })),
+      );
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : 'Unknown error';
+      onError(`Failed to fetch player ledger: ${message}`);
     } finally {
       setLoadingLedger(false);
     }
@@ -451,9 +486,8 @@ export default function PlayerManager({
                           const filteredPredictions = playerLedger.filter((pred) => {
                             const isUpcoming =
                               pred.matches?.status === 'upcoming' ||
-                              (!pred.matches?.actual_home_score &&
-                                pred.matches?.actual_home_score !== 0 &&
-                                !pred.matches?.home_score);
+                              (pred.matches?.actual_home_score == null &&
+                                pred.matches?.actual_away_score == null);
                             if (predFilterType === 'upcoming' && !isUpcoming) return false;
                             if (predFilterType === 'completed' && isUpcoming) return false;
                             if (predSportFilter && pred.matches?.sport !== predSportFilter) return false;

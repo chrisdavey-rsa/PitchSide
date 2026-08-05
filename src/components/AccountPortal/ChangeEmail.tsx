@@ -1,7 +1,19 @@
-import React, { useState } from 'react';
-import { Mail, Lock } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Mail, Lock, Loader2, CheckCircle2 } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { supabase } from '../../supabase';
+import {
+  isOAuthOnlyAccount,
+  normalizeAuthProviders,
+} from '../../lib/authProviders';
+import { OAuthAccountAlert } from './OAuthAccountAlert';
+
+const SUCCESS_MESSAGE =
+  'A confirmation link has been sent to your new email address. You are being logged out. Please click the link in your email to verify and log back in.';
+
+const OAUTH_EMAIL_MESSAGE =
+  'Your account is linked via Google. To change your email address, please manage your settings directly within your Google account.';
 
 interface ChangeEmailProps {
   user: UserProfile;
@@ -9,231 +21,273 @@ interface ChangeEmailProps {
   setStatusMsg: (msg: { text: string; mode: 'success' | 'error' | 'none' }) => void;
 }
 
-export const ChangeEmail: React.FC<ChangeEmailProps> = ({ user, onUpdateUser, setStatusMsg }) => {
-  const [curEmailInput, setCurEmailInput] = useState('email@pitchside.com');
+export const ChangeEmail: React.FC<ChangeEmailProps> = ({
+  user,
+  onUpdateUser: _onUpdateUser,
+  setStatusMsg,
+}) => {
+  const navigate = useNavigate();
+  const [currentEmail, setCurrentEmail] = useState(user.email || '');
   const [curPasswordInput, setCurPasswordInput] = useState('');
   const [newEmailInput, setNewEmailInput] = useState('');
-  const [verificationCode, setVerificationCode] = useState('');
-  const [isEmailVerificationPending, setIsEmailVerificationPending] = useState(false);
-  const [generatedVerificationCode, setGeneratedVerificationCode] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+  const [oauthOnly, setOauthOnly] = useState(false);
 
-  const handleInitiateEmailChange = (e: React.FormEvent) => {
-    e.preventDefault();
-    setStatusMsg({ text: '', mode: 'none' });
+  useEffect(() => {
+    let cancelled = false;
 
-    if (curEmailInput.trim().toLowerCase() !== user.email.toLowerCase()) {
-      setStatusMsg({
-        text: 'The input current email address does not match your registered email credentials.',
-        mode: 'error'
-      });
-      return;
+    const loadAuthUser = async () => {
+      if (!supabase) {
+        if (!cancelled) {
+          setCurrentEmail(user.email || '');
+          setOauthOnly(false);
+          setAuthReady(true);
+        }
+        return;
+      }
+      try {
+        const { data, error } = await supabase.auth.getUser();
+        if (cancelled) return;
+        const authUser = data.user;
+        if (!error && authUser) {
+          if (authUser.email) setCurrentEmail(authUser.email);
+          else setCurrentEmail(user.email || '');
+
+          const providers = normalizeAuthProviders(
+            authUser.app_metadata?.providers,
+            authUser.identities,
+          );
+          setOauthOnly(isOAuthOnlyAccount(providers));
+          setAuthReady(true);
+          return;
+        }
+      } catch {
+        /* fall through */
+      }
+      if (!cancelled) {
+        setCurrentEmail(user.email || '');
+        setOauthOnly(false);
+        setAuthReady(true);
+      }
+    };
+
+    void loadAuthUser();
+    return () => {
+      cancelled = true;
+    };
+  }, [user.email]);
+
+  const finishLogout = async () => {
+    try {
+      await supabase?.auth.signOut();
+    } catch (err) {
+      console.warn('[ChangeEmail] signOut failed', err);
     }
-
-    if (user.password && curPasswordInput !== user.password) {
-      setStatusMsg({
-        text: 'Authentication failed. Current password does not match our records.',
-        mode: 'error'
-      });
-      return;
+    try {
+      localStorage.removeItem('pitchside_logged_in');
+    } catch {
+      /* ignore */
     }
-
-    if (!newEmailInput.trim()) {
-      setStatusMsg({
-        text: 'Please input a valid future email coordinate.',
-        mode: 'error'
-      });
-      return;
-    }
-
-    if (newEmailInput.trim().toLowerCase() === user.email.toLowerCase()) {
-      setStatusMsg({
-        text: 'Your new email address coordinate is identical to your current email.',
-        mode: 'error'
-      });
-      return;
-    }
-
-    const generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
-    setGeneratedVerificationCode(generatedCode);
-    setIsEmailVerificationPending(true);
-    setStatusMsg({
-      text: 'Secure validation codes dispatched! Check simulated inbox code below to finalize email redirection.',
-      mode: 'success'
-    });
+    navigate('/login', { replace: true });
   };
 
-  const handleVerifyEmailCode = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatusMsg({ text: '', mode: 'none' });
 
-    if (verificationCode.trim() !== generatedVerificationCode) {
+    const emailOnRecord = currentEmail.trim().toLowerCase();
+    const newEmail = newEmailInput.trim().toLowerCase();
+    const password = curPasswordInput;
+
+    if (!supabase) {
+      setStatusMsg({ text: 'Authentication service is unavailable.', mode: 'error' });
+      return;
+    }
+    if (!emailOnRecord) {
+      setStatusMsg({ text: 'Could not resolve your current email address.', mode: 'error' });
+      return;
+    }
+    if (!password) {
+      setStatusMsg({ text: 'Please enter your current password.', mode: 'error' });
+      return;
+    }
+    if (!newEmail) {
+      setStatusMsg({ text: 'Please enter a valid new email address.', mode: 'error' });
+      return;
+    }
+    if (newEmail === emailOnRecord) {
       setStatusMsg({
-        text: 'Incorrect confirmation verification code parameter. Please check simulated output below and retry.',
-        mode: 'error'
+        text: 'Your new email address is identical to your current email.',
+        mode: 'error',
       });
       return;
     }
 
+    setLoading(true);
     try {
-      const isLocalProfile = !supabase || !user || !user.id || user.id === 'user-admin' || user.id.startsWith('usr_local_');
-
-      if (supabase && !isLocalProfile) {
-        const { error: dbErr } = await supabase
-          .from('profiles')
-          .update({
-            email: newEmailInput.trim().toLowerCase()
-          })
-          .eq('id', user.id);
-
-        if (dbErr) throw dbErr;
+      const { error: reauthError } = await supabase.auth.signInWithPassword({
+        email: emailOnRecord,
+        password,
+      });
+      if (reauthError) {
+        setStatusMsg({
+          text: reauthError.message || 'Authentication failed. Check your current password.',
+          mode: 'error',
+        });
+        return;
       }
 
-      const updatedProfile: UserProfile = {
-        ...user,
-        email: newEmailInput.trim().toLowerCase()
-      };
+      const { error: updateError } = await supabase.auth.updateUser({ email: newEmail });
+      if (updateError) {
+        setStatusMsg({
+          text: updateError.message || 'Failed to start email change.',
+          mode: 'error',
+        });
+        return;
+      }
 
-      onUpdateUser(updatedProfile);
-      setCurEmailInput('');
+      setStatusMsg({ text: SUCCESS_MESSAGE, mode: 'success' });
+      setShowSuccessModal(true);
       setCurPasswordInput('');
       setNewEmailInput('');
-      setVerificationCode('');
-      setIsEmailVerificationPending(false);
+
+      window.setTimeout(() => {
+        void finishLogout();
+      }, 3000);
+    } catch (err: unknown) {
       setStatusMsg({
-        text: 'Success! Your registered login and correspondence email has been modified successfully!',
-        mode: 'success'
+        text: err instanceof Error ? err.message : 'Email change failed.',
+        mode: 'error',
       });
-    } catch (err: any) {
-      console.warn('Email change sync error:', err);
-      onUpdateUser({
-        ...user,
-        email: newEmailInput.trim().toLowerCase()
-      });
-      setCurEmailInput('');
-      setCurPasswordInput('');
-      setNewEmailInput('');
-      setVerificationCode('');
-      setIsEmailVerificationPending(false);
-      setStatusMsg({
-        text: 'Registered email coordinate updated and local account backup modified successfully.',
-        mode: 'success'
-      });
+    } finally {
+      setLoading(false);
     }
   };
+
+  if (!authReady) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-10 text-xs font-mono text-slate-500 uppercase tracking-wider">
+        <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
+        Loading account…
+      </div>
+    );
+  }
+
+  if (oauthOnly) {
+    return (
+      <OAuthAccountAlert title="Linked via Google" message={OAUTH_EMAIL_MESSAGE} />
+    );
+  }
 
   return (
     <div className="space-y-5 animate-fade-in">
-      {!isEmailVerificationPending ? (
-        <form onSubmit={handleInitiateEmailChange} className="space-y-4 bg-slate-950/20 p-5 rounded-2xl border border-slate-805">
-          
-          <div>
-            <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider mb-1">Current Email Address</label>
-            <div className="relative">
-              <Mail className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-500" />
-              <input
-                type="email"
-                required
-                placeholder="email@pitchside.com"
-                value={curEmailInput}
-                onChange={(e) => setCurEmailInput(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl py-3 pl-10 pr-3 text-xs text-white placeholder:text-slate-655 font-mono outline-hidden"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider mb-1">Current Password</label>
-            <div className="relative">
-              <Lock className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-500" />
-              <input
-                type="password"
-                required
-                placeholder="••••••••"
-                value={curPasswordInput}
-                onChange={(e) => setCurPasswordInput(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl py-3 pl-10 pr-3 text-xs text-white placeholder:text-slate-655 outline-hidden"
-              />
-            </div>
-          </div>
-
-          <div className="border-t border-slate-850 pt-3">
-            <label className="block text-[10px] font-mono text-emerald-450 uppercase tracking-wider mb-1">New Email Address</label>
-            <div className="relative">
-              <Mail className="absolute left-3.5 top-3.5 h-4 w-4 text-emerald-500/60" />
-              <input
-                type="email"
-                required
-                placeholder="Enter new email address"
-                value={newEmailInput}
-                onChange={(e) => setNewEmailInput(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl py-3 pl-10 pr-3 text-xs text-white placeholder:text-slate-655 font-mono outline-hidden"
-              />
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold font-display uppercase tracking-wider py-3 rounded-xl text-xs cursor-pointer shadow-[0_4px_12px_rgba(16,185,129,0.3)] transition-transform duration-100"
-          >
-            Authenticate & Send Validation Code
-          </button>
-        </form>
-      ) : (
-        <form onSubmit={handleVerifyEmailCode} className="space-y-4 bg-slate-950/40 p-5 rounded-2xl border border-emerald-500/20">
-          <div className="bg-emerald-500/5 p-4 rounded-xl border border-emerald-500/20 text-emerald-400 text-xs space-y-2 font-medium">
-            <p className="font-bold flex items-center gap-1.5 font-mono text-[10px] uppercase">
-              📬 Verification Dispatched!
-            </p>
-            <p className="opacity-90 leading-relaxed">
-              Please check your inbox at <strong className="text-white font-mono">{newEmailInput}</strong>. We've sent an update with a confirmation code. Please enter that code.
-            </p>
-          </div>
-
-          <div className="bg-slate-950 border border-slate-850 p-4 rounded-xl">
-            <div className="flex justify-between items-center text-[10px] text-slate-500 font-mono mb-2">
-              <span>SIMULATED EMAIL CLIENT</span>
-              <span className="text-emerald-400 font-bold uppercase">PitchSide System Logs</span>
-            </div>
-            <p className="text-[11px] font-mono text-slate-300 leading-relaxed">
-              Verification email sent successfully. Use code: <code className="bg-slate-900 border border-slate-800 px-3 py-1 rounded text-emerald-400 font-bold text-sm tracking-widest">{generatedVerificationCode}</code> to verify your email.
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-[10px] font-mono text-slate-300 uppercase tracking-wider mb-2">
-              Enter Confirmation Code
-            </label>
+      <form
+        onSubmit={handleSubmit}
+        className="space-y-4 bg-slate-950/20 p-5 rounded-2xl border border-slate-800"
+      >
+        <div>
+          <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider mb-1">
+            Current Email Address
+          </label>
+          <div className="relative">
+            <Mail className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-500" />
             <input
-              type="text"
-              required
-              maxLength={6}
-              placeholder="e.g. 582491"
-              value={verificationCode}
-              onChange={(e) => setVerificationCode(e.target.value.replace(/[^0-9]/g, ''))}
-              className="w-full bg-slate-950 border border-emerald-500/30 focus:border-emerald-550 rounded-xl py-3.5 px-3 text-center text-lg font-bold font-mono tracking-widest text-emerald-400 placeholder:text-slate-700 outline-hidden"
+              type="email"
+              readOnly
+              disabled
+              value={currentEmail}
+              aria-readonly="true"
+              className="w-full bg-slate-900/80 border border-slate-800 rounded-xl py-3 pl-10 pr-3 text-xs text-slate-300 font-mono outline-none cursor-not-allowed opacity-90"
             />
           </div>
+        </div>
 
-          <div className="flex gap-3">
+        <div>
+          <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider mb-1">
+            Current Password
+          </label>
+          <div className="relative">
+            <Lock className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-500" />
+            <input
+              type="password"
+              required
+              autoComplete="current-password"
+              placeholder="••••••••"
+              value={curPasswordInput}
+              onChange={(e) => setCurPasswordInput(e.target.value)}
+              disabled={loading || showSuccessModal}
+              className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl py-3 pl-10 pr-3 text-xs text-white placeholder:text-slate-600 outline-none disabled:opacity-60"
+            />
+          </div>
+        </div>
+
+        <div className="border-t border-slate-800 pt-3">
+          <label className="block text-[10px] font-mono text-emerald-400/90 uppercase tracking-wider mb-1">
+            New Email Address
+          </label>
+          <div className="relative">
+            <Mail className="absolute left-3.5 top-3.5 h-4 w-4 text-emerald-500/60" />
+            <input
+              type="email"
+              required
+              autoComplete="email"
+              placeholder="Enter new email address"
+              value={newEmailInput}
+              onChange={(e) => setNewEmailInput(e.target.value)}
+              disabled={loading || showSuccessModal}
+              className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl py-3 pl-10 pr-3 text-xs text-white placeholder:text-slate-600 font-mono outline-none disabled:opacity-60"
+            />
+          </div>
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading || showSuccessModal}
+          className="w-full inline-flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold font-display uppercase tracking-wider py-3 rounded-xl text-xs cursor-pointer shadow-[0_4px_12px_rgba(16,185,129,0.3)] transition-colors"
+        >
+          {loading ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" /> Authenticating…
+            </>
+          ) : (
+            'Authenticate & Send Validation Code'
+          )}
+        </button>
+      </form>
+
+      {showSuccessModal && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="change-email-success-title"
+            className="w-full max-w-md rounded-2xl border border-emerald-500/30 bg-slate-900 p-5 shadow-2xl space-y-4"
+          >
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0 mt-0.5" />
+              <div>
+                <h5
+                  id="change-email-success-title"
+                  className="text-sm font-bold text-emerald-300 uppercase tracking-wider font-mono"
+                >
+                  Confirmation sent
+                </h5>
+                <p className="mt-2 text-xs text-slate-300 leading-relaxed">{SUCCESS_MESSAGE}</p>
+              </div>
+            </div>
             <button
               type="button"
               onClick={() => {
-                setIsEmailVerificationPending(false);
-                setVerificationCode('');
-                setStatusMsg({ text: 'Email modification aborted.', mode: 'none' });
+                void finishLogout();
               }}
-              className="flex-1 bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-400 font-mono py-2.5 rounded-xl text-xs cursor-pointer transition-colors"
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-bold text-xs uppercase tracking-wider py-2.5 rounded-xl cursor-pointer"
             >
-              Cancel / Go Back
-            </button>
-            <button
-              type="submit"
-              className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-mono font-bold py-2.5 rounded-xl text-xs cursor-pointer shadow-[0_4px_12px_rgba(16,185,129,0.3)] transition-colors"
-            >
-              Verify & Complete change
+              OK
             </button>
           </div>
-        </form>
+        </div>
       )}
     </div>
   );

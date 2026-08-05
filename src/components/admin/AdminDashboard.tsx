@@ -47,7 +47,7 @@ export default function AdminDashboard({ onNavigate }: AdminDashboardProps) {
           supabase.from('matches').select('id').eq('status', 'upcoming')
         ]);
 
-        const upcomingIds = (upcomingMatchIdRows || []).map((m: any) => m.id);
+        const upcomingIds = (upcomingMatchIdRows || []).map((m) => m.id);
         const { count: predictionsCount } = await supabase
           .from('predictions')
           .select('*', { count: 'exact', head: true })
@@ -63,9 +63,13 @@ export default function AdminDashboard({ onNavigate }: AdminDashboardProps) {
           });
           setError(null);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (isMounted) {
-          setError(err.message || 'Failed to fetch dashboard metrics');
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'Failed to fetch dashboard metrics',
+          );
         }
       } finally {
         if (isMounted) {

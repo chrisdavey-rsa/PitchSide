@@ -23,9 +23,9 @@ export type ResetPasswordMode = 'request' | 'update';
 
 export interface ResetPasswordViewProps {
   mode: ResetPasswordMode;
-  onBackToLogin: () => void;
+  onBackToLogin: () => void | Promise<void>;
   /** Called after password successfully updated (State B). */
-  onPasswordUpdated: () => void;
+  onPasswordUpdated: () => void | Promise<void>;
   onLogoClick?: () => void;
 }
 
@@ -64,7 +64,7 @@ export default function ResetPasswordView({
 
 /* ── State A: request reset link ── */
 
-function RequestForm({ onBackToLogin }: { onBackToLogin: () => void }) {
+function RequestForm({ onBackToLogin }: { onBackToLogin: () => void | Promise<void> }) {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -181,8 +181,8 @@ function UpdateForm({
   onPasswordUpdated,
   onBackToLogin,
 }: {
-  onPasswordUpdated: () => void;
-  onBackToLogin: () => void;
+  onPasswordUpdated: () => void | Promise<void>;
+  onBackToLogin: () => void | Promise<void>;
 }) {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -221,8 +221,13 @@ function UpdateForm({
   };
 
   const handleComplete = async () => {
-    await supabase?.auth.signOut();
-    onPasswordUpdated();
+    // Parent (UpdatePassword) also signs out; do it here as a safety net.
+    try {
+      await supabase?.auth.signOut();
+    } catch {
+      /* ignore */
+    }
+    await onPasswordUpdated();
   };
 
   if (done) {
@@ -302,7 +307,9 @@ function UpdateForm({
 
       <button
         type="button"
-        onClick={onBackToLogin}
+        onClick={() => {
+          void onBackToLogin();
+        }}
         className="w-full text-center text-[10px] font-mono uppercase tracking-widest text-slate-600 hover:text-slate-400 transition-colors cursor-pointer"
       >
         Back to Login

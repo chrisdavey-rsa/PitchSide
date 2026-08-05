@@ -1,11 +1,16 @@
 import { useState, useEffect, useCallback, type Dispatch, type SetStateAction } from 'react';
-import { dbFetchMatches, dbFetchLeagues, dbFetchArchivedPlayers } from '../../supabase';
+import {
+  dbFetchMatches,
+  dbFetchLeagues,
+  dbFetchArchivedPlayers,
+  type ArchivedPlayerBackup,
+} from '../../supabase';
 import { League, Match } from '../../types';
 
 export interface AdminDataState {
   fixtures: Match[];
   leagues: League[];
-  archivedUsers: any[];
+  archivedUsers: ArchivedPlayerBackup[];
   loadingFixtures: boolean;
   loadingLeagues: boolean;
   loadingArchives: boolean;
@@ -21,7 +26,7 @@ export interface AdminDataState {
 export function useAdminData(activeTab: string): AdminDataState {
   const [fixtures, setFixtures] = useState<Match[]>([]);
   const [leagues, setLeagues] = useState<League[]>([]);
-  const [archivedUsers, setArchivedUsers] = useState<any[]>([]);
+  const [archivedUsers, setArchivedUsers] = useState<ArchivedPlayerBackup[]>([]);
   const [loadingFixtures, setLoadingFixtures] = useState(false);
   const [loadingLeagues, setLoadingLeagues] = useState(false);
   const [loadingArchives, setLoadingArchives] = useState(false);
@@ -30,7 +35,7 @@ export function useAdminData(activeTab: string): AdminDataState {
   const fetchFixtures = useCallback(async () => {
     setLoadingFixtures(true);
     try {
-      const data = await dbFetchMatches({ horizonDays: null, visibleOnly: false });
+      const data = await dbFetchMatches({ horizonDays: 120, visibleOnly: false });
       setFixtures(data);
     } catch (e) {
       console.warn('useAdminData: Failed to fetch fixtures', e);

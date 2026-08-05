@@ -8,7 +8,7 @@ import {
 } from "../../hooks/usePitchsideQueries";
 import { calculatePoints } from "../../utils";
 import type { PredictionEntry } from "../../supabase";
-import { formatAccuracyPercent } from "../../lib/formatAccuracy";
+import { formatAccuracyFromBasePoints } from "../../lib/formatAccuracy";
 
 interface HistoricScoresProps {
   user: UserProfile;
@@ -25,6 +25,7 @@ type HistoryRow = {
   fixture: string;
   prediction: string;
   result: string;
+  /** Base points only (no power-up multipliers) — same basis as Player Profile accuracy. */
   points: number | null;
   status: "active" | "settled" | "pending";
   matchDate: string;
@@ -37,11 +38,6 @@ function startOfWeek(d: Date): Date {
   const diff = day === 0 ? -6 : 1 - day;
   x.setDate(x.getDate() + diff);
   return x;
-}
-
-function formatPct(hits: number, total: number): string {
-  if (total <= 0) return "—";
-  return formatAccuracyPercent((hits / total) * 100);
 }
 
 export const HistoricScores: React.FC<HistoricScoresProps> = ({
@@ -114,11 +110,15 @@ export const HistoricScores: React.FC<HistoricScoresProps> = ({
     });
     const thisWeekActive = thisWeek.filter((r) => r.status === "active").length;
 
+    // Season points yield = (Σ base points / (completed picks × 5)) × 100
     const seasonSettled = historyRows.filter((r) => r.points !== null);
-    const seasonHits = seasonSettled.filter((r) => (r.points ?? 0) > 0).length;
+    const seasonBasePoints = seasonSettled.reduce(
+      (sum, r) => sum + (r.points ?? 0),
+      0,
+    );
 
-    let allTimeTotal = 0;
-    let allTimeHits = 0;
+    let allTimeSettled = 0;
+    let allTimeBasePoints = 0;
     for (const [matchId, pred] of Object.entries(predictions) as Array<
       [string, PredictionEntry]
     >) {
@@ -132,15 +132,14 @@ export const HistoricScores: React.FC<HistoricScoresProps> = ({
       ) {
         continue;
       }
-      allTimeTotal += 1;
-      const pts = calculatePoints(
+      allTimeSettled += 1;
+      allTimeBasePoints += calculatePoints(
         match.sport as SportType,
         pred.home,
         pred.away,
         match.homeScore,
         match.awayScore,
       );
-      if (pts > 0) allTimeHits += 1;
     }
 
     return {
@@ -148,8 +147,14 @@ export const HistoricScores: React.FC<HistoricScoresProps> = ({
         thisWeek.length === 0
           ? "—"
           : `${thisWeekActive} active / ${thisWeek.length}`,
-      seasonAccuracy: formatPct(seasonHits, seasonSettled.length),
-      allTimeAccuracy: formatPct(allTimeHits, allTimeTotal),
+      seasonAccuracy: formatAccuracyFromBasePoints(
+        seasonBasePoints,
+        seasonSettled.length,
+      ),
+      allTimeAccuracy: formatAccuracyFromBasePoints(
+        allTimeBasePoints,
+        allTimeSettled,
+      ),
     };
   }, [historyRows, matches, predictions]);
 
@@ -187,7 +192,7 @@ export const HistoricScores: React.FC<HistoricScoresProps> = ({
               {hud.seasonAccuracy}
             </p>
             <p className="text-[10px] text-slate-500 mt-0.5">
-              Scoring predictions · {selectedSeason}
+              Points yield ({selectedSeason})
             </p>
           </div>
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-3.5 py-3">
@@ -200,7 +205,7 @@ export const HistoricScores: React.FC<HistoricScoresProps> = ({
             <p className="text-sm font-bold font-display text-white tabular-nums">
               {hud.allTimeAccuracy}
             </p>
-            <p className="text-[10px] text-slate-500 mt-0.5">Career hit rate</p>
+            <p className="text-[10px] text-slate-500 mt-0.5">All-time points yield</p>
           </div>
         </div>
       </div>

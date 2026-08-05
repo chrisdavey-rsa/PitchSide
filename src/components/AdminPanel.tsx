@@ -8,6 +8,7 @@ import { UserProfile } from '../types';
 import { useAdminData } from './admin/useAdminData';
 import AdminLayout, { AdminTab } from './admin/AdminLayout';
 import AdminDashboard from './admin/AdminDashboard';
+import AdminBroadcastPage from '../pages/AdminDashboard';
 import AnalyticsDashboard from './admin/AnalyticsDashboard';
 import PredictionsViewer from './admin/PredictionsViewer';
 import PlayerManager from './admin/PlayerManager';
@@ -87,6 +88,10 @@ export default function AdminPanel({
     >
       {activeTab === 'dashboard' && (
         <AdminDashboard onNavigate={handleNavigate} />
+      )}
+
+      {activeTab === 'broadcast' && (
+        <AdminBroadcastPage isAdmin={isAdmin} />
       )}
 
       {activeTab === 'analytics' && (

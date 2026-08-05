@@ -1,143 +1,207 @@
 # PitchSide Architecture Map
 
-Concise system map after the Jul 2026 audit. Keep Football/Rugby prediction paths isolated from emerging sports (F1/Golf).
+System map after the Aug 2026 comprehensive audit (live project `rdxilidssfrixvlylnjq`). Football/Rugby prediction paths stay isolated from emerging sports (F1/Golf) scaffolding.
 
 ---
 
-## 1. Main entry points & route interceptors
+## 1. Entry points & route interceptors
 
 | Layer | Path | Role |
 |-------|------|------|
 | Bootstrap | `src/main.tsx` | React root, `BrowserRouter`, TanStack `QueryClientProvider` |
-| Shell | `src/App.tsx` → `AppShell` | Splash gate, auth state, overlays (Rules / Admin / Account), SPA routes |
-| Cold start | `src/lib/initializePlatform.ts` | Concurrent preload: session profile + 9-day match horizon + user leagues/predictions → seeds React Query cache |
-| Auth screens | `AuthFlow`, `LoginView`, `ResetPasswordView` | Email/password + Google/Apple OAuth (`OAuthButtons`) |
-| Session hydrate | `src/components/auth/authSession.ts` | `profileFromSession`, nickname→email RPC, login |
+| Shell | `src/App.tsx` → `AppShell` | Splash gate, auth waterfall, overlays (Rules / Admin / Account), SPA routes |
+| Cold start | `src/lib/initializePlatform.ts` | Concurrent preload: session profile + match horizon + user leagues/predictions → React Query cache |
+| Auth UI | `LoginView`, `AuthFlow`, `ResetPasswordView`, `pages/Login.tsx`, `pages/UpdatePassword.tsx` | Email/password + OAuth; recovery redirect |
+| Session hydrate | `src/components/auth/authSession.ts` | `profileFromSession`, nickname→email RPC, login / password reset |
 
-### Auth / onboarding gatekeeper
+### Auth / onboarding waterfall
 
 ```
-Splash (MIN_SPLASH_MS)
-  → initializePlatform()
-  → no session → guest Login / Register
-  → session + needsOnboarding(profile) → OnboardingFlow
-       (nationality ≠ Global, selected_sports non-empty)
-  → else → Dashboard
+Splash (MIN_SPLASH_MS + initializePlatform)
+  → !authHydrated / profile loading → spinner
+  → no session → guest Login | Signup | ResetPassword
+       (/?auth=signup|login honored; /login, /update-password routes)
+  → session + needsCompleteProfile → CompleteProfile (username/name)
+  → session + needsOnboarding → OnboardingFlow (nation + sports)
+  → ready → Dashboard
 ```
 
-`needsOnboarding()` lives in `src/components/OnboardingFlow.tsx`. OAuth users get null country / empty `selected_sports` via `handle_new_user` migration so they always hit onboarding.
-
-### Routes (`react-router-dom`)
+Admin / Account / Rules are **overlays** (not primary routes), except:
 
 | Route | Component |
 |-------|-----------|
-| `/join`, `/join/:leagueId` | `JoinLeague` invite flow |
-| `*` | Auth shell + Dashboard SPA (admin/account/rules are overlays, not routes) |
+| `/terms`, `/privacy` | Legal pages |
+| `/join`, `/join/:leagueId` | League invite |
+| `/login` | Standalone login (+ inline forgot password) |
+| `/update-password` | Recovery session password update |
+| `/admin` | Admin-gated **broadcast** page only (full admin = Dashboard overlay) |
+| `*` | Auth shell + Dashboard |
 
 ---
 
-## 2. Unified workspace engine (sport routing)
+## 2. Core state & global data flow
 
 ```
-Dashboard
-  ├─ SportSelectorBanner / EmergingSportNav  (selected_sports)
-  ├─ Football | Rugby → PredictionsPage → MatchPredictor
-  ├─ Formula 1 → EmergingSportWorkspace → F1GridPredictor
-  └─ Golf → EmergingSportWorkspace → GolfTierPredictor (+ GolfMulliganPanel)
+AppShell
+  ├─ sessionUserId (Supabase Auth) — login truth
+  ├─ currentUser (UserProfile) — hydrated from profiles
+  ├─ registeredUsers — dbFetchPlayers (scoped PROFILE_LIST_COLUMNS)
+  └─ React Query cache
+       ├─ matches (horizon) + acquireMatchesRealtime (refcount channel)
+       ├─ predictions (per user)
+       ├─ leagues / user leagues
+       └─ leaderboards (RPC)
 ```
 
 | Concern | Location |
 |---------|----------|
-| Feature flags / role | `src/sports/emerging/featureFlags.ts` |
-| Catalog hooks | `useF1DriversQuery`, `useF1ConstructorsQuery`, `useGolfPlayersQuery` |
-| Helmet assets | `HELMET_MAP` → local `public/*.png` via `F1HelmetIcon` |
-| Core fixtures | `useMatchesQuery` (horizon) + `acquireMatchesRealtime` |
-| Leaderboards / leagues | `LeaderboardsPage`, `LeagueHub`, `LeagueHubStandings` |
+| Match list + live scores | `useMatchesQuery`, `matchesRealtime`, `useSupabaseRealtime` |
+| Predictions feed | `PredictionsPage` → `MatchPredictor` (`useWindowVirtualizer`) |
+| Leaderboards | `LeaderboardsPage`, `get_global_leaderboard` RPC |
+| Private leagues | `LeagueHub`, `LeagueHubStandings`, `get_league_member_predictions` |
+| Account | `AccountPortal` — desktop sidebar; mobile accordion (core features only) |
+| Notifications | `usePushNotifications`, edge `notify-24h-unpicked`, `weekly-fixture-email` |
+| Admin | `AdminPanel` tabs; broadcast via `pages/AdminDashboard` + `admin-broadcast` |
+| Emerging sports | `src/sports/emerging/*` — UI scaffolding; workspace not mounted on Dashboard |
+| Offline drafts | `useOfflineDraft` + `OfflineDraftBanner` |
 
-Football/Rugby lock-guess + scoring stay in `MatchPredictor` / `utils.calculatePoints`. F1/Golf predictors are UI-first; persistence tables (`f1_predictions`, `golf_predictions`) exist in Supabase for upcoming write paths.
+### Accuracy / points yield
+
+Shared helper: `formatAccuracyFromBasePoints(base, settled)` → `(base / (settled × 5)) × 100`.
+
+Used by Player Profile, Accuracy breakdown, and Prediction History Performance HUD.
 
 ---
 
-## 3. Offline drafting engine
+## 3. Offline draft & optimistic flows
 
 ```
 User edits scores offline
-  → useOfflineDraft.saveDraft(localStorage key: pitchside:offline-draft:{userId}:{eventId})
-  → OfflineDraftBanner (PredictionsPage)
-  → on reconnect / Apply: write predictions via Supabase
-  → DB trigger (prediction_lock_time_enforcement)
-       rejects post-kickoff writes with "Event locked…"
-  → Frontend maps that to LOCK_TIME_PASSED_TOAST
+  → useOfflineDraft.saveDraft (localStorage: pitchside:offline-draft:{userId}:{eventId})
+  → OfflineDraftBanner
+  → reconnect / Apply → Supabase predictions upsert
+  → DB trigger prediction_lock_time_enforcement
+       rejects post-kickoff writes
   → clearDraft on success
 ```
 
-Key files: `src/hooks/useOfflineDraft.ts`, `src/components/OfflineDraftBanner.tsx`, migration `20260723120000_prediction_lock_time_enforcement.sql`.
+Other optimistic paths:
+
+| Flow | Pattern |
+|------|---------|
+| Tournament opt-in | Local profile update + `dbUpdateTournamentSubscriptions` |
+| Email/push toggles | Immediate `profiles` update + push subscribe RPC |
+| Power-up lock | Confirm modal → prediction write with `applied_powerup_id` |
+| Admin FT override | FixturesManager → force resettle RPC |
 
 ---
 
-## 4. Data fetching & realtime (post-audit)
+## 4. Active public tables & relationships
 
-| Fetch | Window / scope |
-|-------|----------------|
-| Matches (player) | `MATCH_HORIZON_DAYS = 9` + live status; explicit `MATCH_LIST_COLUMNS` |
-| Completed (standings) | `STANDINGS_COMPLETED_HORIZON_DAYS = 180` |
-| Predictions (user) | User-scoped column list (still full history — consider season window later) |
-| Profiles list / members | Explicit `PROFILE_LIST_COLUMNS` (no `SELECT *`) |
-| F1 / Golf catalogs | Explicit columns; client filters outdated driver ids |
-| Realtime matches | Ref-counted channel in `matchesRealtime.ts` (safe unmount) |
-| Realtime profiles/leagues | `useSupabaseRealtime.ts` — `removeChannel` on cleanup |
+Live schema (27 tables). Declared FKs from Postgres; logical-only links called out.
+
+### Core prediction domain
+
+| Table | PK | Foreign keys / notes |
+|-------|----|----------------------|
+| `profiles` | `id` (text) | Conventionally = `auth.users.id` (no declared FK). Referenced by predictions, league_members, powerups, push_* |
+| `matches` | `id` | `home_team_id` → `teams`; `away_team_id` → `teams` |
+| `predictions` | `id` | `user_id` → `profiles`; `applied_powerup_id` → `user_powerups`; **`match_id` → matches is logical only (no FK)** |
+| `leagues` | `id` | Referenced by `league_members`, `sport_seasons.global_league_id` |
+| `league_members` | `(league_id, user_id)` | → `leagues`, → `profiles` |
+| `user_powerups` | `id` | → `profiles`; → `sport_seasons`; `applied_fixture_id` → `matches` |
+| `power_up_wallet` | `id` | → `profiles` |
+| `archived_players` | `id` | Soft-delete archive blob (no FKs) |
+| `unsubscribed_emails` | `email` | Mailing exclusions |
+
+### Notifications
+
+| Table | FKs |
+|-------|-----|
+| `push_subscriptions` | `user_id` → `profiles` |
+| `push_notification_log` | `user_id` → `profiles`; `match_id` → `matches` |
+
+### Ingestion / ops
+
+| Table | Role / FKs |
+|-------|------------|
+| `competitions`, `custom_competitions` | Catalog (no FKs) |
+| `teams` | Catalog; referenced by `matches.*_team_id` |
+| `sport_seasons` | `global_league_id` → `leagues`; enums: football/rugby/f1/golf |
+| `api_quota_usage`, `api_fixture_checks` | API-Sports budget |
+| `system_metrics` | Edge sync health |
+| `preeminent_teams`, `pitchside_picks_teams` | Digest / feed curation |
+
+### Emerging sports
+
+| Table | FKs |
+|-------|-----|
+| `f1_constructors` | ← `f1_drivers.constructor_id` |
+| `f1_drivers` | `constructor_id` → `f1_constructors` |
+| `f1_races` | ← `f1_predictions.race_id` |
+| `f1_predictions` | `race_id` → `f1_races`; `user_id` → `auth.users` |
+| `golf_players` | Catalog |
+| `golf_tournaments` | ← `golf_predictions.tournament_id` |
+| `golf_predictions` | `tournament_id` → `golf_tournaments`; `user_id` → `auth.users` |
+
+### Important RPCs
+
+| RPC | Purpose |
+|-----|---------|
+| `delete_user_account()` | Self-serve cascade wipe + `auth.users` delete |
+| `is_pitchside_admin()` | Admin gate |
+| `upsert_push_subscription` | Web Push store |
+| `get_global_leaderboard` / league prediction RPCs | Rankings with settled points |
+| `reserve_api_quota` / `record_api_quota_headers` | Per-sport API budget |
 
 ---
 
-## 5. Active database tables & foreign keys
+## 5. Edge functions (active)
 
-### Tables (`public`)
-
-| Table | Purpose |
-|-------|---------|
-| `profiles` | User contestant profile + sports prefs + mulligans |
-| `matches` | Football/Rugby fixtures + live fields |
-| `predictions` | Score predictions per user/match |
-| `leagues` | Private/public social leagues |
-| `league_members` | Membership junction |
-| `competitions` / `custom_competitions` | Competition catalog |
-| `teams` | Team cache (logos / FK targets) |
-| `power_up_wallet` | Power-up inventory (launch-locked UI) |
-| `archived_players` / `unsubscribed_emails` | Soft-delete / marketing opt-out |
-| `api_quota_usage` / `api_fixture_checks` | API-Sports ops |
-| `f1_constructors` / `f1_drivers` / `f1_races` / `f1_predictions` | F1 domain |
-| `golf_players` / `golf_tournaments` / `golf_predictions` | Golf domain |
-
-### Foreign keys
-
-| From | Column | To |
-|------|--------|-----|
-| `f1_drivers` | `constructor_id` | `f1_constructors.id` |
-| `f1_predictions` | `race_id` | `f1_races.id` |
-| `golf_predictions` | `tournament_id` | `golf_tournaments.id` |
-| `league_members` | `league_id` | `leagues.id` |
-| `league_members` | `user_id` | `profiles.id` |
-| `matches` | `home_team_id` / `away_team_id` | `teams.id` |
-| `power_up_wallet` | `user_id` | `profiles.id` |
-| `predictions` | `user_id` | `profiles.id` |
-
-Auth users live in `auth.users`; `profiles.id` mirrors auth uid (created by `handle_new_user`).
-
-### F1 2026 grid (canonical)
-
-22 drivers / 11 teams. Outdated ids (`doohan`, `tsunoda`, `drugovich`) are deleted via migration and filtered client-side.
+| Function | Trigger | Notes |
+|----------|---------|-------|
+| `weekly-fixture-email` | Cron Mon 08:00 | Max 5 curated fixtures; Resend |
+| `notify-24h-unpicked` | Cron hourly | Web Push for unpicked ~24h fixtures |
+| `admin-broadcast` | Admin JWT | Push + email; `Promise.all` dispatches |
+| `contact-support` | Auth JWT | Resend → `admin@pitchside.pro` |
+| Schedule / settle syncs | Cron / scripts | Shared football league catalog |
 
 ---
 
-## 6. Audit leftovers (intentional keep / follow-ups)
+## 6. Audit outcomes (Aug 2026)
 
-**Kept on purpose**
-- `FALLBACK_DRIVERS` / constructors / golfers — empty-table / offline catalog safety
-- `SUPPORTED_TEAMS`, `POWER_UPS`, competition catalog dual-source until fully DB-driven
-- Admin “soon” metric placeholders
+### Removed / pruned
 
-**Follow-ups**
-- Window or paginate per-user prediction history on cold start
-- Persist F1/Golf predictor confirms into `f1_predictions` / `golf_predictions`
-- Narrow `dbFetchPlayers` further (or replace with nickname RPC) so Dashboard does not hydrate full profile lists for every child
-- Dedicated drag handles on F1 pool cards to further improve mobile scroll vs DnD
+- Unused modules: `leagueMemberBadge.ts`, `golfCoverageFilter.ts`, `SportSelectorBanner.tsx`, `CompetitionFilterRail` UI, `EMERGING_SPORT_META`
+- Hook relocated: `usePersistedCompetitionFilter` → `src/hooks/usePersistedCompetitionFilter.ts`
+- Trimmed unused `classifyAuthProviders` from `authProviders.ts`
+
+### Fixed / hardened
+
+- Seed + live-settle football catalog aligned with edge (`528` Community Shield + European leagues)
+- `PROFILE_LIST_COLUMNS` includes notification / favorite team fields (typed on `ProfileRow`)
+- `archived_players` select narrowed (no `SELECT *` anywhere in client)
+- Admin fixtures fetch bounded to **120-day** horizon
+- `/?auth=signup` / `auth=login` query handoff wired in `AppShell`
+- Mobile Account: accordion (not horizontal tabs); management tabs desktop-only
+- HUD accuracy = points yield (same formula as Player Profile)
+- Sport icons use `loading="lazy"` + `decoding="async"`; F1 helmets keep chip fallback
+
+### Known follow-ups (not blocking)
+
+- Virtualize Leaderboards / HistoricScores / FixturesManager full lists (predictions feed already uses `useWindowVirtualizer`)
+- Scope `dbFetchPredictions` by season for history views
+- Add FK `predictions.match_id → matches(id)` after orphan cleanup
+- Mount or delete F1/Golf workspace tree in one deliberate pass
+- `/admin` route is broadcast-only — consider redirect into AdminPanel Broadcast tab
+- Broad `any` casts remain in some `supabase.ts` mappers (league/team rows); tighten when generating typed Supabase client
+
+---
+
+## 7. Mobile notes
+
+- Bottom nav + tab swipe: `data-no-swipe="true"` on interactive controls
+- Account management (email/password/delete/general) **desktop-only**
+- Mobile Account Hub + exclusive accordion for competitions / leagues / history / support
+- Images: local `public/` sport + helmet assets; PWA icons via `manifest.json` / `sw.js`
+- Dashboard / Account shells use `touch-pan-y` so vertical scroll is not blocked by gesture sensors

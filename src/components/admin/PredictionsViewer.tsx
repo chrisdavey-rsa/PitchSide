@@ -1,15 +1,60 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, Search, X } from 'lucide-react';
-import { supabase } from '../../supabase';
+import {
+  supabase,
+  type DbMatch,
+  type DbPrediction,
+  type DbProfile,
+} from '../../supabase';
+
+type AdminMatchSnippet = Pick<
+  DbMatch,
+  | 'id'
+  | 'home_team'
+  | 'away_team'
+  | 'kickoff_time'
+  | 'actual_home_score'
+  | 'actual_away_score'
+  | 'status'
+  | 'sport'
+>;
+
+type AdminProfileSnippet = Pick<
+  DbProfile,
+  'id' | 'username' | 'first_name' | 'surname'
+>;
+
+type AdminPredictionSnippet = Pick<
+  DbPrediction,
+  | 'id'
+  | 'match_id'
+  | 'user_id'
+  | 'predicted_home_score'
+  | 'predicted_away_score'
+  | 'points_won'
+  | 'created_at'
+  | 'submitted'
+>;
+
+type MergedAdminPrediction = AdminPredictionSnippet & {
+  matches: AdminMatchSnippet | null;
+  profiles: AdminProfileSnippet | null;
+};
 
 export default function PredictionsViewer() {
   const [view, setView] = useState<'upcoming' | 'historical'>('upcoming');
-  const [predictions, setPredictions] = useState<any[]>([]);
+  const [predictions, setPredictions] = useState<MergedAdminPrediction[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedPrediction, setSelectedPrediction] = useState<any | null>(null);
+  const [selectedPrediction, setSelectedPrediction] =
+    useState<MergedAdminPrediction | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
   const fetchPredictions = async (statusFilter: 'upcoming' | 'historical') => {
+    if (!supabase) {
+      setPredictions([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const matchStatus = statusFilter === 'upcoming' ? 'upcoming' : 'completed';
@@ -24,14 +69,16 @@ export default function PredictionsViewer() {
       if (matchErr) throw matchErr;
 
       const matches = matchRows || [];
-      const ids = matches.map((m: any) => m.id);
+      const ids = matches.map((m) => m.id);
       if (ids.length === 0) {
         setPredictions([]);
         setLoading(false);
         return;
       }
-      const matchMap: Record<string, any> = {};
-      matches.forEach((m: any) => { matchMap[m.id] = m; });
+      const matchMap: Record<string, AdminMatchSnippet> = {};
+      matches.forEach((m) => {
+        matchMap[m.id] = m;
+      });
 
       let query = supabase
         .from('predictions')
@@ -57,23 +104,27 @@ export default function PredictionsViewer() {
       const preds = predRows || [];
 
       // Resolve player profiles in a single follow-up query.
-      const userIds = Array.from(new Set(preds.map((p: any) => p.user_id).filter(Boolean)));
-      const profileMap: Record<string, any> = {};
+      const userIds = Array.from(
+        new Set(preds.map((p) => p.user_id).filter((id): id is string => Boolean(id))),
+      );
+      const profileMap: Record<string, AdminProfileSnippet> = {};
       if (userIds.length > 0) {
         const { data: profileRows } = await supabase
           .from('profiles')
           .select('id, username, first_name, surname')
           .in('id', userIds);
-        (profileRows || []).forEach((pr: any) => { profileMap[pr.id] = pr; });
+        (profileRows || []).forEach((pr) => {
+          profileMap[pr.id] = pr;
+        });
       }
 
-      const merged = preds.map((p: any) => ({
+      const merged: MergedAdminPrediction[] = preds.map((p) => ({
         ...p,
         matches: matchMap[p.match_id] || null,
-        profiles: profileMap[p.user_id] || null,
+        profiles: p.user_id ? profileMap[p.user_id] || null : null,
       }));
       setPredictions(merged);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to fetch site-wide predictions:', err);
       setPredictions([]);
     } finally {
@@ -88,10 +139,10 @@ export default function PredictionsViewer() {
   const filtered = predictions.filter((p) => {
     if (!searchTerm) return true;
     const q = searchTerm.toLowerCase();
-    const username = ((p.profiles as any)?.username || '').toLowerCase();
-    const firstName = ((p.profiles as any)?.first_name || '').toLowerCase();
-    const home = ((p.matches as any)?.home_team || '').toLowerCase();
-    const away = ((p.matches as any)?.away_team || '').toLowerCase();
+    const username = (p.profiles?.username || '').toLowerCase();
+    const firstName = (p.profiles?.first_name || '').toLowerCase();
+    const home = (p.matches?.home_team || '').toLowerCase();
+    const away = (p.matches?.away_team || '').toLowerCase();
     return username.includes(q) || firstName.includes(q) || home.includes(q) || away.includes(q);
   });
 
@@ -179,8 +230,8 @@ export default function PredictionsViewer() {
               </thead>
               <tbody className="divide-y divide-slate-800/40">
                 {filtered.map((pred) => {
-                  const match = (pred.matches as any) || {};
-                  const profile = (pred.profiles as any) || {};
+                  const match = pred.matches || ({} as AdminMatchSnippet);
+                  const profile = pred.profiles || ({} as AdminProfileSnippet);
                   const kickoff = match.kickoff_time ? new Date(match.kickoff_time) : null;
                   const createdAt = pred.created_at ? new Date(pred.created_at) : null;
                   return (
@@ -286,8 +337,8 @@ export default function PredictionsViewer() {
 
             {(() => {
               const p = selectedPrediction;
-              const match = (p.matches as any) || {};
-              const profile = (p.profiles as any) || {};
+              const match = p.matches || ({} as AdminMatchSnippet);
+              const profile = p.profiles || ({} as AdminProfileSnippet);
               const kickoff = match.kickoff_time ? new Date(match.kickoff_time) : null;
               const createdAt = p.created_at ? new Date(p.created_at) : null;
               return (

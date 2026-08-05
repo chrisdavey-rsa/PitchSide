@@ -3,16 +3,12 @@ import {
   X,
   User,
   BookOpen,
-  Trophy,
   ChevronDown,
   ShieldAlert,
   LogOut,
   Lock,
-  Layers,
 } from 'lucide-react';
 import { UserProfile, League, Competition } from '../../types';
-import { MyLeagues } from './MyLeagues';
-import { LeaguesAndCompetitions } from './LeaguesAndCompetitions';
 import { btnClose } from '../../ui';
 import LogoutConfirmModal from '../LogoutConfirmModal';
 
@@ -32,29 +28,24 @@ interface MobileAccountHubProps {
   onLogout?: () => void;
   /** When true (mobile bottom-nav tab), use document scroll instead of a nested scrollport. */
   embedded?: boolean;
+  /**
+   * Compact profile + shortcuts only. Feature tabs (leagues / history / support)
+   * live in SidebarNav + the main content pane on all breakpoints.
+   */
+  compact?: boolean;
 }
 
 export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
   user,
   userLeagues,
-  selectedSeason,
-  setSelectedSeason,
-  getCompetitions,
-  onSelectLeague,
-  onUpdateUser,
   onOpenRules,
   onOpenAdmin,
   onClose,
   onLogout,
   embedded = false,
+  compact: _compact = false,
 }) => {
-  const [competitionsOpen, setCompetitionsOpen] = useState(true);
-  const [leaguesOpen, setLeaguesOpen] = useState(false);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
-  const [compStatus, setCompStatus] = useState<{
-    text: string;
-    mode: 'success' | 'error' | 'none';
-  }>({ text: '', mode: 'none' });
   const initials =
     (user.nickname || `${user.firstName?.[0] ?? ''}${user.surname?.[0] ?? ''}` || '?')
       .slice(0, 2)
@@ -67,7 +58,7 @@ export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
       className={
         embedded
           ? 'flex flex-col w-full md:hidden pb-2 touch-pan-y'
-          : 'flex flex-col h-full md:hidden pb-2'
+          : 'flex flex-col w-full md:hidden pb-2 shrink-0'
       }
     >
       <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-800/70 shrink-0">
@@ -92,19 +83,12 @@ export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
         )}
       </div>
 
-      <div
-        className={
-          embedded
-            ? 'w-full px-5 py-5 space-y-5 touch-pan-y'
-            : 'flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 py-5 space-y-5'
-        }
-      >
-        {/* Personal header */}
-        <div className="relative overflow-hidden rounded-2xl border border-slate-800/80 bg-linear-to-br from-slate-900 via-slate-950 to-emerald-950/30 p-5">
+      <div className="w-full px-5 py-4 space-y-4 touch-pan-y">
+        <div className="relative overflow-hidden rounded-2xl border border-slate-800/80 bg-linear-to-br from-slate-900 via-slate-950 to-emerald-950/30 p-4">
           <div className="pointer-events-none absolute -right-8 -top-8 w-28 h-28 rounded-full bg-[radial-gradient(circle,rgba(16,185,129,0.18)_0%,transparent_70%)]" />
-          <div className="relative flex items-center gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0 shadow-[0_0_24px_rgba(16,185,129,0.15)]">
-              <span className="text-lg font-bold font-display text-emerald-400 tracking-wide">
+          <div className="relative flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0">
+              <span className="text-base font-bold font-display text-emerald-400 tracking-wide">
                 {initials}
               </span>
             </div>
@@ -115,46 +99,43 @@ export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
                   Player profile
                 </span>
               </div>
-              <h3 className="text-lg font-bold font-display text-white truncate leading-tight">
+              <h3 className="text-base font-bold font-display text-white truncate leading-tight">
                 {displayName}
               </h3>
-              <p className="text-xs text-slate-400 truncate mt-0.5 font-mono">{user.email}</p>
+              <p className="text-[11px] text-slate-400 truncate mt-0.5 font-mono">{user.email}</p>
             </div>
           </div>
-          <div className="relative mt-4 flex items-center gap-3">
-            <div className="flex-1 rounded-xl bg-slate-950/60 border border-slate-800/60 px-3 py-2.5 text-center">
+          <div className="relative mt-3 flex items-center gap-2">
+            <div className="flex-1 rounded-xl bg-slate-950/60 border border-slate-800/60 px-3 py-2 text-center">
               <span className="block text-[9px] font-mono uppercase tracking-widest text-slate-500 mb-0.5">
                 Leagues
               </span>
-              <span className="text-sm font-bold text-emerald-400 font-display">{activeLeagueCount}</span>
+              <span className="text-sm font-bold text-emerald-400 font-display">
+                {activeLeagueCount}
+              </span>
             </div>
-            <div className="flex-1 rounded-xl bg-slate-950/60 border border-slate-800/60 px-3 py-2.5 text-center">
+            <div className="flex-1 rounded-xl bg-slate-950/60 border border-slate-800/60 px-3 py-2 text-center min-w-0">
               <span className="block text-[9px] font-mono uppercase tracking-widest text-slate-500 mb-0.5">
                 Preferred Sport
               </span>
-              <span className="text-sm font-bold text-slate-200 font-display capitalize truncate">
+              <span className="text-sm font-bold text-slate-200 font-display capitalize truncate block">
                 {user.preferredSport ?? '—'}
               </span>
             </div>
           </div>
         </div>
 
-        {/* Shortcuts */}
         <div className="space-y-2">
-          <span className="text-[10px] font-extrabold text-slate-500 font-mono uppercase tracking-widest pl-1 block">
-            Shortcuts
-          </span>
-
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               onOpenRules();
             }}
-            className="w-full text-left rounded-xl border border-slate-800/80 bg-slate-900/50 hover:bg-slate-900 hover:border-blue-500/30 px-4 py-3.5 flex items-center gap-3 transition-colors cursor-pointer group"
+            className="w-full text-left rounded-xl border border-slate-800/80 bg-slate-900/50 hover:bg-slate-900 hover:border-blue-500/30 px-4 py-3 flex items-center gap-3 transition-colors cursor-pointer group"
           >
-            <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0 group-hover:bg-blue-500/15 transition-colors">
-              <BookOpen className="w-4.5 h-4.5 text-blue-400" />
+            <div className="w-9 h-9 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
+              <BookOpen className="w-4 h-4 text-blue-400" />
             </div>
             <div className="min-w-0 flex-1">
               <span className="block text-sm font-semibold text-white">Rules &amp; Gameplay Guide</span>
@@ -165,17 +146,6 @@ export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
             <ChevronDown className="w-4 h-4 text-slate-600 -rotate-90 shrink-0" />
           </button>
 
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              window.dispatchEvent(new CustomEvent("pitchside:replay-product-tour"));
-            }}
-            className="w-full text-left px-4 py-2 text-[10px] font-mono text-slate-600 hover:text-emerald-400 transition-colors cursor-pointer"
-          >
-            Replay product tour
-          </button>
-
           {user.isAdmin && onOpenAdmin && (
             <button
               type="button"
@@ -183,10 +153,10 @@ export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
                 e.stopPropagation();
                 onOpenAdmin();
               }}
-              className="w-full text-left rounded-xl border border-purple-500/30 bg-purple-950/30 hover:bg-purple-950/50 hover:border-purple-500/50 px-4 py-3.5 flex items-center gap-3 transition-colors cursor-pointer group"
+              className="w-full text-left rounded-xl border border-purple-500/30 bg-purple-950/30 hover:bg-purple-950/50 px-4 py-3 flex items-center gap-3 transition-colors cursor-pointer"
             >
-              <div className="w-10 h-10 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center shrink-0">
-                <Lock className="w-4.5 h-4.5 text-purple-300" />
+              <div className="w-9 h-9 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center shrink-0">
+                <Lock className="w-4 h-4 text-purple-300" />
               </div>
               <div className="min-w-0 flex-1">
                 <span className="block text-sm font-semibold text-white">Admin</span>
@@ -194,95 +164,10 @@ export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
                   Fixtures, players &amp; scoring tools
                 </span>
               </div>
-              <ChevronDown className="w-4 h-4 text-slate-600 -rotate-90 shrink-0" />
             </button>
           )}
-
-          <div className="rounded-xl border border-slate-800/80 bg-slate-900/50 overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setCompetitionsOpen((o) => !o)}
-              className="w-full text-left px-4 py-3.5 flex items-center gap-3 transition-colors cursor-pointer hover:bg-slate-900/80"
-              aria-expanded={competitionsOpen}
-            >
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
-                <Layers className="w-4.5 h-4.5 text-emerald-400" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold text-white">
-                  Leagues and Competitions
-                </span>
-                <span className="block text-[10px] text-slate-500 font-mono mt-0.5">
-                  Manage Predictions feed opt-ins
-                </span>
-              </div>
-              <ChevronDown
-                className={`w-4 h-4 text-slate-500 shrink-0 transition-transform ${competitionsOpen ? 'rotate-180' : ''}`}
-              />
-            </button>
-
-            {competitionsOpen && (
-              <div className="border-t border-slate-800/60">
-                <div className="p-3 space-y-2">
-                  {compStatus.mode !== 'none' && (
-                    <p
-                      className={`text-[10px] font-mono ${
-                        compStatus.mode === 'success' ? 'text-emerald-400' : 'text-red-400'
-                      }`}
-                    >
-                      {compStatus.text}
-                    </p>
-                  )}
-                  <LeaguesAndCompetitions
-                    user={user}
-                    onUpdateUser={onUpdateUser}
-                    setStatusMsg={setCompStatus}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-xl border border-slate-800/80 bg-slate-900/50 overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setLeaguesOpen((o) => !o)}
-              className="w-full text-left px-4 py-3.5 flex items-center gap-3 transition-colors cursor-pointer hover:bg-slate-900/80"
-              aria-expanded={leaguesOpen}
-            >
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
-                <Trophy className="w-4.5 h-4.5 text-emerald-400" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold text-white">My Leagues</span>
-                <span className="block text-[10px] text-slate-500 font-mono mt-0.5">
-                  {activeLeagueCount === 0
-                    ? 'No active leagues yet'
-                    : `${activeLeagueCount} active league${activeLeagueCount === 1 ? '' : 's'}`}
-                </span>
-              </div>
-              <ChevronDown
-                className={`w-4 h-4 text-slate-500 shrink-0 transition-transform ${leaguesOpen ? 'rotate-180' : ''}`}
-              />
-            </button>
-
-            {leaguesOpen && (
-              <div className="border-t border-slate-800/60">
-                <div className="p-3">
-                  <MyLeagues
-                    userLeagues={userLeagues}
-                    selectedSeason={selectedSeason}
-                    setSelectedSeason={setSelectedSeason}
-                    getCompetitions={getCompetitions}
-                    onSelectLeague={onSelectLeague}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
         </div>
 
-        {/* Security restriction banner */}
         <div
           role="status"
           className="rounded-2xl border border-amber-500/25 bg-linear-to-br from-amber-950/40 via-slate-950/80 to-slate-950 p-4 flex gap-3"
@@ -311,10 +196,6 @@ export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
             Log out
           </button>
         )}
-      </div>
-
-      <div className="text-[10px] font-mono text-slate-500 text-center py-3 border-t border-slate-800/40 select-none shrink-0">
-        PITCHSIDE • 2026
       </div>
 
       {onLogout && (

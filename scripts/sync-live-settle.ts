@@ -34,9 +34,9 @@ dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 // ── Catalog (must match seed-full / sync-schedule / sync-settlement) ─────────
 
-/** ONLY these API-Sports league IDs are monitored / settled. */
+/** ONLY these API-Sports league IDs are monitored / settled (aligned with edge footballLeagues). */
 const LEAGUE_CATALOG = {
-  football: [39, 40, 179, 45, 2, 3, 1, 48, 52],
+  football: [39, 40, 179, 45, 2, 3, 1, 48, 528, 140, 135, 78, 61],
   rugby: [13, 16, 22, 14, 15, 26, 19, 10],
 } as const;
 
@@ -48,7 +48,13 @@ const SLUG_BY_SPORT_AND_API: Record<string, string> = {
   "football:2": "f-ucl",
   "football:3": "f-uel",
   "football:1": "f-worldcup",
-  "football:52": "f-shield",
+  "football:48": "f-eflcup",
+  "football:528": "f-shield",
+  "football:52": "f-shield", // legacy API id alias
+  "football:140": "f-laliga",
+  "football:135": "f-seriea",
+  "football:78": "f-bundesliga",
+  "football:61": "f-ligue1",
   "rugby:13": "r-top14",
   "rugby:16": "r-prem",
   "rugby:26": "r-urc",

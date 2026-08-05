@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { UserProfile, Prediction, League, SportType, Match, ActiveCompetition } from "./types";
+import type { Database, Tables, TablesInsert, TablesUpdate } from "./types/supabase";
 import { getCompetitionTitle } from "./data";
 import { GLOBAL_LEAGUE_ID } from "./lib/leaguesConfig";
 import {
@@ -20,9 +21,48 @@ import {
 import type { SupportedTeamOption, TeamSport } from "./data/supportedTeams";
 
 export { formatAccuracyPercent } from "./lib/formatAccuracy";
+export type { Database, Tables, TablesInsert, TablesUpdate };
+export type PitchsideClient = SupabaseClient<Database>;
+
+/** Convenience aliases for public table rows. */
+export type DbProfile = Tables<"profiles">;
+export type DbMatch = Tables<"matches">;
+export type DbPrediction = Tables<"predictions">;
+export type DbLeague = Tables<"leagues">;
+export type DbLeagueMember = Tables<"league_members">;
+export type DbTeam = Tables<"teams">;
+export type DbArchivedPlayer = Tables<"archived_players">;
+
+type DbFunctions = Database["public"]["Functions"];
+export type LeagueMemberPredictionRpc =
+  DbFunctions["get_league_member_predictions"]["Returns"][number];
+export type PlayerPowerupUsageRpc =
+  DbFunctions["get_player_powerup_usage"]["Returns"][number];
+
+/** Client-facing archive backup shape (JSON fields parsed from archived_players). */
+export type ArchivedPlayerBackup = {
+  id: string;
+  deletedUser: {
+    nickname?: string;
+    email?: string;
+    firstName?: string;
+    surname?: string;
+    isAdmin?: boolean;
+    deletedAt?: string;
+    [key: string]: unknown;
+  } | null;
+  predictions: unknown;
+  deletedAt: string | null;
+};
 
 // Retrieve environment variables and clean them of common copy-paste errors
-const metaEnv = (import.meta as any).env || {};
+type ViteClientEnv = {
+  VITE_SUPABASE_URL?: string;
+  VITE_SUPABASE_ANON_KEY?: string;
+  DEV?: boolean;
+  MODE?: string;
+};
+const metaEnv = (import.meta as unknown as { env: ViteClientEnv }).env;
 const cleanUrl = (url: string) => {
   if (!url) return "";
   const baseUrl = url.split("https://")[1] || url.split("http://")[1];
@@ -35,8 +75,8 @@ const supabaseAnonKey = (metaEnv.VITE_SUPABASE_ANON_KEY || "").trim();
 
 export const isSupabaseConfigured = () => !!(supabaseUrl && supabaseAnonKey);
 
-export const supabase = isSupabaseConfigured()
-  ? createClient(supabaseUrl, supabaseAnonKey, {
+export const supabase: PitchsideClient | null = isSupabaseConfigured()
+  ? createClient<Database>(supabaseUrl, supabaseAnonKey, {
       realtime: {
         // Cap client event intake — live score ticks are small; this protects
         // free-tier Realtime quotas if a tab is left open across many fixtures.
@@ -51,6 +91,15 @@ if (!isSupabaseConfigured()) {
   );
 }
 
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === "object" && "message" in err) {
+    const msg = (err as { message: unknown }).message;
+    if (typeof msg === "string") return msg;
+  }
+  return String(err);
+}
+
 // Connection test for UI validation
 export async function testSupabaseConnection(): Promise<{ ok: boolean; error?: string }> {
   if (!supabase) return { ok: false, error: 'Supabase client not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.' };
@@ -58,8 +107,8 @@ export async function testSupabaseConnection(): Promise<{ ok: boolean; error?: s
     const { error } = await supabase.from('profiles').select('id').limit(1);
     if (error) throw error;
     return { ok: true };
-  } catch (err: any) {
-    return { ok: false, error: err.message };
+  } catch (err: unknown) {
+    return { ok: false, error: errorMessage(err) };
   }
 }
 
@@ -69,11 +118,13 @@ export async function testSupabaseConnection(): Promise<{ ok: boolean; error?: s
 
 /** Columns needed to hydrate UserProfile from profiles (no SELECT *). */
 const PROFILE_LIST_COLUMNS =
-  "id, first_name, surname, email, username, dob, phone, nationality, supported_team, preferred_sport, is_admin, is_verified, is_profile_public, created_at, seen_features, selected_sports, favorite_f1_team, favorite_golfer, role, golf_mulligans_available, age_confirmed_13, terms_accepted_at, privacy_accepted_at, subscribed_leagues, golf_coverage_tier, preferred_nation";
+  "id, first_name, surname, email, username, dob, phone, nationality, supported_team, preferred_sport, is_admin, is_verified, is_profile_public, created_at, seen_features, selected_sports, favorite_f1_team, favorite_golfer, role, golf_mulligans_available, age_confirmed_13, terms_accepted_at, privacy_accepted_at, subscribed_leagues, golf_coverage_tier, preferred_nation, favorite_teams, weekly_email_opt_in, push_enabled, email_enabled";
 
 /** Match columns used by mapMatchRow — keep in sync with Match domain model. */
 const MATCH_LIST_COLUMNS =
   "id, external_fixture_id, competition_id, competition_name, sport, home_team, away_team, actual_home_score, actual_away_score, kickoff_time, status, match_tag, round_name, venue_name, odds_home_win, odds_draw, odds_away_win, base_multiplier, provisional_home_score, provisional_away_score, match_minute, is_visible, is_pitchside_pick";
+
+const ARCHIVED_PLAYER_COLUMNS = "id, deleted_user, predictions, created_at";
 
 const PREDICTION_USER_COLUMNS =
   "match_id, predicted_home_score, predicted_away_score, submitted, created_at, provisional_points, points_won, sport, applied_powerup_id";
@@ -95,34 +146,7 @@ export async function dbFetchPlayers(): Promise<UserProfile[]> {
   if (error) throw error;
   if (!data) return [];
 
-  type ProfileRow = {
-    id?: string;
-    username?: string | null;
-    first_name?: string | null;
-    surname?: string | null;
-    email?: string | null;
-    dob?: string | null;
-    phone?: string | null;
-    created_at?: string | null;
-    is_verified?: boolean | null;
-    is_admin?: boolean | null;
-    nationality?: string | null;
-    supported_team?: string | null;
-    preferred_sport?: string | null;
-    seen_features?: unknown;
-    selected_sports?: unknown;
-    favorite_f1_team?: string | null;
-    favorite_golfer?: string | null;
-    role?: string | null;
-    golf_mulligans_available?: number | null;
-    is_profile_public?: boolean | null;
-    age_confirmed_13?: boolean | null;
-    terms_accepted_at?: string | null;
-    privacy_accepted_at?: string | null;
-    subscribed_leagues?: string[] | null;
-    golf_coverage_tier?: string | null;
-    preferred_nation?: string | null;
-  };
+  type ProfileRow = DbProfile;
 
   const activeData = data.filter(
     (d: ProfileRow) => d.username && !d.username.startsWith("freed_nick_"),
@@ -162,6 +186,12 @@ export async function dbFetchPlayers(): Promise<UserProfile[]> {
     golfCoverageTier: (d.golf_coverage_tier as UserProfile["golfCoverageTier"]) ||
       "MAJORS_ONLY",
     preferredNation: d.preferred_nation ?? null,
+    favoriteTeams: Array.isArray(d.favorite_teams)
+      ? d.favorite_teams.map(String)
+      : undefined,
+    pushEnabled: d.push_enabled ?? undefined,
+    emailEnabled: d.email_enabled ?? undefined,
+    weeklyEmailOptIn: d.weekly_email_opt_in ?? undefined,
     isProfilePublic: d.is_profile_public ?? undefined,
     seenFeatures: parseSeenFeatures(d.seen_features),
   }));
@@ -200,7 +230,7 @@ export async function dbUpdateTournamentSubscriptions(
   },
 ): Promise<void> {
   if (!supabase) throw new Error("Database not connected.");
-  const payload: Record<string, unknown> = {
+  const payload: TablesUpdate<"profiles"> = {
     subscribed_leagues: opts.subscribedLeagues,
   };
   if (opts.golfCoverageTier) {
@@ -388,7 +418,7 @@ export async function dbFetchLeagueSubmittedPredictions(
 
   if (error) throw error;
 
-  return (data || []).map((p: any) => ({
+  return (data || []).map((p) => ({
     userId: p.user_id as string,
     matchId: p.match_id as string,
     sport: (p.sport as SportType) || SportType.FOOTBALL,
@@ -426,7 +456,7 @@ export async function dbFetchLeagueMemberPredictions(
     console.log("League Data Payload:", data);
   }
 
-  return (data || []).map((p: any) => ({
+  return (data || []).map((p: LeagueMemberPredictionRpc) => ({
     userId: String(p.user_id),
     matchId: String(p.match_id),
     sport: (p.sport as SportType) || SportType.FOOTBALL,
@@ -458,9 +488,9 @@ export async function dbFetchLiveProvisionalMatrix(
   if (error) throw error;
 
   const matrix: LiveProvisionalMatrix = {};
-  (data || []).forEach((row: any) => {
-    const uid = row.user_id as string | undefined;
-    const matchId = row.match_id as string | undefined;
+  (data || []).forEach((row) => {
+    const uid = row.user_id ?? undefined;
+    const matchId = row.match_id ?? undefined;
     if (!uid || !matchId) return;
     const pts = Number(row.provisional_points) || 0;
     if (pts <= 0) return;
@@ -616,7 +646,10 @@ export async function dbFetchUserPowerups(
     .order("earned_at", { ascending: false });
 
   if (sportType) {
-    query = query.eq("sport_type", sportType);
+    query = query.eq(
+      "sport_type",
+      sportType as Database["public"]["Enums"]["powerup_sport_type"],
+    );
   }
 
   const { data, error } = await query;
@@ -676,48 +709,51 @@ export function filterMatchesToHorizon(
 }
 
 /** Map a raw matches row into the Match domain model (including live fields). */
-export function mapMatchRow(d: Record<string, unknown>): Match {
+export function mapMatchRow(
+  d: Partial<DbMatch> | Record<string, unknown>,
+): Match {
+  const row = d as Partial<DbMatch> & Record<string, unknown>;
   return {
-    id: String(d.id),
-    competitionId: String(d.competition_id ?? ""),
+    id: String(row.id ?? ""),
+    competitionId: String(row.competition_id ?? ""),
     competitionName: getCompetitionTitle(
-      d.competition_id as string | undefined,
-      d.competition_name as string | null | undefined,
+      row.competition_id ?? undefined,
+      row.competition_name ?? undefined,
     ),
-    sport: d.sport as SportType,
-    homeTeam: String(d.home_team ?? ""),
-    awayTeam: String(d.away_team ?? ""),
-    homeScore: d.actual_home_score != null ? Number(d.actual_home_score) : undefined,
-    awayScore: d.actual_away_score != null ? Number(d.actual_away_score) : undefined,
-    matchDate: String(d.kickoff_time ?? ""),
+    sport: row.sport as SportType,
+    homeTeam: String(row.home_team ?? ""),
+    awayTeam: String(row.away_team ?? ""),
+    homeScore: row.actual_home_score != null ? Number(row.actual_home_score) : undefined,
+    awayScore: row.actual_away_score != null ? Number(row.actual_away_score) : undefined,
+    matchDate: String(row.kickoff_time ?? ""),
     status: normalizeMatchStatus(
-      typeof d.status === "string" ? d.status : String(d.status ?? "upcoming"),
+      typeof row.status === "string" ? row.status : String(row.status ?? "upcoming"),
     ),
-    season: (d.season as string) || undefined,
-    matchTag: (d.match_tag as string) || undefined,
-    roundName: (d.round_name as string) || undefined,
-    venueName: (d.venue_name as string) || undefined,
-    oddsHomeWin: d.odds_home_win != null ? Number(d.odds_home_win) : undefined,
-    oddsDraw: d.odds_draw != null ? Number(d.odds_draw) : undefined,
-    oddsAwayWin: d.odds_away_win != null ? Number(d.odds_away_win) : undefined,
-    baseMultiplier: d.base_multiplier != null ? Number(d.base_multiplier) : undefined,
+    season: undefined,
+    matchTag: row.match_tag || undefined,
+    roundName: row.round_name || undefined,
+    venueName: row.venue_name || undefined,
+    oddsHomeWin: row.odds_home_win != null ? Number(row.odds_home_win) : undefined,
+    oddsDraw: row.odds_draw != null ? Number(row.odds_draw) : undefined,
+    oddsAwayWin: row.odds_away_win != null ? Number(row.odds_away_win) : undefined,
+    baseMultiplier: row.base_multiplier != null ? Number(row.base_multiplier) : undefined,
     provisionalHomeScore:
-      d.provisional_home_score != null ? Number(d.provisional_home_score) : undefined,
+      row.provisional_home_score != null ? Number(row.provisional_home_score) : undefined,
     provisionalAwayScore:
-      d.provisional_away_score != null ? Number(d.provisional_away_score) : undefined,
+      row.provisional_away_score != null ? Number(row.provisional_away_score) : undefined,
     matchMinute:
       formatLiveMatchClock({
         status:
-          typeof d.status === "string" ? d.status : String(d.status ?? ""),
+          typeof row.status === "string" ? row.status : String(row.status ?? ""),
         matchMinute:
-          typeof d.match_minute === "string"
-            ? d.match_minute
-            : d.match_minute != null
-              ? String(d.match_minute)
+          typeof row.match_minute === "string"
+            ? row.match_minute
+            : row.match_minute != null
+              ? String(row.match_minute)
               : null,
       }) ?? undefined,
-    isVisible: d.is_visible !== false,
-    isPitchsidePick: d.is_pitchside_pick === true,
+    isVisible: row.is_visible !== false,
+    isPitchsidePick: row.is_pitchside_pick === true,
   };
 }
 
@@ -746,16 +782,25 @@ export async function dbFetchMatches(
   const visibleOnly = options.visibleOnly !== false;
   const statusFilter = options.status;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const applyFilters = (query: any) => {
-    let q = query;
+  // Detach from PostgREST's recursive builder generics (TS2589) while filtering.
+  type LooseMatchQuery = {
+    eq: (column: string, value: unknown) => LooseMatchQuery;
+    in: (column: string, values: readonly string[]) => LooseMatchQuery;
+    order: (
+      column: string,
+      options: { ascending: boolean },
+    ) => LooseMatchQuery;
+  };
+
+  const applyFilters = <T>(query: T): T => {
+    let q = query as unknown as LooseMatchQuery;
     if (visibleOnly) q = q.eq("is_visible", true);
     if (statusFilter) {
       q = Array.isArray(statusFilter)
         ? q.in("status", statusFilter)
         : q.eq("status", statusFilter);
     }
-    return q.order("kickoff_time", { ascending: true });
+    return q.order("kickoff_time", { ascending: true }) as T;
   };
 
   // Unbounded / status-scoped fetch (admin, standings) — still filtered in PostgREST.
@@ -764,7 +809,7 @@ export async function dbFetchMatches(
       supabase.from("matches").select(MATCH_LIST_COLUMNS),
     );
     if (error) throw error;
-    return (data || []).map((row) => mapMatchRow(row as Record<string, unknown>));
+    return (data || []).map((row) => mapMatchRow(row));
   }
 
   const now = new Date();
@@ -789,7 +834,7 @@ export async function dbFetchMatches(
     // Skip redundant live fetch when caller already constrained status away from live.
     statusFilter &&
       !(Array.isArray(statusFilter) ? statusFilter.includes("live") : statusFilter === "live")
-      ? Promise.resolve({ data: [] as unknown[], error: null })
+      ? Promise.resolve({ data: [] as Partial<DbMatch>[], error: null })
       : applyFilters(supabase.from("matches").select(MATCH_LIST_COLUMNS).eq("status", "live")),
   ]);
 
@@ -798,7 +843,7 @@ export async function dbFetchMatches(
 
   const byId = new Map<string, Match>();
   for (const row of [...(windowRes.data || []), ...(liveRes.data || [])]) {
-    const mapped = mapMatchRow(row as Record<string, unknown>);
+    const mapped = mapMatchRow(row);
     byId.set(mapped.id, mapped);
   }
 
@@ -899,8 +944,26 @@ export async function dbSetMatchVisibility(
 const LEAGUE_PUBLIC_COLUMNS =
   "id, name, competition_id, creator_id, creator_name, is_private, is_public, max_players, max_participants, season, is_archived, created_at, updated_at";
 
+/** Public league columns selected by client reads (never includes password). */
+type LeaguePublicRow = Pick<
+  DbLeague,
+  | "id"
+  | "name"
+  | "competition_id"
+  | "creator_id"
+  | "creator_name"
+  | "is_private"
+  | "is_public"
+  | "max_players"
+  | "max_participants"
+  | "season"
+  | "is_archived"
+  | "created_at"
+  | "updated_at"
+>;
+
 /** Map a raw leagues row. Never reads the deprecated JSONB `members` column. */
-function mapLeagueRow(d: any, members: string[] = []): League {
+function mapLeagueRow(d: LeaguePublicRow, members: string[] = []): League {
   const isPrivate =
     typeof d.is_private === "boolean"
       ? d.is_private
@@ -963,8 +1026,8 @@ export async function dbFetchLeagues(
   if (!data || data.length === 0) return [];
 
   // Hydrate membership strictly from league_members — ignore deprecated JSONB.
-  const membership = await dbFetchLeaguesMembership(data.map((d: any) => d.id));
-  const mapped = data.map((d: any) => mapLeagueRow(d, membership[d.id] || []));
+  const membership = await dbFetchLeaguesMembership(data.map((d) => d.id));
+  const mapped = data.map((d) => mapLeagueRow(d, membership[d.id] || []));
 
   if (options.includeAllPrivate) return mapped;
 
@@ -1032,7 +1095,7 @@ export async function dbUpdateLeagueSettings(
 ): Promise<void> {
   if (!supabase) throw new Error("Database not connected.");
   const maxPlayers = Math.min(20, Math.max(1, settings.maxPlayers));
-  const payload: Record<string, unknown> = {
+  const payload: TablesUpdate<"leagues"> = {
     is_private: settings.isPrivate,
     is_public: !settings.isPrivate,
     max_players: maxPlayers,
@@ -1118,7 +1181,7 @@ export async function dbAdminUpdateLeague(
   },
 ): Promise<void> {
   if (!supabase) throw new Error("Database not connected.");
-  const payload: Record<string, unknown> = {
+  const payload: TablesUpdate<"leagues"> = {
     updated_at: new Date().toISOString(),
   };
   if (typeof patch.name === "string") {
@@ -1219,7 +1282,7 @@ export async function dbFetchUserLeagues(userId: string): Promise<League[]> {
   if (memError) throw memError;
 
   const leagueIds = Array.from(
-    new Set((membershipRows || []).map((r: any) => r.league_id).filter(Boolean)),
+    new Set((membershipRows || []).map((r) => r.league_id).filter(Boolean)),
   );
   if (leagueIds.length === 0) return [];
 
@@ -1232,9 +1295,9 @@ export async function dbFetchUserLeagues(userId: string): Promise<League[]> {
   if (leagueError) throw leagueError;
 
   // Step 3: hydrate full member lists from league_members (not the deprecated JSONB).
-  const activeIds = (leagueRows || []).map((d: any) => d.id as string);
+  const activeIds = (leagueRows || []).map((d) => d.id);
   const membership = await dbFetchLeaguesMembership(activeIds);
-  return (leagueRows || []).map((d: any) => mapLeagueRow(d, membership[d.id] || []));
+  return (leagueRows || []).map((d) => mapLeagueRow(d, membership[d.id] || []));
 }
 
 /**
@@ -1254,7 +1317,7 @@ export async function dbFetchTeams(): Promise<SupportedTeamOption[]> {
 
   if (error) throw error;
 
-  return (data || []).map((row: any): SupportedTeamOption => {
+  return (data || []).map((row): SupportedTeamOption => {
     const sportDb = String(row.sport || "").toLowerCase();
     const sport: TeamSport = sportDb === "rugby" ? "Rugby" : "Football";
     return {
@@ -1279,7 +1342,7 @@ export async function dbFetchLeaguesMembership(
   if (error) throw error;
 
   const map: Record<string, string[]> = {};
-  (data || []).forEach((row: any) => {
+  (data || []).forEach((row) => {
     if (!map[row.league_id]) map[row.league_id] = [];
     map[row.league_id].push(row.user_id);
   });
@@ -1298,7 +1361,7 @@ export async function dbFetchLeagueMembers(leagueId: string): Promise<UserProfil
   if (memError) throw memError;
 
   const userIds = Array.from(
-    new Set((memberRows || []).map((r: any) => r.user_id).filter(Boolean)),
+    new Set((memberRows || []).map((r) => r.user_id).filter(Boolean)),
   );
   if (userIds.length === 0) return [];
 
@@ -1308,9 +1371,9 @@ export async function dbFetchLeagueMembers(leagueId: string): Promise<UserProfil
     .in("id", userIds);
   if (profileError) throw profileError;
 
-  const profileMap: Record<string, Record<string, unknown>> = {};
-  (profileRows || []).forEach((p: Record<string, unknown>) => {
-    if (p.id) profileMap[String(p.id)] = p;
+  const profileMap: Record<string, DbProfile> = {};
+  (profileRows || []).forEach((p) => {
+    if (p.id) profileMap[p.id] = p as DbProfile;
   });
 
   return userIds
@@ -1318,20 +1381,20 @@ export async function dbFetchLeagueMembers(leagueId: string): Promise<UserProfil
       const p = profileMap[uid];
       if (!p) return null;
       return {
-        id: String(p.id),
-        email: String(p.email || ""),
-        firstName: String(p.first_name || ""),
-        surname: String(p.surname || ""),
-        dob: String(p.dob || ""),
+        id: p.id,
+        email: p.email || "",
+        firstName: p.first_name || "",
+        surname: p.surname || "",
+        dob: p.dob || "",
         // profiles.username is the canonical nickname column
-        nickname: String(p.username || "Anonymous"),
-        createdAt: String(p.created_at || new Date().toISOString()),
+        nickname: p.username || "Anonymous",
+        createdAt: p.created_at || new Date().toISOString(),
         emailVerified: Boolean(p.is_verified),
         isAdmin: Boolean(p.is_admin),
         agreedToTerms: Boolean(p.terms_accepted_at),
-        nationality: String(p.nationality || ""),
-        isProfilePublic: (p.is_profile_public as boolean | undefined) ?? true,
-        supportedTeam: String(p.supported_team || ""),
+        nationality: p.nationality || "",
+        isProfilePublic: p.is_profile_public ?? true,
+        supportedTeam: p.supported_team || "",
         preferredSport: (p.preferred_sport as SportType | undefined) || undefined,
       } as UserProfile;
     })
@@ -1342,17 +1405,45 @@ export async function dbFetchLeagueMembers(leagueId: string): Promise<UserProfil
 // DB OPERATIONS: MAILING EXCLUSIONS & BACKUPS
 // ==========================================
 
-export async function dbFetchArchivedPlayers(): Promise<any[]> {
+export async function dbFetchArchivedPlayers(): Promise<ArchivedPlayerBackup[]> {
   if (!supabase) throw new Error("Database not connected.");
-  const { data, error } = await supabase.from("archived_players").select("*").order("created_at", { ascending: false });
+  const { data, error } = await supabase
+    .from("archived_players")
+    .select(ARCHIVED_PLAYER_COLUMNS)
+    .order("created_at", { ascending: false });
   if (error) throw error;
   
-  return data ? data.map((d: any) => ({
-    id: d.id,
-    deletedUser: typeof d.deleted_user === "string" ? JSON.parse(d.deleted_user) : d.deleted_user,
-    predictions: typeof d.predictions === "string" ? JSON.parse(d.predictions) : d.predictions,
-    deletedAt: d.created_at,
-  })) : [];
+  return data
+    ? data.map((d) => {
+        let deletedUser: ArchivedPlayerBackup["deletedUser"] = null;
+        try {
+          const raw =
+            typeof d.deleted_user === "string"
+              ? JSON.parse(d.deleted_user)
+              : d.deleted_user;
+          deletedUser =
+            raw && typeof raw === "object"
+              ? (raw as NonNullable<ArchivedPlayerBackup["deletedUser"]>)
+              : null;
+        } catch {
+          deletedUser = null;
+        }
+        let predictions: unknown = d.predictions;
+        try {
+          if (typeof d.predictions === "string") {
+            predictions = JSON.parse(d.predictions);
+          }
+        } catch {
+          predictions = d.predictions;
+        }
+        return {
+          id: d.id,
+          deletedUser,
+          predictions,
+          deletedAt: d.created_at,
+        };
+      })
+    : [];
 }
 
 // ==========================================
@@ -1393,8 +1484,13 @@ function analyticsPct(part: number, whole: number): number {
 }
 
 /** Page through a Supabase select until all rows are collected (PostgREST default page = 1000). */
-async function fetchAllRows<T extends Record<string, unknown>>(
-  buildQuery: () => any,
+async function fetchAllRows<T>(
+  buildQuery: () => {
+    range: (
+      from: number,
+      to: number,
+    ) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>;
+  },
   pageSize = 1000,
 ): Promise<T[]> {
   const rows: T[] = [];
@@ -1402,7 +1498,7 @@ async function fetchAllRows<T extends Record<string, unknown>>(
   for (;;) {
     const { data, error } = await buildQuery().range(from, from + pageSize - 1);
     if (error) throw error;
-    const batch = (data ?? []) as T[];
+    const batch = data ?? [];
     rows.push(...batch);
     if (batch.length < pageSize) break;
     from += pageSize;
@@ -1519,9 +1615,15 @@ export async function dbFetchAdminAnalytics(): Promise<AdminAnalyticsSnapshot> {
   };
 }
 
-export async function dbSaveArchivedPlayer(id: string, backupPayload: any): Promise<void> {
+export async function dbSaveArchivedPlayer(
+  id: string,
+  backupPayload: {
+    deletedUser?: { deletedAt?: string } & Record<string, unknown>;
+    predictions?: unknown;
+  },
+): Promise<void> {
   if (!supabase) throw new Error("Database not connected.");
-  const payload = {
+  const payload: TablesInsert<"archived_players"> = {
     id: id,
     deleted_user: JSON.stringify(backupPayload.deletedUser),
     predictions: JSON.stringify(backupPayload.predictions),
@@ -1531,9 +1633,16 @@ export async function dbSaveArchivedPlayer(id: string, backupPayload: any): Prom
   if (error) throw error;
 }
 
-export async function dbSaveUnsubscribedEmail(email: string, details: any): Promise<void> {
+export async function dbSaveUnsubscribedEmail(
+  email: string,
+  details: {
+    unsubscribedAt?: string;
+    userId?: string;
+    nickname?: string;
+  },
+): Promise<void> {
   if (!supabase) throw new Error("Database not connected.");
-  const payload = {
+  const payload: TablesInsert<"unsubscribed_emails"> = {
     email: email.toLowerCase(),
     unsubscribed_at: details.unsubscribedAt || new Date().toISOString(),
     user_id: details.userId || "",
@@ -1803,7 +1912,7 @@ export async function dbFetchPlayerPowerupUsage(
     return [];
   }
 
-  return (data || []).map((row: any) => ({
+  return (data || []).map((row: PlayerPowerupUsageRpc) => ({
     powerupType: String(row.powerup_type ?? "unknown"),
     sport: String(row.sport ?? "football"),
     timesUsed: Number(row.times_used ?? 0),

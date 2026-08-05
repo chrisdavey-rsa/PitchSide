@@ -8,6 +8,7 @@ import { motion } from "motion/react";
 import { AtSign, Loader2, Check } from "lucide-react";
 import type { UserProfile } from "../../types";
 import { supabase } from "../../supabase";
+import type { TablesUpdate } from "../../types/supabase";
 import AuthCard, { AuthError } from "./AuthCard";
 import {
   USERNAME_MAX,
@@ -197,7 +198,7 @@ export default function CompleteProfile({ user, onComplete }: Props) {
       }
 
       const nowIso = new Date().toISOString();
-      const patch: Record<string, unknown> = {
+      const patch: TablesUpdate<"profiles"> = {
         age_confirmed_13: true,
         terms_accepted_at: nowIso,
         privacy_accepted_at: nowIso,

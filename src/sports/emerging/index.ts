@@ -16,7 +16,6 @@ export type {
   F1GridMode,
   EmergingProfileSlice,
 } from './types';
-export { EMERGING_SPORT_META } from './types';
 export { SportIcon, SPORT_ICON_SRC, SPORT_ICON_SRC_MUTED } from './sportIcons';
 export {
   HELMET_MAP,
@@ -36,7 +35,6 @@ export {
   emergingQueryKeys,
 } from './hooks/useEmergingSports';
 
-export { default as SportSelectorBanner } from './components/SportSelectorBanner';
 export { default as EmergingSearchCombobox } from './components/EmergingSearchCombobox';
 export { default as EmergingSportWorkspace } from './components/EmergingSportWorkspace';
 export { default as F1GridPredictor } from './components/f1/F1GridPredictor';
