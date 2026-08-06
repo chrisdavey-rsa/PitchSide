@@ -2,7 +2,7 @@
   "id": "/",
   "name": "PitchSide Predictions",
   "short_name": "PitchSide",
-  "description": "Play. Predict. Prevail. The ultimate sports score predictor.",
+  "description": "Play. Predict. The ultimate sports score predictor.",
   "display": "standalone",
   "orientation": "any",
   "start_url": "/",

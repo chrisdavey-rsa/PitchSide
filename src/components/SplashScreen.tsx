@@ -34,9 +34,9 @@ export default function SplashScreen() {
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 1.1, duration: 0.5 }}
-          className="text-[10px] text-slate-500 font-mono tracking-[0.35em] uppercase"
+          className="text-[10px] text-slate-500 font-mono tracking-[0.35em] uppercase text-center"
         >
-          Play. Predict. Prevail.
+          Play. Predict.
         </motion.div>
       </div>
     </motion.div>

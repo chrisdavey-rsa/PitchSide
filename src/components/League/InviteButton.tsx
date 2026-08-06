@@ -38,7 +38,7 @@ export default function InviteButton({
       const shareUrl = buildInviteShareUrl(league.id, password);
       const payload = {
         title: "Join my PitchSide league",
-        text: "Come predict the scores with me on PitchSide!",
+        text: "Compete and predict the scores with me on PitchSide!",
         url: shareUrl,
       };
 

@@ -195,7 +195,7 @@ export default function AuthFlow({
           <PitchSideLogo size="lg" autoplay={true} />
         </div>
         <p className="text-xs text-slate-400 font-mono mt-2 uppercase tracking-widest">
-          Play. Predict. Prevail.
+          Play. Predict.
         </p>
       </div>
 

@@ -24,7 +24,7 @@ export default function AuthCard({ children, badge, onLogoClick }: AuthCardProps
           <PitchSideLogo size="lg" autoplay={false} />
         </div>
         <p className="text-xs text-slate-400 font-mono mt-2 uppercase tracking-widest">
-          Play. Predict. Prevail.
+          Play. Predict.
         </p>
         {/* Mobile-only value prop — desktop has the left marketing panel */}
         <p className="lg:hidden mt-3 mx-auto max-w-xs text-[11px] leading-relaxed text-slate-400 font-sans">
