@@ -48,7 +48,7 @@ export async function profileFromSession(
   const { data: row } = await supabase
     .from('profiles')
     .select(
-      'id, first_name, surname, email, username, dob, phone, nationality, supported_team, preferred_sport, is_admin, is_profile_public, created_at, seen_features, selected_sports, favorite_f1_team, favorite_golfer, role, golf_mulligans_available, age_confirmed_13, terms_accepted_at, privacy_accepted_at, subscribed_leagues, golf_coverage_tier, preferred_nation, favorite_teams, weekly_email_opt_in, push_enabled, email_enabled',
+      'id, first_name, surname, email, username, dob, phone, nationality, supported_team, preferred_sport, is_admin, is_profile_public, created_at, seen_features, selected_sports, favorite_f1_team, favorite_golfer, role, golf_mulligans_available, age_confirmed_13, terms_accepted_at, privacy_accepted_at, subscribed_leagues, golf_coverage_tier, preferred_nation, favorite_teams, weekly_email_opt_in, push_enabled, email_enabled, friend_activity_opt_in',
     )
     .eq('id', authUser.id)
     .single();
@@ -113,6 +113,7 @@ export async function profileFromSession(
       weeklyEmailOptIn:
         row.email_enabled === true ||
         (row.email_enabled == null && row.weekly_email_opt_in !== false),
+      friendActivityOptIn: row.friend_activity_opt_in === true,
       favoriteF1Team: row.favorite_f1_team ?? null,
       favoriteGolfer: row.favorite_golfer ?? null,
       role: row.role ?? null,

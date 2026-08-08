@@ -62,7 +62,7 @@ interface PredictionsPageProps {
     winner: "home" | "away" | "draw" | null,
     marginStr: string,
   ) => void;
-  onSubmitPrediction: (matchId: string, powerupInstanceId?: string | null) => void;
+  onSubmitPrediction: (matchId: string, chipInstanceId?: string | null) => void;
   onOpenLeagues: () => void;
   onUserUpdate?: (user: UserProfile) => void;
   isOffline?: boolean;
@@ -370,6 +370,7 @@ export default function PredictionsPage({
           onRugbyPredictionChange={onRugbyPredictionChange}
           onSubmitPrediction={onSubmitPrediction}
           userId={user.id}
+          goldenTickets={user.goldenTickets ?? 0}
           unifiedFeed
           feedSportFilter={sportFilter}
           matchesLoading={matchesLoading}

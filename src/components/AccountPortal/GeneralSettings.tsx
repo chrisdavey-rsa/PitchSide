@@ -8,6 +8,7 @@ import CountryFlag from '../CountryFlag';
 import { filterTeams } from '../../data/supportedTeams';
 import { useTeamsCatalogQuery } from '../../hooks/usePitchsideQueries';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
+import { FriendActivityToggle } from './Preferences';
 
 interface GeneralSettingsProps {
   user: UserProfile;
@@ -28,8 +29,12 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ user, onUpdate
   const [pushEnabledPref, setPushEnabledPref] = useState<boolean>(
     user.pushEnabled ?? false,
   );
+  const [friendActivityOptIn, setFriendActivityOptIn] = useState<boolean>(
+    user.friendActivityOptIn ?? false,
+  );
   const [prefsLoading, setPrefsLoading] = useState(true);
   const [emailBusy, setEmailBusy] = useState(false);
+  const [friendBusy, setFriendBusy] = useState(false);
   const [teamSearch, setTeamSearch] = useState('');
   const [isTeamDropdownOpen, setIsTeamDropdownOpen] = useState(false);
   const { data: teamCatalog = [] } = useTeamsCatalogQuery();
@@ -48,13 +53,14 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ user, onUpdate
       if (isLocalProfile || !supabase) {
         setEmailEnabled(user.emailEnabled ?? user.weeklyEmailOptIn ?? false);
         setPushEnabledPref(user.pushEnabled ?? false);
+        setFriendActivityOptIn(user.friendActivityOptIn ?? false);
         setPrefsLoading(false);
         return;
       }
       setPrefsLoading(true);
       const { data, error } = await supabase
         .from('profiles')
-        .select('push_enabled, email_enabled, weekly_email_opt_in')
+        .select('push_enabled, email_enabled, weekly_email_opt_in, friend_activity_opt_in')
         .eq('id', user.id)
         .maybeSingle();
       if (cancelled) return;
@@ -62,18 +68,22 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ user, onUpdate
         console.warn('[GeneralSettings] notification prefs load failed', error.message);
         setEmailEnabled(user.emailEnabled ?? false);
         setPushEnabledPref(user.pushEnabled ?? false);
+        setFriendActivityOptIn(user.friendActivityOptIn ?? false);
       } else {
         const emailOn =
           data?.email_enabled === true ||
           (data?.email_enabled == null && data?.weekly_email_opt_in === true);
         const pushOn = data?.push_enabled === true;
+        const friendOn = data?.friend_activity_opt_in === true;
         setEmailEnabled(!!emailOn);
         setPushEnabledPref(!!pushOn);
+        setFriendActivityOptIn(!!friendOn);
         onUpdateUser({
           ...user,
           emailEnabled: !!emailOn,
           weeklyEmailOptIn: !!emailOn,
           pushEnabled: !!pushOn,
+          friendActivityOptIn: !!friendOn,
         });
       }
       setPrefsLoading(false);
@@ -125,7 +135,19 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ user, onUpdate
       const ok = await push.disable();
       if (ok) {
         setPushEnabledPref(false);
-        onUpdateUser({ ...user, pushEnabled: false });
+        // Friend alerts require global push — clear opt-in when push turns off.
+        setFriendActivityOptIn(false);
+        if (!isLocalProfile && supabase) {
+          void supabase
+            .from('profiles')
+            .update({ friend_activity_opt_in: false })
+            .eq('id', user.id);
+        }
+        onUpdateUser({
+          ...user,
+          pushEnabled: false,
+          friendActivityOptIn: false,
+        });
       }
       return;
     }
@@ -133,6 +155,31 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ user, onUpdate
     if (ok) {
       setPushEnabledPref(true);
       onUpdateUser({ ...user, pushEnabled: true });
+    }
+  };
+
+  const handleFriendActivityToggle = async (next: boolean) => {
+    if (!push.enabled && next) return;
+    setFriendActivityOptIn(next);
+    setFriendBusy(true);
+    try {
+      if (!isLocalProfile && supabase) {
+        const { error } = await supabase
+          .from('profiles')
+          .update({ friend_activity_opt_in: next })
+          .eq('id', user.id);
+        if (error) throw error;
+      }
+      onUpdateUser({ ...user, friendActivityOptIn: next });
+    } catch (err) {
+      console.warn('[GeneralSettings] friend_activity_opt_in update failed', err);
+      setFriendActivityOptIn(!next);
+      setStatusMsg({
+        text: 'Could not update friend activity preference. Try again.',
+        mode: 'error',
+      });
+    } finally {
+      setFriendBusy(false);
     }
   };
 
@@ -578,6 +625,15 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ user, onUpdate
               <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500 peer-disabled:opacity-40"></div>
             </label>
           </div>
+
+          <FriendActivityToggle
+            enabled={friendActivityOptIn}
+            globalNotificationsEnabled={push.enabled}
+            busy={friendBusy || prefsLoading}
+            onChange={(next) => {
+              void handleFriendActivityToggle(next);
+            }}
+          />
         </div>
 
         <div className="bg-slate-950/40 p-5 rounded-2xl border border-slate-800/80 space-y-4">

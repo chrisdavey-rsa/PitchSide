@@ -146,13 +146,13 @@ export function useSupabaseRealtime(
                     row.points_won != null
                       ? Number(row.points_won)
                       : existing.pointsWon ?? null,
-                  appliedPowerupId:
-                    (typeof row.applied_powerup_id === "string"
-                      ? row.applied_powerup_id
-                      : row.applied_powerup_id === null
+                  appliedChipId:
+                    (typeof row.applied_chip_id === "string"
+                      ? row.applied_chip_id
+                      : row.applied_chip_id === null
                         ? null
                         : undefined) ??
-                    existing.appliedPowerupId ??
+                    existing.appliedChipId ??
                     null,
                 },
               };

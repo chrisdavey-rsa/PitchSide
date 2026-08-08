@@ -140,7 +140,7 @@ export const MobileAccountHub: React.FC<MobileAccountHubProps> = ({
             <div className="min-w-0 flex-1">
               <span className="block text-sm font-semibold text-white">Rules &amp; Gameplay Guide</span>
               <span className="block text-[10px] text-slate-500 font-mono mt-0.5">
-                Scoring formulas, margins &amp; power-ups
+                Scoring formulas, margins &amp; chips
               </span>
             </div>
             <ChevronDown className="w-4 h-4 text-slate-600 -rotate-90 shrink-0" />

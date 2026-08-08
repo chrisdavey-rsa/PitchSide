@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -37,8 +37,11 @@ import {
   MatchCentreStatusLabel,
   MatchLiveScoreCentre,
   SportColorStrip,
+  GoldenTicketCardIcon,
   TEAM_NAME_CLASS,
   formatTeamName,
+  isGoldenTicketMatch,
+  GOLDEN_TICKET_CARD_CLASS,
 } from "../predictions/MatchCard";
 import {
   belongsInActiveFeed,
@@ -48,35 +51,35 @@ import {
   isSameLocalDay,
 } from "../../lib/matchStatus";
 import { usePersistedCompetitionFilter } from "../../hooks/usePersistedCompetitionFilter";
-import { settlePredictionWithPowerUp } from "../../utils";
+import { settlePredictionWithChip } from "../../utils";
 import LockGuessButton from "./LockGuessButton";
-import PowerUpPerimeterBeam from "./PowerUpPerimeterBeam";
+import ChipPerimeterBeam from "./ChipPerimeterBeam";
 import SportIntroModal from "../onboarding/SportIntroModal";
-import PowerUpSelector from "../predictions/PowerUpSelector";
+import ChipSelector from "../predictions/ChipSelector";
 import StickyActionPill from "../predictions/StickyActionPill";
-import PowerUpLockConfirmModal from "../predictions/PowerUpLockConfirmModal";
+import ChipLockConfirmModal from "../predictions/ChipLockConfirmModal";
 import LockConfirmModal from "../predictions/LockConfirmModal";
 import { useScrollObserver } from "../../hooks/useScrollObserver";
 import { shouldSkipLockConfirm } from "../../lib/lockConfirmPrefs";
 import {
-  dbEnsureBaselinePowerups,
+  dbEnsureBaselineChips,
   dbFetchMatchConsensus,
-  dbFetchUserPowerups,
+  dbFetchUserChips,
   type MatchConsensus,
   type PredictionEntry,
 } from "../../supabase";
 import type { FeedSportFilter } from "../predictions/PredictionsFeedFilter";
 import {
-  POWER_UP_IDS,
+  CHIP_IDS,
   buildSeasonWallet,
-  getPowerUp,
-  toPowerUpSportType,
-  type PowerUpId,
-  type UserPowerUpInstance,
-} from "../../constants/powerups";
+  getChip,
+  toChipSportType,
+  type ChipId,
+  type UserChipInstance,
+} from "../../constants/chips";
 
-/** Perimeter accent colours matching each Power-Up chip. */
-const POWERUP_RING_COLOR: Record<PowerUpId, string> = {
+/** Perimeter accent colours matching each chip. */
+const CHIP_RING_COLOR: Record<ChipId, string> = {
   double_bubble: "#38bdf8",
   safety_net: "#34d399",
   sniper: "#fb7185",
@@ -111,9 +114,11 @@ interface MatchPredictorProps {
   onFeatureSeen: (featureKey: SeenFeatureKey) => void | Promise<unknown>;
   onScoreChange: (matchId: string, side: "home" | "away", val: string) => void;
   onRugbyPredictionChange: (matchId: string, winner: "home" | "away" | "draw" | null, marginStr: string) => void;
-  onSubmitPrediction: (matchId: string, powerupInstanceId?: string | null) => void;
-  /** Needed to load / consume season power-up inventory. */
+  onSubmitPrediction: (matchId: string, chipInstanceId?: string | null) => void;
+  /** Needed to load / consume season chip inventory. */
   userId?: string;
+  /** profiles.golden_tickets — enables God Mode consensus. */
+  goldenTickets?: number;
   /** Skip competition picker — show continuous multi-sport feed. */
   unifiedFeed?: boolean;
   feedSportFilter?: FeedSportFilter;
@@ -168,6 +173,7 @@ export default function MatchPredictor({
   onRugbyPredictionChange,
   onSubmitPrediction,
   userId,
+  goldenTickets = 0,
   unifiedFeed = false,
   feedSportFilter = "all",
   matchesLoading = false,
@@ -218,31 +224,31 @@ export default function MatchPredictor({
   useBodyScrollLock(!!introSport);
   useOverlayHistory(!!introSport, dismissIntro, "sport-intro");
 
-  const powerUpSport = toPowerUpSportType(selectedSport);
+  const chipSport = toChipSportType(selectedSport);
   const sportSeasonId = selectedCompId || selectedCompetition?.id || "season";
 
-  const { data: powerupRows = [] } = useQuery({
-    queryKey: ["userPowerups", userId, powerUpSport],
-    enabled: !!userId && !!powerUpSport,
+  const { data: chipRows = [] } = useQuery({
+    queryKey: ["userChips", userId, chipSport],
+    enabled: !!userId && !!chipSport,
     queryFn: async () => {
       if (!userId) return [];
-      await dbEnsureBaselinePowerups(userId);
-      return dbFetchUserPowerups(userId, powerUpSport);
+      await dbEnsureBaselineChips(userId);
+      return dbFetchUserChips(userId, chipSport);
     },
     staleTime: 30_000,
   });
 
   const wallet = useMemo(() => {
     const defaults = buildSeasonWallet({
-      sportType: powerUpSport,
+      sportType: chipSport,
       sportSeasonId,
       seasonIsActive: true,
     });
 
-    const byType = new Map<PowerUpId, (typeof powerupRows)[number]>();
-    for (const row of powerupRows) {
-      const type = row.powerup_type as PowerUpId;
-      if (!POWER_UP_IDS.includes(type)) continue;
+    const byType = new Map<ChipId, (typeof chipRows)[number]>();
+    for (const row of chipRows) {
+      const type = row.chip_type as ChipId;
+      if (!CHIP_IDS.includes(type)) continue;
       const existing = byType.get(type);
       // Prefer available over used/expired for the chip face.
       if (
@@ -253,8 +259,8 @@ export default function MatchPredictor({
       }
     }
 
-    return defaults.map((chip): UserPowerUpInstance => {
-      const row = byType.get(chip.powerUpId);
+    return defaults.map((chip): UserChipInstance => {
+      const row = byType.get(chip.chipId);
       if (!row) return chip;
 
       const status =
@@ -275,16 +281,16 @@ export default function MatchPredictor({
           row.status === "available" ? undefined : chip.progressHint,
       };
     });
-  }, [powerUpSport, sportSeasonId, powerupRows]);
+  }, [chipSport, sportSeasonId, chipRows]);
 
   /** Chip selected and waiting for a fixture tap. */
-  const [assigningPowerUpId, setAssigningPowerUpId] = useState<PowerUpId | null>(null);
-  /** matchId → user_powerups.id (uuid) */
+  const [assigningChipId, setAssigningChipId] = useState<ChipId | null>(null);
+  /** matchId → user_chips.id (uuid) */
   const [armedInstanceByMatch, setArmedInstanceByMatch] = useState<
     Record<string, string>
   >({});
 
-  const isAssigningPowerUp = assigningPowerUpId !== null;
+  const isAssigningChip = assigningChipId !== null;
 
   const hasOpenFixtures = useMemo(
     () =>
@@ -299,8 +305,8 @@ export default function MatchPredictor({
 
   const [pendingLock, setPendingLock] = useState<{
     matchId: string;
-    powerupInstanceId: string;
-    powerUpId: PowerUpId;
+    chipInstanceId: string;
+    chipId: ChipId;
     fixtureLabel: string;
   } | null>(null);
 
@@ -400,25 +406,25 @@ export default function MatchPredictor({
     },
   });
 
-  const assignedPowerUpIds = useMemo(() => {
-    const ids: PowerUpId[] = [];
+  const assignedChipIds = useMemo(() => {
+    const ids: ChipId[] = [];
     for (const instanceId of Object.values(armedInstanceByMatch)) {
       const chip = wallet.find((w) => w.instanceId === instanceId);
-      if (chip) ids.push(chip.powerUpId);
+      if (chip) ids.push(chip.chipId);
     }
     return ids;
   }, [armedInstanceByMatch, wallet]);
 
-  /** Sentinel for sticky pill — competitions + main Power-Ups bar. */
+  /** Sentinel for sticky pill — competitions + main Chips bar. */
   const [topControlsEl, setTopControlsEl] = useState<HTMLElement | null>(null);
   const isScrolledPastTop = useScrollObserver(topControlsEl);
 
-  const handlePowerUpSelect = useCallback(
-    (powerUpId: PowerUpId) => {
+  const handleChipSelect = useCallback(
+    (chipId: ChipId) => {
       if (!hasOpenFixtures) return;
       const instance = wallet.find(
         (w) =>
-          w.powerUpId === powerUpId &&
+          w.chipId === chipId &&
           w.status === "available" &&
           w.unlocked,
       );
@@ -433,26 +439,26 @@ export default function MatchPredictor({
           delete next[assignedMatchId];
           return next;
         });
-        setAssigningPowerUpId(null);
+        setAssigningChipId(null);
         return;
       }
 
-      setAssigningPowerUpId((cur) => (cur === powerUpId ? null : powerUpId));
+      setAssigningChipId((cur) => (cur === chipId ? null : chipId));
     },
     [armedInstanceByMatch, hasOpenFixtures, wallet],
   );
 
-  const assignPowerUpToMatch = useCallback(
+  const assignChipToMatch = useCallback(
     (matchId: string) => {
-      if (!assigningPowerUpId) return;
+      if (!assigningChipId) return;
       const instance = wallet.find(
         (w) =>
-          w.powerUpId === assigningPowerUpId &&
+          w.chipId === assigningChipId &&
           w.status === "available" &&
           w.unlocked,
       );
       if (!instance) {
-        setAssigningPowerUpId(null);
+        setAssigningChipId(null);
         return;
       }
 
@@ -469,9 +475,9 @@ export default function MatchPredictor({
         next[matchId] = instance.instanceId;
         return next;
       });
-      setAssigningPowerUpId(null);
+      setAssigningChipId(null);
     },
-    [assigningPowerUpId, wallet],
+    [assigningChipId, wallet],
   );
 
   return (
@@ -485,12 +491,12 @@ export default function MatchPredictor({
       {selectedSport && (unifiedFeed || selectedCompId) && (
         <StickyActionPill
           visible={isScrolledPastTop}
-          sportType={powerUpSport}
+          sportType={chipSport}
           instances={wallet}
-          assigningPowerUpId={assigningPowerUpId}
-          assignedPowerUpIds={assignedPowerUpIds}
+          assigningChipId={assigningChipId}
+          assignedChipIds={assignedChipIds}
           hasOpenFixtures={hasOpenFixtures}
-          onSelectPowerUp={handlePowerUpSelect}
+          onSelectChip={handleChipSelect}
         />
       )}
 
@@ -600,17 +606,17 @@ export default function MatchPredictor({
 
               {(unifiedFeed || (selectedCompId && filteredCompetitions.length > 0)) && (
                 <div className={unifiedFeed ? "" : "mt-6 pt-5 border-t border-slate-800"}>
-                  <PowerUpSelector
-                    sportType={powerUpSport}
+                  <ChipSelector
+                    sportType={chipSport}
                     instances={wallet}
-                    assigningPowerUpId={assigningPowerUpId}
-                    assignedPowerUpIds={assignedPowerUpIds}
+                    assigningChipId={assigningChipId}
+                    assignedChipIds={assignedChipIds}
                     hasOpenFixtures={hasOpenFixtures}
-                    onSelect={handlePowerUpSelect}
+                    onSelect={handleChipSelect}
                   />
                   {unifiedFeed && feedSportFilter === "all" && (
                     <p className="mt-1.5 text-[9px] text-slate-600 font-mono px-0.5">
-                      Power-Ups shown for{" "}
+                      Chips shown for{" "}
                       {selectedSport === SportType.RUGBY ? "Rugby" : "Football"}{" "}
                       — filter by sport to switch the chip wallet.
                     </p>
@@ -621,7 +627,7 @@ export default function MatchPredictor({
 
               {(unifiedFeed || (selectedCompId && filteredCompetitions.length > 0)) && (
                 <div className="mt-4 space-y-4">
-                  {isAssigningPowerUp && (
+                  {isAssigningChip && (
                     <div
                       role="status"
                       className="sticky top-2 z-20 rounded-xl border border-violet-500/40 bg-violet-950/90 px-3 py-2.5 text-center shadow-lg shadow-violet-950/40 backdrop-blur-md"
@@ -631,7 +637,7 @@ export default function MatchPredictor({
                       </p>
                       <button
                         type="button"
-                        onClick={() => setAssigningPowerUpId(null)}
+                        onClick={() => setAssigningChipId(null)}
                         className="mt-1.5 text-[9px] font-mono uppercase tracking-wider text-violet-300/80 hover:text-white cursor-pointer"
                       >
                         Cancel
@@ -695,24 +701,24 @@ export default function MatchPredictor({
                                   match.homeScore ?? match.provisionalHomeScore;
                                 const finalAway =
                                   match.awayScore ?? match.provisionalAwayScore;
-                                const historyPowerUp =
-                                  pred?.appliedPowerupId
+                                const historyChip =
+                                  pred?.appliedChipId
                                     ? wallet.find(
                                         (w) =>
-                                          w.instanceId === pred.appliedPowerupId,
-                                      )?.powerUpId
+                                          w.instanceId === pred.appliedChipId,
+                                      )?.chipId
                                     : undefined;
                                 const points =
                                   pred?.submitted &&
                                   finalHome != null &&
                                   finalAway != null
-                                    ? settlePredictionWithPowerUp(
+                                    ? settlePredictionWithChip(
                                         match.sport,
                                         pred.home,
                                         pred.away,
                                         finalHome,
                                         finalAway,
-                                        historyPowerUp ?? null,
+                                        historyChip ?? null,
                                       ).earnedPoints
                                     : pred?.provisionalPoints;
                                 return (
@@ -821,6 +827,12 @@ export default function MatchPredictor({
                           match.id,
                         );
                         const isSubmitted = savedPred.submitted;
+                        const hasMadePick = isSubmitted === true;
+                        const canViewConsensus =
+                          hasMadePick || Number(goldenTickets) > 0;
+                        const godModeConsensus =
+                          canViewConsensus && !hasMadePick;
+                        const isGoldenTicket = isGoldenTicketMatch(match);
                         const homeLeading = (savedPred.home || 0) > (savedPred.away || 0);
                         const awayLeading = (savedPred.away || 0) > (savedPred.home || 0);
                         const isDrawPick =
@@ -854,9 +866,9 @@ export default function MatchPredictor({
                           (armedInstanceId
                             ? wallet.find((w) => w.instanceId === armedInstanceId)
                             : undefined) ||
-                          (savedPred.appliedPowerupId
+                          (savedPred.appliedChipId
                             ? wallet.find(
-                                (w) => w.instanceId === savedPred.appliedPowerupId,
+                                (w) => w.instanceId === savedPred.appliedChipId,
                               )
                             : undefined);
                         const settledPoints =
@@ -864,13 +876,13 @@ export default function MatchPredictor({
                           isSubmitted &&
                           (match.homeScore != null || resultHome != null) &&
                           (match.awayScore != null || resultAway != null)
-                            ? settlePredictionWithPowerUp(
+                            ? settlePredictionWithChip(
                                 match.sport,
                                 savedPred.home,
                                 savedPred.away,
                                 match.homeScore ?? resultHome ?? 0,
                                 match.awayScore ?? resultAway ?? 0,
-                                poweredChip?.powerUpId ?? null,
+                                poweredChip?.chipId ?? null,
                               ).earnedPoints
                             : null;
                         const asItStandsPoints =
@@ -878,13 +890,13 @@ export default function MatchPredictor({
                           isSubmitted &&
                           liveHome != null &&
                           liveAway != null
-                            ? settlePredictionWithPowerUp(
+                            ? settlePredictionWithChip(
                                 match.sport,
                                 savedPred.home,
                                 savedPred.away,
                                 liveHome,
                                 liveAway,
-                                poweredChip?.powerUpId ?? null,
+                                poweredChip?.chipId ?? null,
                               ).earnedPoints
                             : savedPred.provisionalPoints ?? 0;
                         const displayResultPoints =
@@ -896,36 +908,36 @@ export default function MatchPredictor({
 
                         const assignedInstanceId =
                           armedInstanceByMatch[match.id] ??
-                          savedPred.appliedPowerupId ??
+                          savedPred.appliedChipId ??
                           null;
                         const assignedChip = assignedInstanceId
                           ? wallet.find((w) => w.instanceId === assignedInstanceId)
                           : undefined;
-                        const appliedPowerupRow = savedPred.appliedPowerupId
-                          ? powerupRows.find(
-                              (r) => r.id === savedPred.appliedPowerupId,
+                        const appliedChipRow = savedPred.appliedChipId
+                          ? chipRows.find(
+                              (r) => r.id === savedPred.appliedChipId,
                             )
-                          : powerupRows.find(
+                          : chipRows.find(
                               (r) =>
                                 r.applied_fixture_id === match.id &&
                                 r.status === "used",
                             );
-                        const assignedPowerUpId =
-                          (assignedChip?.powerUpId as PowerUpId | undefined) ??
-                          (appliedPowerupRow?.powerup_type &&
-                          POWER_UP_IDS.includes(
-                            appliedPowerupRow.powerup_type as PowerUpId,
+                        const assignedChipId =
+                          (assignedChip?.chipId as ChipId | undefined) ??
+                          (appliedChipRow?.chip_type &&
+                          CHIP_IDS.includes(
+                            appliedChipRow.chip_type as ChipId,
                           )
-                            ? (appliedPowerupRow.powerup_type as PowerUpId)
+                            ? (appliedChipRow.chip_type as ChipId)
                             : null);
-                        const hasPowerUpAssigned = Boolean(assignedPowerUpId);
-                        const ringColor = assignedPowerUpId
-                          ? POWERUP_RING_COLOR[assignedPowerUpId]
+                        const hasChipAssigned = Boolean(assignedChipId);
+                        const ringColor = assignedChipId
+                          ? CHIP_RING_COLOR[assignedChipId]
                           : undefined;
-                        const powerUpDef = assignedPowerUpId
-                          ? getPowerUp(assignedPowerUpId)
+                        const chipDef = assignedChipId
+                          ? getChip(assignedChipId)
                           : undefined;
-                        const PowerUpBadgeIcon = powerUpDef?.icon;
+                        const ChipBadgeIcon = chipDef?.icon;
 
                         const lockControl = !isEmailVerified ? (
                           <div
@@ -973,17 +985,17 @@ export default function MatchPredictor({
                             submitted={false}
                             onClick={() => {
                               const fixtureLabel = `${formatTeamName(match.homeTeam)} v ${formatTeamName(match.awayTeam)}`;
-                              const powerupId =
+                              const chipId =
                                 armedInstanceByMatch[match.id] ?? null;
-                              if (powerupId) {
+                              if (chipId) {
                                 const chip = wallet.find(
-                                  (w) => w.instanceId === powerupId,
+                                  (w) => w.instanceId === chipId,
                                 );
                                 if (chip) {
                                   setPendingLock({
                                     matchId: match.id,
-                                    powerupInstanceId: powerupId,
-                                    powerUpId: chip.powerUpId,
+                                    chipInstanceId: chipId,
+                                    chipId: chip.chipId,
                                     fixtureLabel,
                                   });
                                   return;
@@ -1046,15 +1058,15 @@ export default function MatchPredictor({
                               </div>
                             )}
                             <div
-                              role={isAssigningPowerUp && !isLocked ? "button" : undefined}
+                              role={isAssigningChip && !isLocked ? "button" : undefined}
                               tabIndex={
-                                isAssigningPowerUp && !isLocked ? 0 : undefined
+                                isAssigningChip && !isLocked ? 0 : undefined
                               }
                               onClick={(e) => {
-                                if (!isAssigningPowerUp) return;
-                                // Closed / locked fixtures cannot receive a Power-Up.
+                                if (!isAssigningChip) return;
+                                // Closed / locked fixtures cannot receive a Chip.
                                 if (isLocked) {
-                                  setAssigningPowerUpId(null);
+                                  setAssigningChipId(null);
                                   return;
                                 }
                                 const el = e.target as HTMLElement;
@@ -1065,37 +1077,39 @@ export default function MatchPredictor({
                                 ) {
                                   return;
                                 }
-                                assignPowerUpToMatch(match.id);
+                                assignChipToMatch(match.id);
                               }}
                               onKeyDown={(e) => {
                                 if (
-                                  isAssigningPowerUp &&
+                                  isAssigningChip &&
                                   !isLocked &&
                                   (e.key === "Enter" || e.key === " ")
                                 ) {
                                   e.preventDefault();
-                                  assignPowerUpToMatch(match.id);
+                                  assignChipToMatch(match.id);
                                 }
                               }}
                               style={
-                                hasPowerUpAssigned && ringColor
+                                hasChipAssigned && ringColor
                                   ? ({
-                                      "--powerup-ring-color": ringColor,
+                                      "--chip-ring-color": ringColor,
                                     } as React.CSSProperties)
                                   : undefined
                               }
                               className={`relative overflow-hidden pl-4 pr-2.5 pt-2.5 sm:pl-5 sm:pr-4 sm:pt-3 rounded-xl border transition-all w-full h-auto ${
                                 finishedToday ? "pb-3 sm:pb-3 " : "pb-5 sm:pb-5 "
                               }${
-                                hasPowerUpAssigned ? "powerup-assigned-ring " : ""
+                                hasChipAssigned ? "chip-assigned-ring " : ""
                               }${
-                                isLive
+                                isGoldenTicket
+                                  ? `${GOLDEN_TICKET_CARD_CLASS} `
+                                  : isLive
                                   ? "border-rose-500/40 bg-slate-900 shadow-[0_0_24px_rgba(244,63,94,0.08)]"
                                   : finishedToday
                                   ? "border-emerald-500/25 bg-slate-900"
-                                  : isAssigningPowerUp && !isLocked
+                                  : isAssigningChip && !isLocked
                                   ? "border-violet-500/60 bg-slate-900 ring-1 ring-violet-400/40 cursor-pointer"
-                                  : hasPowerUpAssigned
+                                  : hasChipAssigned
                                   ? "bg-slate-900"
                                   : pickState === "saved"
                                   ? "border-sky-500/50 bg-slate-900 shadow-[0_0_16px_rgba(14,165,233,0.1)]"
@@ -1110,34 +1124,37 @@ export default function MatchPredictor({
                                   : "bg-slate-900/40 border-slate-800/40"
                               }`}
                             >
-                              {hasPowerUpAssigned && ringColor && (
-                                <PowerUpPerimeterBeam color={ringColor} />
+                              {hasChipAssigned && ringColor && (
+                                <ChipPerimeterBeam color={ringColor} />
                               )}
 
-                              {hasPowerUpAssigned && powerUpDef && (
+                              {hasChipAssigned && chipDef && (
                                 <div
                                   className="absolute top-2 right-2 z-[3] pointer-events-none"
-                                  title={powerUpDef.name}
-                                  aria-label={`${powerUpDef.name} applied`}
+                                  title={chipDef.name}
+                                  aria-label={`${chipDef.name} applied`}
                                 >
                                   <span
-                                    className={`inline-flex h-6 w-6 items-center justify-center rounded-md border shadow-sm ${powerUpDef.theme.border} ${powerUpDef.theme.bg} ${powerUpDef.theme.iconText}`}
+                                    className={`inline-flex h-6 w-6 items-center justify-center rounded-md border shadow-sm ${chipDef.theme.border} ${chipDef.theme.bg} ${chipDef.theme.iconText}`}
                                     style={{
                                       boxShadow: `0 0 10px ${ringColor}33`,
                                     }}
                                   >
-                                    {assignedPowerUpId === "double_bubble" ? (
+                                    {assignedChipId === "double_bubble" ? (
                                       <span className="font-display font-black text-[9px] leading-none tracking-tighter">
                                         2×
                                       </span>
-                                    ) : PowerUpBadgeIcon ? (
-                                      <PowerUpBadgeIcon className="h-3 w-3" />
+                                    ) : ChipBadgeIcon ? (
+                                      <ChipBadgeIcon className="h-3 w-3" />
                                     ) : null}
                                   </span>
                                 </div>
                               )}
 
-                              <SportColorStrip sport={String(match.sport)} />
+                              <SportColorStrip
+                                sport={String(match.sport)}
+                                isGoldenTicket={isGoldenTicket}
+                              />
 
                               {/* Bottom-corner meta: kick-off left, status right — shared size. */}
                               <div className="absolute bottom-2 left-3 z-[1] pointer-events-none flex items-center">
@@ -1260,18 +1277,23 @@ export default function MatchPredictor({
                                       </button>
                                       )}
                                     </div>
-                                    <h5
-                                      className={`mt-1 ${TEAM_NAME_CLASS} ${
-                                        showActiveGreen && homeLeading
-                                          ? "text-emerald-400"
-                                          : showActiveGreen && isDrawPick
-                                            ? "text-emerald-300/80"
-                                            : "text-white"
-                                      }`}
-                                      title={match.homeTeam}
-                                    >
-                                      {formatTeamName(match.homeTeam)}
-                                    </h5>
+                                    <div className="relative mt-1 flex w-full items-center justify-center">
+                                      {isGoldenTicket ? (
+                                        <GoldenTicketCardIcon className="left-0 sm:left-1" />
+                                      ) : null}
+                                      <h5
+                                        className={`${TEAM_NAME_CLASS} ${
+                                          showActiveGreen && homeLeading
+                                            ? "text-emerald-400"
+                                            : showActiveGreen && isDrawPick
+                                              ? "text-emerald-300/80"
+                                              : "text-white"
+                                        }`}
+                                        title={match.homeTeam}
+                                      >
+                                        {formatTeamName(match.homeTeam)}
+                                      </h5>
+                                    </div>
                                   </div>
 
                                   <div className="min-w-0 flex flex-col items-center justify-center text-center gap-1 px-1 pt-2">
@@ -1392,44 +1414,49 @@ export default function MatchPredictor({
                                     }`}
                                   >
                                     <div className="min-w-0 flex flex-col items-center text-center">
-                                      <button
-                                        type="button"
-                                        disabled={isLocked}
-                                        onClick={() => {
-                                          const currentMargin =
-                                            Math.abs(
-                                              (savedPred.home || 0) -
-                                                (savedPred.away || 0),
-                                            ) || 1;
-                                          onRugbyPredictionChange(
-                                            match.id,
-                                            "home",
-                                            currentMargin.toString(),
-                                          );
-                                        }}
-                                        className={`w-full flex items-center justify-center bg-slate-950 px-1.5 py-1 rounded-xl border transition-all select-none min-w-0 ${
-                                          isLocked
-                                            ? "cursor-default border-slate-700/80"
-                                            : "cursor-pointer"
-                                        } ${
-                                          homeLeading
-                                            ? "border-emerald-500/40 bg-emerald-500/10"
-                                            : "border-slate-800 hover:border-emerald-500/40"
-                                        }`}
-                                      >
-                                        <span
-                                          className={`${TEAM_NAME_CLASS} ${
+                                      <div className="relative w-full flex items-center justify-center">
+                                        {isGoldenTicket ? (
+                                          <GoldenTicketCardIcon className="left-0 sm:left-1" />
+                                        ) : null}
+                                        <button
+                                          type="button"
+                                          disabled={isLocked}
+                                          onClick={() => {
+                                            const currentMargin =
+                                              Math.abs(
+                                                (savedPred.home || 0) -
+                                                  (savedPred.away || 0),
+                                              ) || 1;
+                                            onRugbyPredictionChange(
+                                              match.id,
+                                              "home",
+                                              currentMargin.toString(),
+                                            );
+                                          }}
+                                          className={`w-full flex items-center justify-center bg-slate-950 px-1.5 py-1 rounded-xl border transition-all select-none min-w-0 ${
+                                            isLocked
+                                              ? "cursor-default border-slate-700/80"
+                                              : "cursor-pointer"
+                                          } ${
                                             homeLeading
-                                              ? "text-emerald-400"
-                                              : showActiveGreen && isDrawPick
-                                                ? "text-emerald-300/80"
-                                                : "text-white"
+                                              ? "border-emerald-500/40 bg-emerald-500/10"
+                                              : "border-slate-800 hover:border-emerald-500/40"
                                           }`}
-                                          title={match.homeTeam}
                                         >
-                                          {formatTeamName(match.homeTeam)}
-                                        </span>
-                                      </button>
+                                          <span
+                                            className={`${TEAM_NAME_CLASS} ${
+                                              homeLeading
+                                                ? "text-emerald-400"
+                                                : showActiveGreen && isDrawPick
+                                                  ? "text-emerald-300/80"
+                                                  : "text-white"
+                                            }`}
+                                            title={match.homeTeam}
+                                          >
+                                            {formatTeamName(match.homeTeam)}
+                                          </span>
+                                        </button>
+                                      </div>
                                     </div>
 
                                     <div className="min-w-0 flex flex-col items-center justify-center text-center gap-1 px-1 pt-2">
@@ -1602,14 +1629,20 @@ export default function MatchPredictor({
                               )}
                               </div>
 
-                            {/* Consensus: hide on finished fixtures to shrink the card */}
-                            {isSubmitted && !isFinished && (
+                            {/* Consensus: hide on finished fixtures to shrink the card.
+                                God Mode (golden ticket holders) can view before locking a pick. */}
+                            {canViewConsensus && !isFinished && (
                               <div className="mt-2.5 border-t border-slate-800/60 pt-2 overflow-hidden">
-                                <div className="flex items-center justify-center gap-1.5">
+                                <div className="flex items-center justify-center gap-1.5 flex-wrap">
                                   <Users className="h-3.5 w-3.5 text-slate-600" />
                                   <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-slate-500">
                                     Community Consensus
                                   </span>
+                                  {godModeConsensus ? (
+                                    <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-yellow-400">
+                                      God Mode Active
+                                    </span>
+                                  ) : null}
                                 </div>
                                 {consensus &&
                                 consensus.total >= CONSENSUS_THRESHOLD ? (
@@ -1669,22 +1702,22 @@ export default function MatchPredictor({
       )}
 
       {pendingLock && (
-        <PowerUpLockConfirmModal
+        <ChipLockConfirmModal
           open
-          powerUpId={pendingLock.powerUpId}
+          chipId={pendingLock.chipId}
           fixtureLabel={pendingLock.fixtureLabel}
           onCancel={() => setPendingLock(null)}
           onConfirm={() => {
-            const { matchId, powerupInstanceId } = pendingLock;
+            const { matchId, chipInstanceId } = pendingLock;
             setPendingLock(null);
-            onSubmitPrediction(matchId, powerupInstanceId);
+            onSubmitPrediction(matchId, chipInstanceId);
             setArmedInstanceByMatch((prev) => {
               const next = { ...prev };
               delete next[matchId];
               return next;
             });
             void queryClient.invalidateQueries({
-              queryKey: ["userPowerups", userId, powerUpSport],
+              queryKey: ["userChips", userId, chipSport],
             });
           }}
         />

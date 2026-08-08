@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { LogOut } from 'lucide-react';
-import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
+import AppModalShell from './modals/AppModalShell';
 
 interface LogoutConfirmModalProps {
   open: boolean;
@@ -17,8 +17,6 @@ export default function LogoutConfirmModal({
   onCancel,
   onConfirm,
 }: LogoutConfirmModalProps) {
-  useBodyScrollLock(open);
-
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -31,50 +29,49 @@ export default function LogoutConfirmModal({
   if (!open) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
+    <AppModalShell
+      open={open}
+      onClose={onCancel}
+      zClass="z-[200]"
+      maxWidthClass="max-w-sm"
       aria-labelledby="logout-confirm-title"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
-      }}
+      panelClassName="rounded-2xl border border-slate-700/80 bg-slate-900 shadow-2xl"
     >
-      <div className="w-full max-w-sm rounded-2xl border border-slate-700/80 bg-slate-900 shadow-2xl p-6 space-y-5">
-        <div className="flex flex-col items-center text-center gap-3">
-          <div className="w-12 h-12 rounded-full bg-red-500/10 border border-red-500/25 flex items-center justify-center">
+      <div className="p-4 sm:p-6 space-y-4 sm:space-y-5">
+        <div className="flex flex-col items-center text-center gap-2 sm:gap-3">
+          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-red-500/10 border border-red-500/25 flex items-center justify-center">
             <LogOut className="w-5 h-5 text-red-400" />
           </div>
           <div>
             <h3
               id="logout-confirm-title"
-              className="text-base font-bold font-display text-white tracking-wide"
+              className="text-sm sm:text-base font-bold font-display text-white tracking-wide"
             >
-              Log out of PitchSide?
+              Sign out of PitchSide?
             </h3>
-            <p className="mt-1.5 text-sm text-slate-400 font-sans leading-relaxed">
-              Are you sure you want to log out?
+            <p className="mt-1.5 text-xs sm:text-sm text-slate-400 font-sans leading-relaxed">
+              You can sign back in anytime to manage your predictions.
             </p>
           </div>
         </div>
 
-        <div className="flex flex-col gap-2.5">
+        <div className="flex flex-col gap-2 sm:gap-2.5">
           <button
             type="button"
             onClick={onConfirm}
-            className="w-full py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-sm font-display cursor-pointer"
+            className="w-full py-2.5 sm:py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-sm font-display cursor-pointer touch-manipulation"
           >
-            Log out
+            Sign out
           </button>
           <button
             type="button"
             onClick={onCancel}
-            className="w-full py-3 rounded-xl border border-slate-700 bg-slate-950/60 hover:bg-slate-800 text-slate-300 hover:text-white font-semibold text-sm font-mono uppercase tracking-wider cursor-pointer"
+            className="w-full py-2.5 sm:py-3 rounded-xl border border-slate-700 bg-slate-950/60 hover:bg-slate-800 text-slate-300 hover:text-white font-semibold text-sm font-mono uppercase tracking-wider cursor-pointer touch-manipulation"
           >
             Cancel
           </button>
         </div>
       </div>
-    </div>
+    </AppModalShell>
   );
 }

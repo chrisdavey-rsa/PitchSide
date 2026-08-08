@@ -133,7 +133,7 @@ function extractFinalScores(sport: Sport, item: any): FinalScores | null {
     : extractRugbyFinalScores(item);
 }
 
-type PowerUpType =
+type ChipType =
   | "double_bubble"
   | "safety_net"
   | "sniper"
@@ -216,9 +216,9 @@ function calculateBasePoints(
     : calculateRugbyPoints(predictedHome, predictedAway, actualHome, actualAway);
 }
 
-function applyPowerUp(
+function applyChip(
   basePoints: number,
-  powerup: PowerUpType | null | undefined,
+  chip: ChipType | null | undefined,
   predictedHome: number,
   predictedAway: number,
   actualHome: number,
@@ -240,19 +240,19 @@ function applyPowerUp(
   const outcomeCorrect = predictedWinner === actualWinner;
   const isExact = predictedHome === actualHome && predictedAway === actualAway;
 
-  if (powerup === "banker") {
+  if (chip === "banker") {
     if (outcomeCorrect) {
       points = EXACT_SCORE_POINTS;
       isBankerExact = true;
     }
-  } else if (powerup === "sniper" && isExact) {
+  } else if (chip === "sniper" && isExact) {
     points = Math.round(points * 1.5);
   }
 
-  if (powerup === "double_bubble") points *= 2;
-  else if (powerup === "pitchside_master") points *= 3;
+  if (chip === "double_bubble") points *= 2;
+  else if (chip === "pitchside_master") points *= 3;
 
-  if (powerup === "safety_net" && points === 0) points = SAFETY_FLOOR;
+  if (chip === "safety_net" && points === 0) points = SAFETY_FLOOR;
 
   return { points, isBankerExact };
 }
@@ -436,7 +436,7 @@ Deno.serve(async (req: Request) => {
   for (const match of completed) {
     const { data: existing, error: fetchErr } = await supabase
       .from("matches")
-      .select("id, base_multiplier")
+      .select("id, base_multiplier, is_golden_ticket")
       .eq("id", match.id)
       .maybeSingle();
 
@@ -472,7 +472,7 @@ Deno.serve(async (req: Request) => {
     const { data: predictions, error: predFetchErr } = await supabase
       .from("predictions")
       .select(
-        "id, user_id, predicted_home_score, predicted_away_score, applied_powerup_id",
+        "id, user_id, predicted_home_score, predicted_away_score, applied_chip_id",
       )
       .eq("match_id", match.id);
 
@@ -481,21 +481,21 @@ Deno.serve(async (req: Request) => {
       continue;
     }
 
-    const powerupIds = [
+    const chipIds = [
       ...new Set(
         (predictions ?? [])
-          .map((p) => p.applied_powerup_id as string | null)
+          .map((p) => p.applied_chip_id as string | null)
           .filter((id): id is string => !!id),
       ),
     ];
-    const powerupTypeById = new Map<string, PowerUpType>();
-    if (powerupIds.length > 0) {
+    const chipTypeById = new Map<string, ChipType>();
+    if (chipIds.length > 0) {
       const { data: chips } = await supabase
-        .from("user_powerups")
-        .select("id, powerup_type")
-        .in("id", powerupIds);
+        .from("user_chips")
+        .select("id, chip_type")
+        .in("id", chipIds);
       for (const chip of chips ?? []) {
-        powerupTypeById.set(chip.id, chip.powerup_type as PowerUpType);
+        chipTypeById.set(chip.id, chip.chip_type as ChipType);
       }
     }
 
@@ -503,8 +503,8 @@ Deno.serve(async (req: Request) => {
     const usersToEvaluate = new Set<string>();
 
     for (const pred of predictions ?? []) {
-      const powerupType = pred.applied_powerup_id
-        ? powerupTypeById.get(pred.applied_powerup_id) ?? null
+      const chipType = pred.applied_chip_id
+        ? chipTypeById.get(pred.applied_chip_id) ?? null
         : null;
       const basePoints = calculateBasePoints(
         sport,
@@ -513,9 +513,9 @@ Deno.serve(async (req: Request) => {
         match.actual_home_score,
         match.actual_away_score,
       );
-      const powered = applyPowerUp(
+      const powered = applyChip(
         basePoints,
-        powerupType,
+        chipType,
         pred.predicted_home_score,
         pred.predicted_away_score,
         match.actual_home_score,
@@ -536,15 +536,36 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
-      if (pred.applied_powerup_id) {
+      // Golden Ticket: true Perfect Prediction on marquee fixtures (Banker excluded).
+      const isExact =
+        pred.predicted_home_score === match.actual_home_score &&
+        pred.predicted_away_score === match.actual_away_score;
+      if (
+        existing.is_golden_ticket === true &&
+        isExact &&
+        !powered.isBankerExact &&
+        pred.user_id
+      ) {
+        const { error: ticketErr } = await supabase.rpc(
+          "increment_golden_tickets",
+          { p_user_id: pred.user_id },
+        );
+        if (ticketErr) {
+          errors.push(
+            `${pred.id}: golden ticket award failed — ${ticketErr.message}`,
+          );
+        }
+      }
+
+      if (pred.applied_chip_id) {
         await supabase
-          .from("user_powerups")
+          .from("user_chips")
           .update({
             status: "used",
             used_at: new Date().toISOString(),
             applied_fixture_id: match.id,
           })
-          .eq("id", pred.applied_powerup_id)
+          .eq("id", pred.applied_chip_id)
           .eq("status", "available");
       }
 
@@ -553,7 +574,7 @@ Deno.serve(async (req: Request) => {
     }
 
     for (const userId of usersToEvaluate) {
-      await supabase.rpc("evaluate_powerup_unlocks", {
+      await supabase.rpc("evaluate_chip_unlocks", {
         p_user_id: userId,
         p_sport_type: sport,
         p_season_id: null,

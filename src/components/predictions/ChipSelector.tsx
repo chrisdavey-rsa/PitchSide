@@ -1,22 +1,22 @@
 import React, { useMemo, useState } from "react";
 import { Lock } from "lucide-react";
 import {
-  POWER_UPS,
-  getPowerUp,
-  type PowerUpId,
-  type PowerUpSportType,
-  type UserPowerUpInstance,
-} from "../../constants/powerups";
+  CHIPS,
+  getChip,
+  type ChipId,
+  type ChipSportType,
+  type UserChipInstance,
+} from "../../constants/chips";
 import { SportIcon } from "../../sports/emerging/sportIcons";
 import type { SportKey } from "../../sports/emerging/types";
 
-function sportKeyFromPowerUp(sport: PowerUpSportType): SportKey {
+function sportKeyFromChip(sport: ChipSportType): SportKey {
   if (sport === "f1") return "formula1";
   return sport;
 }
 
 /** Hard accent border color per chip (used for dashed / solid states). */
-const ACCENT_BORDER: Record<PowerUpId, string> = {
+const ACCENT_BORDER: Record<ChipId, string> = {
   double_bubble: "border-sky-400",
   safety_net: "border-emerald-400",
   sniper: "border-rose-400",
@@ -25,46 +25,46 @@ const ACCENT_BORDER: Record<PowerUpId, string> = {
 };
 
 type Props = {
-  sportType: PowerUpSportType;
-  instances: UserPowerUpInstance[];
-  /** Power-up currently waiting for a fixture tap. */
-  assigningPowerUpId?: PowerUpId | null;
-  /** Power-up types already assigned to a fixture (local state). */
-  assignedPowerUpIds?: PowerUpId[];
+  sportType: ChipSportType;
+  instances: UserChipInstance[];
+  /** Chip currently waiting for a fixture tap. */
+  assigningChipId?: ChipId | null;
+  /** Chip types already assigned to a fixture (local state). */
+  assignedChipIds?: ChipId[];
   /** False when every visible fixture is closed / locked. */
   hasOpenFixtures?: boolean;
-  /** Show the Power-Ups title / hint row (hide inside sticky dropdown). */
+  /** Show the Chips title / hint row (hide inside sticky dropdown). */
   showHeader?: boolean;
   /** Smaller chips for the sticky pill overlay. */
   isCompact?: boolean;
-  onSelect?: (powerUpId: PowerUpId) => void;
+  onSelect?: (chipId: ChipId) => void;
   className?: string;
 };
 
 /**
- * Prediction workspace power-up chip grid — 5 equal chips, dashed/solid borders.
+ * Prediction workspace chip grid — 5 equal chips, dashed/solid borders.
  */
-export default function PowerUpSelector({
+export default function ChipSelector({
   sportType,
   instances,
-  assigningPowerUpId = null,
-  assignedPowerUpIds = [],
+  assigningChipId = null,
+  assignedChipIds = [],
   hasOpenFixtures = true,
   showHeader = true,
   isCompact = false,
   onSelect,
   className = "",
 }: Props) {
-  const [tipId, setTipId] = useState<PowerUpId | null>(null);
+  const [tipId, setTipId] = useState<ChipId | null>(null);
   const byId = useMemo(() => {
-    const map = new Map<PowerUpId, UserPowerUpInstance>();
-    instances.forEach((row) => map.set(row.powerUpId, row));
+    const map = new Map<ChipId, UserChipInstance>();
+    instances.forEach((row) => map.set(row.chipId, row));
     return map;
   }, [instances]);
 
   const assignedSet = useMemo(
-    () => new Set(assignedPowerUpIds),
-    [assignedPowerUpIds],
+    () => new Set(assignedChipIds),
+    [assignedChipIds],
   );
 
   return (
@@ -72,7 +72,7 @@ export default function PowerUpSelector({
       {showHeader && (
         <div className="flex flex-col gap-0.5 px-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
           <p className="text-[10px] font-mono uppercase tracking-widest text-slate-500">
-            Power-Ups
+            Chips
           </p>
           <p className="text-[9px] font-sans normal-case tracking-normal text-slate-600">
             Tap a chip, then a fixture
@@ -85,7 +85,7 @@ export default function PowerUpSelector({
           isCompact ? "gap-1" : "gap-1.5 sm:gap-2"
         }`}
       >
-        {POWER_UPS.map((def) => {
+        {CHIPS.map((def) => {
           const instance = byId.get(def.id);
           const unlocked =
             !!instance?.unlocked &&
@@ -94,7 +94,7 @@ export default function PowerUpSelector({
             instance.status !== "consumed";
           const consumed = instance?.status === "consumed";
           const assigned = assignedSet.has(def.id);
-          const assigning = assigningPowerUpId === def.id;
+          const assigning = assigningChipId === def.id;
           const Icon = def.icon;
           const unlockTip =
             instance?.progressHint ||
@@ -180,7 +180,7 @@ export default function PowerUpSelector({
                     }`}
                   >
                     <SportIcon
-                      sport={sportKeyFromPowerUp(sportType)}
+                      sport={sportKeyFromChip(sportType)}
                       className={isCompact ? "h-2 w-2" : "h-2.5 w-2.5"}
                     />
                   </span>
@@ -238,7 +238,7 @@ export default function PowerUpSelector({
                       : unlockTip
                     : noOpenFixtures
                       ? "No open fixtures"
-                      : getPowerUp(def.id)?.tagline}
+                      : getChip(def.id)?.tagline}
                 </div>
               )}
             </div>

@@ -1,5 +1,5 @@
 /**
- * PitchSide Player Guide — sport-scoped rules + dedicated Power-Ups section.
+ * PitchSide Player Guide — sport-scoped rules + dedicated Chips section.
  * Mobile: sticky horizontal tabs. Desktop: left sidebar + content pane.
  */
 
@@ -25,14 +25,14 @@ import {
 } from "lucide-react";
 import { UserProfile } from "../types";
 import { useCommunityShieldScheduled } from "./events/CommunityShieldEvent";
-import { POWER_UPS } from "../constants/powerups";
-import PowerUpModal from "./powerups/PowerUpModal";
+import { CHIPS } from "../constants/chips";
+import ChipModal from "./chips/ChipModal";
 import HowToPredictStepper from "./predictions/HowToPredictStepper";
 import { btnClose } from "../ui";
 import { retainOverlayHistoryDuringTransition } from "../hooks/useOverlayHistory";
 
 type RulesSport = "football" | "rugby" | "formula1" | "golf";
-type RulesNavId = RulesSport | "powerups";
+type RulesNavId = RulesSport | "chips" | "golden_ticket";
 
 type NavItem = {
   id: RulesNavId;
@@ -76,13 +76,23 @@ const SPORT_NAV: NavItem[] = [
   },
 ];
 
-const POWERUPS_NAV: NavItem = {
-  id: "powerups",
-  label: "Power-Ups",
-  short: "PU",
+const CHIPS_NAV: NavItem = {
+  id: "chips",
+  label: "Chips",
+  short: "CH",
   accent: "text-violet-300 border-violet-500/30",
   activeAccent: "bg-violet-500/15 text-violet-100 border-violet-500/40",
 };
+
+const GOLDEN_TICKET_NAV: NavItem = {
+  id: "golden_ticket",
+  label: "Golden Ticket",
+  short: "GT",
+  accent: "text-yellow-300 border-yellow-500/30",
+  activeAccent: "bg-yellow-500/15 text-yellow-100 border-yellow-500/40",
+};
+
+const EXTRA_NAV_IDS: RulesNavId[] = ["chips", "golden_ticket"];
 
 interface RulesInfoProps {
   user?: UserProfile | null;
@@ -432,25 +442,25 @@ function GolfContent() {
   );
 }
 
-function PowerUpsRulesContent({ isAdmin }: { isAdmin?: boolean }) {
-  const [activePowerUp, setActivePowerUp] = useState<string | null>(null);
+function ChipsRulesContent({ isAdmin }: { isAdmin?: boolean }) {
+  const [activeChip, setActiveChip] = useState<string | null>(null);
 
   return (
     <div className="space-y-6">
       <section>
-        <SectionHeading icon={Zap} title="Power-Ups" barClass="bg-violet-400" />
+        <SectionHeading icon={Zap} title="Chips" barClass="bg-violet-400" />
         <div className="p-4 bg-slate-950/40 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed space-y-3">
           <p>
-            Power-Ups give you a strategic edge. They are earned by making consistent predictions and
+            Chips give you a strategic edge. They are earned by making consistent predictions and
             must be used before the end of that specific sport&apos;s season. Unused chips do not
             carry over to the next year.
           </p>
           <p>
-            Power-Ups apply to Football and Rugby seasons.
+            Chips apply to Football and Rugby seasons.
             {isAdmin && (
               <>
                 {" "}
-                Administrators can also preview Power-Up behaviour for Formula 1 and Golf ahead of
+                Administrators can also preview Chip behaviour for Formula 1 and Golf ahead of
                 public launch.
               </>
             )}
@@ -471,16 +481,16 @@ function PowerUpsRulesContent({ isAdmin }: { isAdmin?: boolean }) {
             </tr>
           </thead>
           <tbody>
-            {POWER_UPS.map((powerUp) => (
+            {CHIPS.map((chip) => (
               <tr
-                key={`ref-${powerUp.id}`}
+                key={`ref-${chip.id}`}
                 className="border-b border-slate-800/80 last:border-b-0"
               >
                 <td className="px-3 py-2.5 text-[11px] font-bold font-display text-slate-200 whitespace-nowrap align-top">
-                  {powerUp.name}
+                  {chip.name}
                 </td>
                 <td className="px-3 py-2.5 text-[11px] text-slate-400 font-sans leading-snug">
-                  {powerUp.tagline}
+                  {chip.tagline}
                 </td>
               </tr>
             ))}
@@ -489,30 +499,30 @@ function PowerUpsRulesContent({ isAdmin }: { isAdmin?: boolean }) {
       </div>
 
       <div className="grid grid-cols-1 gap-3">
-        {POWER_UPS.map((powerUp) => {
-          const Icon = powerUp.icon;
+        {CHIPS.map((chip) => {
+          const Icon = chip.icon;
           return (
             <button
-              key={powerUp.id}
+              key={chip.id}
               type="button"
-              onClick={() => setActivePowerUp(powerUp.id)}
+              onClick={() => setActiveChip(chip.id)}
               className={`group text-left rounded-2xl border p-4 transition-all cursor-pointer hover:brightness-110 ${
-                powerUp.isPremium
+                chip.isPremium
                   ? "border-amber-300/50 bg-linear-to-br from-amber-500/15 via-yellow-500/10 to-slate-950 shadow-[0_0_28px_rgba(251,191,36,0.2)]"
-                  : `${powerUp.theme.border} ${powerUp.theme.bg}`
+                  : `${chip.theme.border} ${chip.theme.bg}`
               }`}
             >
               <div className="flex items-start gap-3">
                 <div
                   className={`shrink-0 flex h-11 w-11 items-center justify-center rounded-xl border ${
-                    powerUp.isPremium
+                    chip.isPremium
                       ? "border-amber-200/40 bg-slate-950/70"
-                      : `${powerUp.theme.border} bg-slate-950/50`
+                      : `${chip.theme.border} bg-slate-950/50`
                   }`}
                 >
                   <Icon
                     className={`h-5 w-5 ${
-                      powerUp.isPremium ? "text-amber-200" : powerUp.theme.iconText
+                      chip.isPremium ? "text-amber-200" : chip.theme.iconText
                     }`}
                   />
                 </div>
@@ -520,30 +530,30 @@ function PowerUpsRulesContent({ isAdmin }: { isAdmin?: boolean }) {
                   <div className="flex items-center justify-between gap-2">
                     <h4
                       className={`text-xs font-bold font-display ${
-                        powerUp.isPremium ? "text-amber-100" : powerUp.theme.accentText
+                        chip.isPremium ? "text-amber-100" : chip.theme.accentText
                       }`}
                     >
-                      {powerUp.name}
+                      {chip.name}
                     </h4>
                     <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-slate-400 shrink-0" />
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5">{powerUp.tagline}</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">{chip.tagline}</p>
                   <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
                     <div className="rounded-lg border border-slate-800/80 bg-slate-950/40 px-2.5 py-2">
                       <span className="block text-[8px] font-mono uppercase tracking-widest text-slate-500 mb-1">
                         Function
                       </span>
-                      <p className="text-slate-300 leading-snug">{powerUp.gameImpact}</p>
+                      <p className="text-slate-300 leading-snug">{chip.gameImpact}</p>
                     </div>
                     <div className="rounded-lg border border-slate-800/80 bg-slate-950/40 px-2.5 py-2">
                       <span className="block text-[8px] font-mono uppercase tracking-widest text-slate-500 mb-1">
                         How earned
                       </span>
-                      <p className="text-slate-300 leading-snug">{powerUp.howToEarn}</p>
+                      <p className="text-slate-300 leading-snug">{chip.howToEarn}</p>
                     </div>
                   </div>
-                  {powerUp.notes && (
-                    <p className="mt-2 text-[9px] text-amber-200/80 leading-snug">{powerUp.notes}</p>
+                  {chip.notes && (
+                    <p className="mt-2 text-[9px] text-amber-200/80 leading-snug">{chip.notes}</p>
                   )}
                 </div>
               </div>
@@ -553,10 +563,30 @@ function PowerUpsRulesContent({ isAdmin }: { isAdmin?: boolean }) {
       </div>
 
       <AnimatePresence>
-        {activePowerUp && (
-          <PowerUpModal powerUpId={activePowerUp} onClose={() => setActivePowerUp(null)} />
+        {activeChip && (
+          <ChipModal chipId={activeChip} onClose={() => setActiveChip(null)} />
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+function GoldenTicketRulesContent() {
+  return (
+    <div className="space-y-6">
+      <section>
+        <SectionHeading icon={Ticket} title="Golden Ticket" barClass="bg-yellow-400" />
+        <div className="p-4 bg-gradient-to-r from-yellow-900/30 via-yellow-700/15 to-slate-950/40 rounded-xl border border-yellow-500/40 text-xs text-slate-300 leading-relaxed space-y-3">
+          <p>
+            The Golden Ticket is PitchSide&apos;s ultimate status symbol, awarded exclusively for
+            landing a Perfect Prediction on a marquee fixture. It is not a consumable chip. Holding
+            a Golden Ticket grants you permanent &apos;God Mode&apos; for the season, allowing you to
+            view community consensus percentages before locking in your picks. Furthermore, ticket
+            holders gain exclusive entry into &apos;The Summit&apos;, an end-of-season, high-stakes
+            prediction event where the ultimate winners are etched into the PitchSide Pantheon.
+          </p>
+        </div>
+      </section>
     </div>
   );
 }
@@ -565,7 +595,7 @@ export default function RulesInfo({ user, onClose }: RulesInfoProps) {
   const communityShieldScheduled = useCommunityShieldScheduled();
   const visibleNav = useMemo(() => {
     const sports = SPORT_NAV.filter((s) => !s.adminOnly || user?.isAdmin === true);
-    return [...sports, POWERUPS_NAV];
+    return [...sports, CHIPS_NAV, GOLDEN_TICKET_NAV];
   }, [user?.isAdmin]);
 
   const [activeNav, setActiveNav] = useState<RulesNavId>("football");
@@ -599,7 +629,7 @@ export default function RulesInfo({ user, onClose }: RulesInfoProps) {
             PitchSide Player Guide
           </h2>
           <p className="text-xs text-slate-400 font-mono">
-            HOW TO PLAY · POINTS · POWER-UPS
+            HOW TO PLAY · POINTS · CHIPS
           </p>
           <button
             type="button"
@@ -644,7 +674,7 @@ export default function RulesInfo({ user, onClose }: RulesInfoProps) {
             Sports
           </span>
           {visibleNav
-            .filter((item) => item.id !== "powerups")
+            .filter((item) => !EXTRA_NAV_IDS.includes(item.id))
             .map((item) => {
               const active = safeNav === item.id;
               return (
@@ -671,28 +701,34 @@ export default function RulesInfo({ user, onClose }: RulesInfoProps) {
             })}
 
           <span className="text-[10px] font-extrabold text-slate-500 font-mono uppercase tracking-widest px-2 mt-4 mb-2">
-            Power-Ups
+            Chips
           </span>
-          <button
-            type="button"
-            onClick={() => setActiveNav("powerups")}
-            className={`w-full text-left px-3 py-2.5 rounded-xl text-xs font-semibold font-mono flex items-center gap-2.5 border transition-all cursor-pointer ${
-              safeNav === "powerups"
-                ? POWERUPS_NAV.activeAccent
-                : "border-transparent text-slate-400 hover:bg-slate-900/50 hover:text-white"
-            }`}
-          >
-            <span
-              className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold border ${
-                safeNav === "powerups"
-                  ? "border-current/30 bg-slate-950/40"
-                  : "border-slate-700 bg-slate-900"
-              }`}
-            >
-              PU
-            </span>
-            Power-Ups
-          </button>
+          {[CHIPS_NAV, GOLDEN_TICKET_NAV].map((item) => {
+            const active = safeNav === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveNav(item.id)}
+                className={`w-full text-left px-3 py-2.5 rounded-xl text-xs font-semibold font-mono flex items-center gap-2.5 border transition-all cursor-pointer ${
+                  active
+                    ? item.activeAccent
+                    : "border-transparent text-slate-400 hover:bg-slate-900/50 hover:text-white"
+                }`}
+              >
+                <span
+                  className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold border ${
+                    active
+                      ? "border-current/30 bg-slate-950/40"
+                      : "border-slate-700 bg-slate-900"
+                  }`}
+                >
+                  {item.short}
+                </span>
+                {item.label}
+              </button>
+            );
+          })}
         </aside>
 
         <div className="flex-1 p-5 sm:p-6 overflow-y-auto max-h-[min(70vh,720px)] md:max-h-[min(75vh,780px)]">
@@ -702,9 +738,10 @@ export default function RulesInfo({ user, onClose }: RulesInfoProps) {
           {safeNav === "rugby" && <RugbyContent />}
           {safeNav === "formula1" && <Formula1Content />}
           {safeNav === "golf" && <GolfContent />}
-          {safeNav === "powerups" && <PowerUpsRulesContent isAdmin={user?.isAdmin} />}
+          {safeNav === "chips" && <ChipsRulesContent isAdmin={user?.isAdmin} />}
+          {safeNav === "golden_ticket" && <GoldenTicketRulesContent />}
 
-          {user?.isAdmin && safeNav !== "powerups" && (
+          {user?.isAdmin && safeNav !== "chips" && safeNav !== "golden_ticket" && (
             <div className="mt-8 p-5 rounded-xl border border-purple-500/30 bg-purple-950/20">
               <div className="flex items-center gap-2 mb-2">
                 <Lock className="w-5 h-5 text-purple-400" />

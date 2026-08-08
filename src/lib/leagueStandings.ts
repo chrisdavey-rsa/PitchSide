@@ -6,7 +6,7 @@
 import { Match, SportType } from "../types";
 import { BASE_SEASON_YEAR, getLatestSeason } from "../seasons";
 import { outcomeOf, settlePredictionPoints } from "../services/scoringEngine";
-import type { AppliedPowerUp } from "../services/scoringEngine";
+import type { AppliedChip } from "../services/scoringEngine";
 import { formatAccuracyPercent } from "./formatAccuracy";
 
 export type StandingsHorizon = "season" | "month" | "week";
@@ -18,10 +18,10 @@ export type LeaguePredictionRow = {
   home: number;
   away: number;
   submitted: boolean;
-  /** Settled / power-up-adjusted points from RPC (may be 0). */
+  /** Settled / chip-adjusted points from RPC (may be 0). */
   pointsWon?: number | null;
-  /** Power-up type used at settle — mirrors global leaderboard JOIN. */
-  powerupType?: AppliedPowerUp;
+  /** Chip type used at settle — mirrors global leaderboard JOIN. */
+  chipType?: AppliedChip;
 };
 
 export type LeagueStandingRow = {
@@ -82,7 +82,7 @@ function pointsForPrediction(
   }
 
   // Fallback only when payload omitted settle (legacy RPC / optimistic merge):
-  // recompute with power-up, same as global — never bare calculatePoints.
+  // recompute with chip, same as global — never bare calculatePoints.
   if (
     match &&
     match.status === "completed" &&
@@ -95,7 +95,7 @@ function pointsForPrediction(
       row.away,
       match.homeScore,
       match.awayScore,
-      row.powerupType,
+      row.chipType,
     ).earnedPoints;
   }
 

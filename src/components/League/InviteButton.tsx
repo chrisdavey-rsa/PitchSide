@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Share2, Link2, Check } from "lucide-react";
 import type { League } from "../../types";
-import { dbGetLeaguePassword } from "../../supabase";
+import { dbGetLeaguePassword, supabase } from "../../supabase";
 
 interface InviteButtonProps {
   league: League;
@@ -10,13 +10,20 @@ interface InviteButtonProps {
   className?: string;
 }
 
-/** Share URL: `/join/:leagueId?code=<password>` (password fetched via member-only RPC). */
-export function buildInviteShareUrl(leagueId: string, password: string): string {
+/** Share URL: `/join/:leagueId?code=<password>&ref=<inviterId>`. */
+export function buildInviteShareUrl(
+  leagueId: string,
+  password: string,
+  inviterId?: string | null,
+): string {
   const origin =
     typeof window !== "undefined" ? window.location.origin : "https://pitchside.app";
   const url = new URL(`${origin}/join/${encodeURIComponent(leagueId)}`);
   if (password) {
     url.searchParams.set("code", password);
+  }
+  if (inviterId?.trim()) {
+    url.searchParams.set("ref", inviterId.trim());
   }
   return url.toString();
 }
@@ -35,7 +42,12 @@ export default function InviteButton({
 
     try {
       const password = await dbGetLeaguePassword(league.id);
-      const shareUrl = buildInviteShareUrl(league.id, password);
+      let inviterId: string | null = null;
+      if (supabase) {
+        const { data } = await supabase.auth.getUser();
+        inviterId = data.user?.id ?? null;
+      }
+      const shareUrl = buildInviteShareUrl(league.id, password, inviterId);
       const payload = {
         title: "Join my PitchSide league",
         text: "Compete and predict the scores with me on PitchSide!",

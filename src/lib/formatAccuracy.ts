@@ -21,7 +21,7 @@ export function formatAccuracyPercent(value: number): string {
 }
 
 /**
- * Accuracy = (base_points / (settled_predictions × 5)) × 100 — no power-up multipliers.
+ * Accuracy = (base_points / (settled_predictions × 5)) × 100 — no chip multipliers.
  */
 export function formatAccuracyFromBasePoints(
   basePoints: number,

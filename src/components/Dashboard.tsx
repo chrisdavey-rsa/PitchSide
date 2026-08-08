@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -70,7 +70,7 @@ import { isGlobalLeague } from "../lib/leaguesConfig";
 import { calculatePoints, computeWeeklyStreak } from "../utils";
 import { formatAccuracy, safeNum } from "../supabase";
 import TopNavigation, { type DesktopMainView } from './Dashboard/TopNavigation';
-import WelcomeHeader from './Dashboard/WelcomeHeader';
+import PlayerStatsBanner from './Dashboard/PlayerStatsBanner';
 import type { LeaderboardScope } from './Dashboard/leaderboardTypes';
 import LeagueHub from './Dashboard/LeagueHub';
 import LeagueManagementPanel from './Dashboard/LeagueManagementPanel';
@@ -83,6 +83,7 @@ import OnboardingTour, { type TourStep } from './OnboardingTour';
 import CommunityShieldEvent, {
   isCommunityShieldOpen,
   isCommunityShieldScheduled,
+  findCommunityShieldMatch,
 } from './events/CommunityShieldEvent';
 import AccountPortal from './AccountPortal';
 import RulesInfo from './RulesInfo';
@@ -385,7 +386,7 @@ export default function Dashboard({
           target: "mobile-rules",
           title: "Rules",
           description:
-            "Scoring, margins, and power-ups — open any time you need a refresher.",
+            "Scoring, margins, and chips — open any time you need a refresher.",
           placement: "above",
         },
         {
@@ -488,6 +489,10 @@ export default function Dashboard({
   // the Golden Ticket section in the Rules guide.
   const communityShieldScheduled = useMemo(
     () => isCommunityShieldScheduled(allMatches),
+    [allMatches],
+  );
+  const communityShieldMatch = useMemo(
+    () => findCommunityShieldMatch(allMatches) ?? null,
     [allMatches],
   );
 
@@ -922,7 +927,7 @@ export default function Dashboard({
 
   const submitPrediction = async (
     matchId: string,
-    powerupInstanceId?: string | null,
+    chipInstanceId?: string | null,
   ) => {
     // Inputs default to 0–0 in the UI even when state has no row yet — locking
     // must still write those scores (previously `!pred` silently no-op'd).
@@ -979,7 +984,7 @@ export default function Dashboard({
         competitionId,
         homeScore,
         awayScore,
-        powerupInstanceId ?? null,
+        chipInstanceId ?? null,
       );
 
       const nextPredictions = {
@@ -1010,7 +1015,7 @@ export default function Dashboard({
         queryKey: ["completedMatches", "leagueStandings"],
       });
       queryClient.invalidateQueries({
-        queryKey: ["userPowerups", user.id],
+        queryKey: ["userChips", user.id],
       });
 
       const draft = loadOfflineDraft<OfflinePredictionDraft>(
@@ -1029,8 +1034,8 @@ export default function Dashboard({
       }
 
       triggerToast(
-        powerupInstanceId
-          ? "Prediction locked — Power-Up consumed."
+        chipInstanceId
+          ? "Prediction locked — Chip consumed."
           : "Prediction locked successfully!",
       );
     } catch (e) {
@@ -1041,7 +1046,7 @@ export default function Dashboard({
         awayScore,
         sport,
         competitionId,
-        powerupInstanceId,
+        chipInstanceId,
         error: e,
       });
       setPredictions(previousPredictions);
@@ -1682,7 +1687,7 @@ export default function Dashboard({
       ) : !isMobileLayout ? (
           /* Desktop only — never mount mobile Predictions/MatchPredictor in parallel (SportIntro / overlay fight). */
           <div className="w-full space-y-6 overflow-visible">
-            <WelcomeHeader
+            <PlayerStatsBanner
               user={user}
               userPoints={userPoints}
               accuracyPercent={accuracyPercent}
@@ -2077,6 +2082,7 @@ export default function Dashboard({
       {showShieldEvent && !showOnboarding && !showLeagues && (
         <CommunityShieldEvent
           user={user}
+          match={communityShieldMatch}
           triggerToast={triggerToast}
           onClose={dismissShieldEvent}
         />

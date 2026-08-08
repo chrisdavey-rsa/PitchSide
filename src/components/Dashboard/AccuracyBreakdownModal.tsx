@@ -180,7 +180,7 @@ export default function AccuracyBreakdownModal({
               {nickname}
             </h3>
             <p className="text-[11px] font-mono text-slate-500 mt-0.5">
-              Base points only · power-ups excluded
+              Base points only · chips excluded
             </p>
           </div>
           <button

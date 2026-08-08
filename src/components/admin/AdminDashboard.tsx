@@ -167,7 +167,7 @@ export default function AdminDashboard({ onNavigate }: AdminDashboardProps) {
             { label: 'Activation Rate', icon: Zap, color: 'text-amber-400', hint: '% of signups who cast a first prediction' },
             { label: 'Cross-Sport Players', icon: Repeat, color: 'text-blue-400', hint: 'players active in both football & rugby' },
             { label: 'Avg Prediction Accuracy', icon: Target, color: 'text-emerald-400', hint: 'mean points per settled prediction' },
-            { label: 'Power-Up Deployment Rate', icon: Activity, color: 'text-purple-400', hint: '% of wallets with an armed power-up' },
+            { label: 'Chip Deployment Rate', icon: Activity, color: 'text-purple-400', hint: '% of wallets with an armed chip' },
           ].map(({ label, icon: Icon, color, hint }) => (
             <div
               key={label}

@@ -8,7 +8,7 @@ import {
   calculateFootballPoints as engineFootballPoints,
   calculateRugbyPoints as engineRugbyPoints,
   settlePredictionPoints,
-  type AppliedPowerUp,
+  type AppliedChip,
 } from './services/scoringEngine';
 
 /**
@@ -38,8 +38,8 @@ export function calculateRugbyPoints(
 }
 
 /**
- * General scoring dispatch (base points only — no power-up modifiers).
- * Prefer settlePredictionWithPowerUp when a chip is applied.
+ * General scoring dispatch (base points only — no chip modifiers).
+ * Prefer settlePredictionWithChip when a chip is applied.
  */
 export function calculatePoints(
   sport: SportType,
@@ -54,14 +54,14 @@ export function calculatePoints(
   return calculateRugbyPoints(predictedHome, predictedAway, actualHome, actualAway);
 }
 
-/** Full settlement including power-up overrides (mirrors pitchside_settle_prediction_points). */
-export function settlePredictionWithPowerUp(
+/** Full settlement including chip overrides (mirrors pitchside_settle_prediction_points). */
+export function settlePredictionWithChip(
   sport: SportType,
   predictedHome: number,
   predictedAway: number,
   actualHome: number,
   actualAway: number,
-  appliedPowerup?: AppliedPowerUp,
+  appliedChip?: AppliedChip,
 ): { earnedPoints: number; isBankerExact: boolean; basePoints: number } {
   return settlePredictionPoints(
     sport,
@@ -69,7 +69,7 @@ export function settlePredictionWithPowerUp(
     predictedAway,
     actualHome,
     actualAway,
-    appliedPowerup,
+    appliedChip,
   );
 }
 

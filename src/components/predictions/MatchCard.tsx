@@ -3,6 +3,7 @@
  * Competition context lives in feed sub-headers (not in-card).
  */
 import React from "react";
+import { Ticket } from "lucide-react";
 import CompetitionFlag from "./CompetitionFlag";
 import type { SportKey } from "../../sports/emerging/types";
 import { getCompetitionTitle } from "../../constants/competitions";
@@ -10,6 +11,24 @@ import { displayTeamName } from "../../lib/teamNames";
 import { isLiveMatch } from "../../lib/matchStatus";
 import { formatLiveMatchClock } from "../../lib/matchClock";
 import type { Match } from "../../types";
+
+/** Known Community Shield / Golden Ticket competition id. */
+const GOLDEN_TICKET_COMPETITION_ID = "f-shield";
+
+/** True when the fixture awards / is branded as a Golden Ticket marquee. */
+export function isGoldenTicketMatch(
+  match: Pick<Match, "id" | "competitionId" | "isGoldenTicket" | "matchTag">,
+): boolean {
+  if (match.isGoldenTicket === true) return true;
+  if (match.competitionId === GOLDEN_TICKET_COMPETITION_ID) return true;
+  if (match.id === "f-communityshield") return true;
+  const tag = String(match.matchTag || "").toLowerCase();
+  return tag.includes("golden ticket") || tag.includes("golden-ticket");
+}
+
+/** Extra card chrome classes for Golden Ticket fixtures. */
+export const GOLDEN_TICKET_CARD_CLASS =
+  "border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.2)] bg-slate-900";
 
 /** F1 checkered strip (user-specified repeating gradients). */
 const F1_CHECKERED: React.CSSProperties = {
@@ -37,9 +56,21 @@ function normalizeSport(sport: string | null | undefined): SportKey | string {
 /** Absolute left sport colour strip on fixture cards. */
 export function SportColorStrip({
   sport,
+  isGoldenTicket = false,
 }: {
   sport: string | null | undefined;
+  /** When true, use the gold accent bar (ticket icon is rendered separately). */
+  isGoldenTicket?: boolean;
 }) {
+  if (isGoldenTicket) {
+    return (
+      <span
+        aria-hidden
+        className="absolute left-0 top-0 bottom-0 w-2 rounded-l-md z-[1] bg-gradient-to-b from-yellow-400 via-amber-500 to-yellow-700 shadow-[0_0_12px_rgba(234,179,8,0.45)]"
+      />
+    );
+  }
+
   const key = normalizeSport(sport);
 
   if (key === "formula1") {
@@ -64,6 +95,30 @@ export function SportColorStrip({
       aria-hidden
       className={`absolute left-0 top-0 bottom-0 w-2 rounded-l-md z-[1] ${tone}`}
     />
+  );
+}
+
+/**
+ * Golden Ticket mark — place inside the Home team name row (`relative`) so it
+ * shares that row’s vertical center without shifting the centred grid.
+ */
+export function GoldenTicketCardIcon({
+  className = "",
+}: {
+  className?: string;
+}) {
+  return (
+    <span
+      aria-hidden
+      className={`pointer-events-none absolute top-1/2 z-[2] -translate-y-1/2 -rotate-12 ${className}`}
+      title="Golden Ticket fixture"
+    >
+      <Ticket
+        className="h-6 w-6 text-[#FFD700] drop-shadow-[0_0_8px_rgba(253,224,71,0.85)]"
+        strokeWidth={2.2}
+        absoluteStrokeWidth
+      />
+    </span>
   );
 }
 

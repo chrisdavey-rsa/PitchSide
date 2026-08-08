@@ -1,67 +1,67 @@
 /**
- * Mobile sticky shortcut: jump back to competitions, or open Power-Ups
+ * Mobile sticky shortcut: jump back to competitions, or open Chips
  * while scrolled deep into the fixture list.
  */
 import React, { useEffect, useState } from "react";
-import PowerUpSelector from "./PowerUpSelector";
+import ChipSelector from "./ChipSelector";
 import type {
-  PowerUpId,
-  PowerUpSportType,
-  UserPowerUpInstance,
-} from "../../constants/powerups";
+  ChipId,
+  ChipSportType,
+  UserChipInstance,
+} from "../../constants/chips";
 
 type Props = {
   /** When true, the pill fades/slides into view. */
   visible: boolean;
-  sportType: PowerUpSportType;
-  instances: UserPowerUpInstance[];
-  assigningPowerUpId?: PowerUpId | null;
-  assignedPowerUpIds?: PowerUpId[];
+  sportType: ChipSportType;
+  instances: UserChipInstance[];
+  assigningChipId?: ChipId | null;
+  assignedChipIds?: ChipId[];
   hasOpenFixtures?: boolean;
-  onSelectPowerUp: (powerUpId: PowerUpId) => void;
+  onSelectChip: (chipId: ChipId) => void;
 };
 
 export default function StickyActionPill({
   visible,
   sportType,
   instances,
-  assigningPowerUpId = null,
-  assignedPowerUpIds = [],
+  assigningChipId = null,
+  assignedChipIds = [],
   hasOpenFixtures = true,
-  onSelectPowerUp,
+  onSelectChip,
 }: Props) {
-  const [isPowerUpMenuOpen, setIsPowerUpMenuOpen] = useState(false);
+  const [isChipMenuOpen, setIsChipMenuOpen] = useState(false);
   const [menuEntered, setMenuEntered] = useState(false);
 
   useEffect(() => {
-    if (!visible) setIsPowerUpMenuOpen(false);
+    if (!visible) setIsChipMenuOpen(false);
   }, [visible]);
 
   useEffect(() => {
-    if (!isPowerUpMenuOpen) {
+    if (!isChipMenuOpen) {
       setMenuEntered(false);
       return;
     }
     const id = requestAnimationFrame(() => setMenuEntered(true));
     return () => cancelAnimationFrame(id);
-  }, [isPowerUpMenuOpen]);
+  }, [isChipMenuOpen]);
 
   const scrollToCompetitions = () => {
-    setIsPowerUpMenuOpen(false);
+    setIsChipMenuOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  if (!visible && !isPowerUpMenuOpen) {
+  if (!visible && !isChipMenuOpen) {
     return null;
   }
 
   return (
     <div className="md:hidden" data-no-swipe="true">
-      {isPowerUpMenuOpen && (
+      {isChipMenuOpen && (
         <div
           className="fixed inset-0 z-40"
           aria-hidden
-          onClick={() => setIsPowerUpMenuOpen(false)}
+          onClick={() => setIsChipMenuOpen(false)}
         />
       )}
 
@@ -88,45 +88,45 @@ export default function StickyActionPill({
 
             <button
               type="button"
-              onClick={() => setIsPowerUpMenuOpen((open) => !open)}
+              onClick={() => setIsChipMenuOpen((open) => !open)}
               className={`whitespace-nowrap px-4 py-2.5 text-[10px] font-bold font-display uppercase tracking-wide transition-colors cursor-pointer ${
-                isPowerUpMenuOpen
+                isChipMenuOpen
                   ? "bg-violet-500/20 text-violet-100"
                   : "text-slate-200 hover:bg-slate-700/80 hover:text-white"
               }`}
-              aria-label="Open power-ups"
-              aria-expanded={isPowerUpMenuOpen}
+              aria-label="Open chips"
+              aria-expanded={isChipMenuOpen}
             >
-              Power-Ups
+              Chips
             </button>
           </div>
 
-          {isPowerUpMenuOpen && (
+          {isChipMenuOpen && (
             <div
               role="dialog"
-              aria-label="Power-Ups"
+              aria-label="Chips"
               className={`absolute top-full left-1/2 z-50 mt-2 w-[92vw] max-w-sm origin-top rounded-xl border border-slate-700/50 bg-slate-900/85 p-2 shadow-2xl backdrop-blur-md transition-all duration-150 ease-out ${
                 menuEntered
                   ? "-translate-x-1/2 translate-y-0 scale-100 opacity-100"
                   : "-translate-x-1/2 -translate-y-2.5 scale-95 opacity-0"
               }`}
             >
-              {/* Caret under the Power-Ups half of the centred pill */}
+              {/* Caret under the Chips half of the centred pill */}
               <div
                 aria-hidden
                 className="absolute -top-1.5 right-[20%] h-3 w-3 rotate-45 border-l border-t border-slate-700/50 bg-slate-900/85 backdrop-blur-md"
               />
-              <PowerUpSelector
+              <ChipSelector
                 sportType={sportType}
                 instances={instances}
-                assigningPowerUpId={assigningPowerUpId}
-                assignedPowerUpIds={assignedPowerUpIds}
+                assigningChipId={assigningChipId}
+                assignedChipIds={assignedChipIds}
                 hasOpenFixtures={hasOpenFixtures}
                 showHeader={false}
                 isCompact
-                onSelect={(powerUpId) => {
-                  onSelectPowerUp(powerUpId);
-                  setIsPowerUpMenuOpen(false);
+                onSelect={(chipId) => {
+                  onSelectChip(chipId);
+                  setIsChipMenuOpen(false);
                 }}
               />
             </div>

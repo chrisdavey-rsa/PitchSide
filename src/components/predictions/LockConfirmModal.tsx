@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Lock, X } from "lucide-react";
-import { useBodyScrollLock } from "../../hooks/useBodyScrollLock";
 import { setSkipLockConfirm } from "../../lib/lockConfirmPrefs";
+import AppModalShell from "../modals/AppModalShell";
 
 type Props = {
   open: boolean;
@@ -20,25 +20,21 @@ export default function LockConfirmModal({
   onConfirm,
 }: Props) {
   const [dontShow, setDontShow] = useState(false);
-  useBodyScrollLock(open);
   if (!open) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
+    <AppModalShell
+      open={open}
+      onClose={onCancel}
+      maxWidthClass="max-w-sm"
       aria-labelledby="lock-confirm-title"
-      onClick={onCancel}
+      panelClassName="rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl shadow-black/50"
     >
-      <div
-        className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl shadow-black/50 p-5 space-y-4"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="p-4 sm:p-5 space-y-3 sm:space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-500/40 bg-emerald-500/10">
-              <Lock className="h-5 w-5 text-emerald-400" />
+            <span className="flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-500/40 bg-emerald-500/10">
+              <Lock className="h-4 w-4 sm:h-5 sm:w-5 text-emerald-400" />
             </span>
             <div className="min-w-0">
               <h3
@@ -56,7 +52,7 @@ export default function LockConfirmModal({
           <button
             type="button"
             onClick={onCancel}
-            className="p-1 rounded-lg text-slate-500 hover:text-white cursor-pointer"
+            className="p-1 rounded-lg text-slate-500 hover:text-white cursor-pointer touch-manipulation"
             aria-label="Cancel"
           >
             <X className="h-4 w-4" />
@@ -79,7 +75,7 @@ export default function LockConfirmModal({
           <button
             type="button"
             onClick={onCancel}
-            className="flex-1 h-10 rounded-xl border border-slate-700 bg-slate-950 text-slate-300 text-xs font-display font-bold uppercase tracking-wide cursor-pointer hover:border-slate-500"
+            className="flex-1 h-10 rounded-xl border border-slate-700 bg-slate-950 text-slate-300 text-xs font-display font-bold uppercase tracking-wide cursor-pointer hover:border-slate-500 touch-manipulation"
           >
             Cancel
           </button>
@@ -89,12 +85,12 @@ export default function LockConfirmModal({
               if (dontShow) setSkipLockConfirm(true);
               onConfirm();
             }}
-            className="flex-1 h-10 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-display font-bold uppercase tracking-wide cursor-pointer"
+            className="flex-1 h-10 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-display font-bold uppercase tracking-wide cursor-pointer touch-manipulation"
           >
             Lock pick
           </button>
         </div>
       </div>
-    </div>
+    </AppModalShell>
   );
 }

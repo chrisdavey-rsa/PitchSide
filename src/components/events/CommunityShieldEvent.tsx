@@ -1,21 +1,27 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * Golden Ticket / Community Shield prediction modal.
  */
 
 import React, { useMemo, useState } from "react";
 import { motion } from "motion/react";
-import { Ticket, X, Sparkles, Plus, Minus, Trophy } from "lucide-react";
+import { Ticket, X, Sparkles, Plus, Minus, Trophy, HelpCircle } from "lucide-react";
 import { UserProfile, SportType, Match } from "../../types";
 import { dbSavePrediction } from "../../supabase";
 import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "../../lib/queryKeys";
 import { useMatchesQuery } from "../../hooks/usePitchsideQueries";
+import AppModalShell from "../modals/AppModalShell";
 
 // Hardcoded identifiers for the one-off Community Shield "Golden Ticket" fixture.
 export const COMMUNITY_SHIELD_MATCH_ID = "f-communityshield";
 export const COMMUNITY_SHIELD_COMPETITION_ID = "f-shield";
 export const COMMUNITY_SHIELD_KICKOFF = new Date("2026-08-09T15:00:00Z");
+
+const GOLDEN_TICKET_HELP =
+  "A Golden Ticket is awarded for a Perfect Prediction on marquee events. Holding one grants 'God Mode' (early access to community consensus data) and an exclusive entry into the end-of-season Summit event.";
 
 // True while we are still before kickoff and the event should be offered.
 export function isCommunityShieldOpen(now: Date = new Date()): boolean {
@@ -32,6 +38,17 @@ export function isCommunityShieldScheduled(matches: Match[]): boolean {
     (m) =>
       m.competitionId === COMMUNITY_SHIELD_COMPETITION_ID &&
       m.status !== "completed",
+  );
+}
+
+/** Resolve the live Community Shield fixture from a match list. */
+export function findCommunityShieldMatch(matches: Match[]): Match | undefined {
+  return (
+    matches.find(
+      (m) =>
+        m.competitionId === COMMUNITY_SHIELD_COMPETITION_ID &&
+        m.status !== "completed",
+    ) || matches.find((m) => m.id === COMMUNITY_SHIELD_MATCH_ID)
   );
 }
 
@@ -54,6 +71,8 @@ interface CommunityShieldEventProps {
   user: UserProfile;
   onClose: () => void;
   triggerToast: (message: string) => void;
+  /** Live fixture — team labels and prediction target come from this. */
+  match?: Match | null;
 }
 
 function ScoreStepper({
@@ -66,29 +85,34 @@ function ScoreStepper({
   onChange: (next: number) => void;
 }) {
   return (
-    <div className="flex flex-col items-center gap-2">
-      <span className="text-[10px] font-mono uppercase tracking-widest text-amber-200/80">
+    <div className="flex flex-col items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
+      <span
+        className="text-[9px] sm:text-[10px] font-mono uppercase tracking-widest text-amber-200/80 truncate max-w-[100px] text-center"
+        title={label}
+      >
         {label}
       </span>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 sm:gap-2">
         <button
           type="button"
           onClick={() => onChange(Math.max(0, value - 1))}
-          className="w-8 h-8 rounded-lg bg-slate-950/60 border border-amber-500/30 text-amber-200 hover:bg-slate-900 flex items-center justify-center cursor-pointer transition-colors"
+          className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-slate-950/60 border border-amber-500/30 text-amber-200 hover:bg-slate-900 flex items-center justify-center cursor-pointer transition-colors touch-manipulation"
           aria-label={`Decrease ${label}`}
         >
-          <Minus className="w-4 h-4" />
+          <Minus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </button>
-        <div className="w-14 h-14 rounded-xl bg-gradient-to-b from-amber-400/20 to-amber-600/10 border border-amber-400/40 flex items-center justify-center">
-          <span className="text-3xl font-black font-display text-amber-100">{value}</span>
+        <div className="w-11 h-11 sm:w-14 sm:h-14 rounded-xl bg-gradient-to-b from-amber-400/20 to-amber-600/10 border border-amber-400/40 flex items-center justify-center">
+          <span className="text-2xl sm:text-3xl font-black font-display text-amber-100 tabular-nums">
+            {value}
+          </span>
         </div>
         <button
           type="button"
           onClick={() => onChange(Math.min(30, value + 1))}
-          className="w-8 h-8 rounded-lg bg-slate-950/60 border border-amber-500/30 text-amber-200 hover:bg-slate-900 flex items-center justify-center cursor-pointer transition-colors"
+          className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-slate-950/60 border border-amber-500/30 text-amber-200 hover:bg-slate-900 flex items-center justify-center cursor-pointer transition-colors touch-manipulation"
           aria-label={`Increase ${label}`}
         >
-          <Plus className="w-4 h-4" />
+          <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </button>
       </div>
     </div>
@@ -99,11 +123,24 @@ export default function CommunityShieldEvent({
   user,
   onClose,
   triggerToast,
+  match: matchProp,
 }: CommunityShieldEventProps) {
   const queryClient = useQueryClient();
+  const { data: dbMatches = [] } = useMatchesQuery();
+  const match = useMemo(() => {
+    if (matchProp) return matchProp;
+    return findCommunityShieldMatch(dbMatches) ?? null;
+  }, [matchProp, dbMatches]);
+
+  const homeLabel = match?.homeTeam?.trim() || "Home";
+  const awayLabel = match?.awayTeam?.trim() || "Away";
+  const matchId = match?.id || COMMUNITY_SHIELD_MATCH_ID;
+  const competitionId = match?.competitionId || COMMUNITY_SHIELD_COMPETITION_ID;
+
   const [home, setHome] = useState(0);
   const [away, setAway] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
 
   const handleSubmit = async () => {
     if (submitting) return;
@@ -111,9 +148,9 @@ export default function CommunityShieldEvent({
     try {
       await dbSavePrediction(
         user.id,
-        COMMUNITY_SHIELD_MATCH_ID,
+        matchId,
         SportType.FOOTBALL,
-        COMMUNITY_SHIELD_COMPETITION_ID,
+        competitionId,
         home,
         away,
         true,
@@ -131,72 +168,113 @@ export default function CommunityShieldEvent({
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 font-sans">
-      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={onClose} />
-
+    <AppModalShell
+      open
+      onClose={onClose}
+      zClass="z-[60]"
+      maxWidthClass="max-w-md"
+      clipPanel={false}
+      scrollBody={false}
+      aria-labelledby="golden-ticket-title"
+      panelClassName="overflow-visible rounded-2xl sm:rounded-3xl border border-amber-400/40 bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 shadow-[0_0_60px_rgba(245,158,11,0.25)]"
+    >
       <motion.div
         initial={{ opacity: 0, scale: 0.94, y: 16 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.94, y: 16 }}
         transition={{ type: "spring", damping: 22, stiffness: 300 }}
-        className="relative w-full max-w-md overflow-hidden rounded-3xl border border-amber-400/40 bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 shadow-[0_0_60px_rgba(245,158,11,0.25)]"
+        className="relative max-h-[90dvh] overflow-hidden"
       >
         {/* Ambient golden glow */}
         <div className="pointer-events-none absolute -top-16 left-1/2 -translate-x-1/2 w-72 h-72 bg-amber-400/20 rounded-full blur-3xl" />
         <div className="pointer-events-none absolute -bottom-20 -right-10 w-56 h-56 bg-yellow-500/10 rounded-full blur-3xl" />
 
+        {/* Info (?) — mirrors close button placement */}
+        <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-20">
+          <button
+            type="button"
+            onClick={() => setShowHelp((v) => !v)}
+            onMouseEnter={() => setShowHelp(true)}
+            onMouseLeave={() => setShowHelp(false)}
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-amber-500/35 bg-slate-950/70 text-amber-200/80 hover:text-white hover:border-amber-400/60 transition-colors cursor-pointer touch-manipulation"
+            aria-label="What is a Golden Ticket?"
+            aria-expanded={showHelp}
+          >
+            <HelpCircle className="w-4 h-4" />
+          </button>
+          {showHelp ? (
+            <div
+              role="tooltip"
+              className="absolute left-0 top-full mt-2 w-[min(16.5rem,calc(100vw-2.5rem))] rounded-xl border border-amber-500/30 bg-slate-950 px-3 py-2.5 text-left shadow-2xl shadow-black/50 z-30"
+            >
+              <p className="text-[11px] leading-snug text-slate-200 font-sans">
+                {GOLDEN_TICKET_HELP}
+              </p>
+            </div>
+          ) : null}
+        </div>
+
         <button
+          type="button"
           onClick={onClose}
-          className="absolute top-4 right-4 z-10 text-amber-200/70 hover:text-white transition-colors cursor-pointer"
+          className="absolute top-3 right-3 sm:top-4 sm:right-4 z-20 flex h-8 w-8 items-center justify-center rounded-full text-amber-200/70 hover:text-white hover:bg-slate-900/80 transition-colors cursor-pointer touch-manipulation"
           title="Maybe later"
+          aria-label="Close"
         >
           <X className="w-5 h-5" />
         </button>
 
-        <div className="relative p-7 text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-300 to-yellow-600 shadow-lg shadow-amber-900/40">
-            <Ticket className="h-8 w-8 text-slate-950" />
+        <div className="relative px-4 py-5 sm:p-7 text-center">
+          <div className="mx-auto mb-3 sm:mb-4 flex h-12 w-12 sm:h-16 sm:w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-300 to-yellow-600 shadow-lg shadow-amber-900/40">
+            <Ticket className="h-6 w-6 sm:h-8 sm:w-8 text-slate-950" />
           </div>
 
           <div className="mb-1 flex items-center justify-center gap-2">
-            <Sparkles className="h-4 w-4 text-amber-300" />
-            <span className="text-[11px] font-mono font-bold uppercase tracking-[0.2em] text-amber-300">
+            <Sparkles className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-amber-300" />
+            <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-[0.2em] text-amber-300">
               Golden Ticket Event
             </span>
-            <Sparkles className="h-4 w-4 text-amber-300" />
+            <Sparkles className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-amber-300" />
           </div>
 
-          <h2 className="font-display text-2xl font-extrabold text-white">Football is back.</h2>
-          <p className="mx-auto mt-2 max-w-xs text-sm text-slate-300">
+          <h2
+            id="golden-ticket-title"
+            className="font-display text-xl sm:text-2xl font-extrabold text-white"
+          >
+            Football is back.
+          </h2>
+          <p className="mx-auto mt-1.5 sm:mt-2 max-w-xs text-xs sm:text-sm text-slate-300 leading-snug">
             Make a <span className="font-bold text-amber-200">Perfect Prediction</span> for the
             Community Shield to win a <span className="font-bold text-amber-200">Golden Ticket</span>.
           </p>
 
-          <div className="mt-6 flex items-center justify-center gap-5 rounded-2xl border border-amber-500/20 bg-slate-950/50 py-5">
-            <ScoreStepper label="Home" value={home} onChange={setHome} />
-            <div className="flex flex-col items-center">
-              <Trophy className="mb-1 h-5 w-5 text-amber-400" />
-              <span className="text-lg font-black text-slate-600">vs</span>
+          <div className="mt-4 sm:mt-6 flex items-center justify-center gap-2 sm:gap-5 rounded-2xl border border-amber-500/20 bg-slate-950/50 py-3.5 sm:py-5 px-2 sm:px-3">
+            <ScoreStepper label={homeLabel} value={home} onChange={setHome} />
+            <div className="flex flex-col items-center shrink-0">
+              <Trophy className="mb-0.5 sm:mb-1 h-4 w-4 sm:h-5 sm:w-5 text-amber-400" />
+              <span className="text-sm sm:text-lg font-black text-slate-600">vs</span>
             </div>
-            <ScoreStepper label="Away" value={away} onChange={setAway} />
+            <ScoreStepper label={awayLabel} value={away} onChange={setAway} />
           </div>
 
           <button
+            type="button"
             onClick={handleSubmit}
             disabled={submitting}
-            className="mt-6 w-full rounded-xl bg-gradient-to-r from-amber-400 to-yellow-500 py-3 font-display text-sm font-bold uppercase tracking-wider text-slate-950 shadow-lg shadow-amber-900/40 transition-all hover:from-amber-300 hover:to-yellow-400 disabled:opacity-60 cursor-pointer"
+            className="mt-4 sm:mt-6 w-full rounded-xl bg-gradient-to-r from-amber-400 to-yellow-500 py-2.5 sm:py-3 font-display text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-950 shadow-lg shadow-amber-900/40 transition-all hover:from-amber-300 hover:to-yellow-400 disabled:opacity-60 cursor-pointer touch-manipulation"
           >
             {submitting ? "Locking in..." : "Lock In My Prediction"}
           </button>
 
           <button
+            type="button"
             onClick={onClose}
-            className="mt-3 w-full text-[10px] font-mono uppercase tracking-widest text-slate-600 hover:text-slate-400 transition-colors cursor-pointer"
+            className="mt-2 sm:mt-3 w-full text-[10px] font-mono uppercase tracking-widest text-slate-600 hover:text-slate-400 transition-colors cursor-pointer"
           >
             Maybe later
           </button>
         </div>
       </motion.div>
-    </div>
+    </AppModalShell>
   );
 }

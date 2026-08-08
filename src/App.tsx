@@ -430,6 +430,11 @@ function AppShell() {
     setAuthHydrated(true);
     localStorage.setItem('pitchside_logged_in', JSON.stringify(user));
     const pendingInvite = readPendingInvite();
+    if (pendingInvite?.ref) {
+      void import('./lib/userFollows').then(({ processInviteFollowRef }) =>
+        processInviteFollowRef(user.id, pendingInvite.ref),
+      );
+    }
     if (pendingInvite) {
       navigate(pendingInviteToPath(pendingInvite));
     }

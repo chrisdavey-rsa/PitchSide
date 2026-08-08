@@ -112,6 +112,7 @@ type DbMatch = {
   kickoff_time: string | null;
   competition_id: string | null;
   base_multiplier: number | null;
+  is_golden_ticket?: boolean | null;
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -267,7 +268,7 @@ function calculateRugbyPoints(
   return 0;
 }
 
-type PowerUpType =
+type ChipType =
   | "double_bubble"
   | "safety_net"
   | "sniper"
@@ -277,10 +278,10 @@ type PowerUpType =
 const EXACT_SCORE_POINTS = 5;
 const SAFETY_FLOOR = 5;
 
-/** Keep in sync with sync-settlement / scoringEngine / pitchside_apply_powerup. */
-function applyPowerUp(
+/** Keep in sync with sync-settlement / scoringEngine / pitchside_apply_chip. */
+function applyChip(
   basePoints: number,
-  powerup: PowerUpType | null | undefined,
+  chip: ChipType | null | undefined,
   predictedHome: number,
   predictedAway: number,
   actualHome: number,
@@ -302,19 +303,19 @@ function applyPowerUp(
   const outcomeCorrect = predictedWinner === actualWinner;
   const isExact = predictedHome === actualHome && predictedAway === actualAway;
 
-  if (powerup === "banker") {
+  if (chip === "banker") {
     if (outcomeCorrect) {
       points = EXACT_SCORE_POINTS;
       isBankerExact = true;
     }
-  } else if (powerup === "sniper" && isExact) {
+  } else if (chip === "sniper" && isExact) {
     points = Math.round(points * 1.5);
   }
 
-  if (powerup === "double_bubble") points *= 2;
-  else if (powerup === "pitchside_master") points *= 3;
+  if (chip === "double_bubble") points *= 2;
+  else if (chip === "pitchside_master") points *= 3;
 
-  if (powerup === "safety_net" && points === 0) points = SAFETY_FLOOR;
+  if (chip === "safety_net" && points === 0) points = SAFETY_FLOOR;
 
   return { points, isBankerExact };
 }
@@ -340,7 +341,7 @@ async function loadActiveCatalogMatches(
 
   const { data: liveRows, error: liveErr } = await supabase
     .from("matches")
-    .select("id, sport, status, kickoff_time, competition_id, base_multiplier")
+    .select("id, sport, status, kickoff_time, competition_id, base_multiplier, is_golden_ticket")
     .eq("status", "live")
     .in("competition_id", CATALOG_COMPETITION_IDS);
 
@@ -350,7 +351,7 @@ async function loadActiveCatalogMatches(
 
   const { data: upcomingRows, error: upErr } = await supabase
     .from("matches")
-    .select("id, sport, status, kickoff_time, competition_id, base_multiplier")
+    .select("id, sport, status, kickoff_time, competition_id, base_multiplier, is_golden_ticket")
     .eq("status", "upcoming")
     .gte("kickoff_time", sinceIso)
     .lte("kickoff_time", nowIso)
@@ -375,11 +376,12 @@ async function gradePredictions(
   actualHome: number,
   actualAway: number,
   multiplier: number | null,
+  isGoldenTicket = false,
 ): Promise<number> {
   const { data: predictions, error } = await supabase
     .from("predictions")
     .select(
-      "id, user_id, predicted_home_score, predicted_away_score, applied_powerup_id",
+      "id, user_id, predicted_home_score, predicted_away_score, applied_chip_id",
     )
     .eq("match_id", matchId);
 
@@ -390,28 +392,28 @@ async function gradePredictions(
     return 0;
   }
 
-  const powerupIds = [
+  const chipIds = [
     ...new Set(
       (predictions ?? [])
-        .map((p) => p.applied_powerup_id as string | null)
+        .map((p) => p.applied_chip_id as string | null)
         .filter((id): id is string => !!id),
     ),
   ];
-  const powerupTypeById = new Map<string, PowerUpType>();
-  if (powerupIds.length > 0) {
+  const chipTypeById = new Map<string, ChipType>();
+  if (chipIds.length > 0) {
     const { data: chips } = await supabase
-      .from("user_powerups")
-      .select("id, powerup_type")
-      .in("id", powerupIds);
+      .from("user_chips")
+      .select("id, chip_type")
+      .in("id", chipIds);
     for (const chip of chips ?? []) {
-      powerupTypeById.set(chip.id, chip.powerup_type as PowerUpType);
+      chipTypeById.set(chip.id, chip.chip_type as ChipType);
     }
   }
 
   let graded = 0;
   for (const pred of predictions ?? []) {
-    const powerupType = pred.applied_powerup_id
-      ? powerupTypeById.get(pred.applied_powerup_id) ?? null
+    const chipType = pred.applied_chip_id
+      ? chipTypeById.get(pred.applied_chip_id) ?? null
       : null;
     const base = sport === "football"
       ? calculateFootballPoints(
@@ -426,9 +428,9 @@ async function gradePredictions(
         actualHome,
         actualAway,
       );
-    const powered = applyPowerUp(
+    const powered = applyChip(
       base,
-      powerupType,
+      chipType,
       pred.predicted_home_score,
       pred.predicted_away_score,
       actualHome,
@@ -449,16 +451,36 @@ async function gradePredictions(
       continue;
     }
 
+    const isExact =
+      pred.predicted_home_score === actualHome &&
+      pred.predicted_away_score === actualAway;
+    if (
+      isGoldenTicket &&
+      isExact &&
+      !powered.isBankerExact &&
+      pred.user_id
+    ) {
+      const { error: ticketErr } = await supabase.rpc(
+        "increment_golden_tickets",
+        { p_user_id: pred.user_id },
+      );
+      if (ticketErr) {
+        console.warn(
+          `[sync-live-settle] golden ticket award failed ${pred.id}: ${ticketErr.message}`,
+        );
+      }
+    }
+
     // Chip is normally marked used at lock time; keep settlement idempotent.
-    if (pred.applied_powerup_id) {
+    if (pred.applied_chip_id) {
       await supabase
-        .from("user_powerups")
+        .from("user_chips")
         .update({
           status: "used",
           used_at: new Date().toISOString(),
           applied_fixture_id: matchId,
         })
-        .eq("id", pred.applied_powerup_id)
+        .eq("id", pred.applied_chip_id)
         .eq("status", "available");
     }
 
@@ -592,6 +614,7 @@ async function processSport(
         scores.home,
         scores.away,
         known.base_multiplier,
+        known.is_golden_ticket === true,
       );
       continue;
     }

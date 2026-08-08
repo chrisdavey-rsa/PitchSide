@@ -173,7 +173,7 @@ export default function LeagueHubStandings({
       away: r.away,
       submitted: r.submitted,
       pointsWon: r.pointsWon,
-      powerupType: (r.powerupType as LeaguePredictionRow["powerupType"]) ?? null,
+      chipType: (r.chipType as LeaguePredictionRow["chipType"]) ?? null,
     }));
     const seen = new Set(rows.map((r) => `${r.userId}:${r.matchId}`));
 
@@ -192,7 +192,7 @@ export default function LeagueHubStandings({
         submitted: true,
         pointsWon:
           typeof pred.pointsWon === "number" ? pred.pointsWon : null,
-        powerupType: undefined,
+        chipType: undefined,
       });
       seen.add(key);
     });

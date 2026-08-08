@@ -1,5 +1,5 @@
 /**
- * Mulligan power-up UI for Golf Majors.
+ * Mulligan chip UI for Golf Majors.
  * Shows "Play Mulligan" when a roster golfer misses the Friday cut and the
  * player still has golf_mulligans_available > 0.
  */

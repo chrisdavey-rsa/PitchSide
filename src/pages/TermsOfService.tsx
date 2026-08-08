@@ -48,7 +48,7 @@ export default function TermsOfService() {
             <h2 className="text-base font-display font-bold text-white">3. The Service</h2>
             <p>
               PitchSide is a sports prediction and social competition platform. Features may include
-              score predictions, private and global leagues, power-ups, leaderboards, and related
+              score predictions, private and global leagues, chips, leaderboards, and related
               tools. Features may change, be added, or be withdrawn at any time.
             </p>
           </section>
@@ -65,7 +65,7 @@ export default function TermsOfService() {
           <section className="space-y-2">
             <h2 className="text-base font-display font-bold text-white">5. Finality of Scoring</h2>
             <p>
-              All scoring settlements, game mechanic outcomes (including power-ups), and leaderboard
+              All scoring settlements, game mechanic outcomes (including chips), and leaderboard
               rankings determined by PitchSide&apos;s logic and third-party data providers are final
               and cannot be disputed. Fixture data, live scores, and results may be corrected after
               publication when source data changes; your standing may update accordingly.

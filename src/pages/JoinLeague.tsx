@@ -8,6 +8,7 @@ import { isGlobalLeague } from "../lib/leaguesConfig";
 import {
   storePendingInvite,
   clearPendingInvite,
+  readPendingInvite,
 } from "../lib/pendingInvite";
 import PitchSideLogo from "../components/PitchSideLogo";
 
@@ -26,9 +27,10 @@ export default function JoinLeague({
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  // Support `/join/:leagueId?code=` and `/join?id=&code=`
+  // Support `/join/:leagueId?code=` and `/join?id=&code=` (+ optional `ref` inviter)
   const leagueId = (leagueIdParam || searchParams.get("id") || "").trim();
   const codeFromUrl = (searchParams.get("code") || "").trim();
+  const refFromUrl = (searchParams.get("ref") || "").trim();
 
   const [league, setLeague] = useState<League | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,9 +51,13 @@ export default function JoinLeague({
       return;
     }
 
-    // Keep guests on-track through signup / login (preserve password code).
+    // Keep guests on-track through signup / login (preserve password code + inviter).
     if (!currentUser) {
-      storePendingInvite(leagueId, codeFromUrl || undefined);
+      storePendingInvite(
+        leagueId,
+        codeFromUrl || undefined,
+        refFromUrl || undefined,
+      );
     }
 
     let cancelled = false;
@@ -80,7 +86,7 @@ export default function JoinLeague({
     return () => {
       cancelled = true;
     };
-  }, [leagueId, currentUser, codeFromUrl]);
+  }, [leagueId, currentUser, codeFromUrl, refFromUrl]);
 
   const alreadyMember =
     !!currentUser && !!league && league.members.includes(currentUser.id);
@@ -90,6 +96,12 @@ export default function JoinLeague({
       if (!currentUser || !league) return;
 
       if (alreadyMember) {
+        const inviter =
+          refFromUrl || readPendingInvite()?.ref || undefined;
+        if (inviter) {
+          const { processInviteFollowRef } = await import("../lib/userFollows");
+          await processInviteFollowRef(currentUser.id, inviter);
+        }
         clearPendingInvite();
         onJoined(league.id);
         navigate("/");
@@ -117,6 +129,12 @@ export default function JoinLeague({
 
       try {
         await dbJoinLeague(league.id, currentUser.id, password.trim());
+        const inviter =
+          refFromUrl || readPendingInvite()?.ref || undefined;
+        if (inviter) {
+          const { processInviteFollowRef } = await import("../lib/userFollows");
+          await processInviteFollowRef(currentUser.id, inviter);
+        }
         clearPendingInvite();
         setStatus(`You're in — welcome to ${league.name}!`);
         window.setTimeout(() => {
@@ -145,7 +163,7 @@ export default function JoinLeague({
         setJoining(false);
       }
     },
-    [alreadyMember, currentUser, league, navigate, onJoined],
+    [alreadyMember, currentUser, league, navigate, onJoined, refFromUrl],
   );
 
   const handleJoin = () => {

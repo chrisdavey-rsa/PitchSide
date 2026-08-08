@@ -43,6 +43,13 @@ export interface UserProfile {
   pushEnabled?: boolean;
   /** profiles.email_enabled — weekly fixture digest. */
   emailEnabled?: boolean;
+  /** profiles.friend_activity_opt_in — alerts when followed friends submit picks. */
+  friendActivityOptIn?: boolean;
+  /**
+   * profiles.golden_tickets — Golden Tickets held (God Mode + Summit entry).
+   * Not a consumable Chip.
+   */
+  goldenTickets?: number;
   /** @deprecated Prefer emailEnabled */
   weeklyEmailOptIn?: boolean;
   /** Client-only legacy field — never stored on profiles. Prefer Supabase Auth. */
@@ -92,6 +99,11 @@ export interface Match {
   matchTag?: string;
   /** True when a PitchSide Picks club/country features in the fixture. */
   isPitchsidePick?: boolean;
+  /**
+   * matches.is_golden_ticket — marquee fixture that awards a Golden Ticket
+   * on a true Perfect Prediction (Banker wins excluded).
+   */
+  isGoldenTicket?: boolean;
 
   // --- Live API-Sports data (see 20260715_api_automation_schema.sql) ---
   /** Competition round/stage label from the data provider (e.g. "Round 12"). */

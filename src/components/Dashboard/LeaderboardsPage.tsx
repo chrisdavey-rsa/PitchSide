@@ -16,6 +16,11 @@ import { mapLeaderboardForSport } from "../../hooks/usePitchsideQueries";
 import LeaderboardPlayerLabel from "./LeaderboardPlayerLabel";
 import LeaderboardPlayerProfileModal from "./LeaderboardPlayerProfileModal";
 import {
+  FriendsOnlyToggle,
+  filterLeaderboardToFriends,
+} from "../Leaderboards/LeaderboardTable";
+import { useFollowingIdsQuery } from "../../hooks/useFollowingIds";
+import {
   SportIcon,
   isEmergingSport,
   isSportAccessible,
@@ -110,6 +115,9 @@ export default function LeaderboardsPage({
     direction: "desc",
   });
   const [formPlayer, setFormPlayer] = useState<LeaderboardItem | null>(null);
+  const [friendsOnly, setFriendsOnly] = useState(false);
+  const followingQuery = useFollowingIdsQuery(user.id);
+  const followingIds = followingQuery.data || [];
 
   useEffect(() => {
     if (!syncSportFromParent || !activeSport) return;
@@ -213,7 +221,10 @@ export default function LeaderboardsPage({
     const source =
       horizon === "season" && scope === "league" ? seasonLeagueAware : baseRows;
 
-    const filtered = [...source];
+    let filtered = [...source];
+    if (friendsOnly) {
+      filtered = filterLeaderboardToFriends(filtered, user.id, followingIds);
+    }
     const { key, direction } = sortConfig;
 
     filtered.sort((a, b) => {
@@ -261,7 +272,16 @@ export default function LeaderboardsPage({
     });
 
     return filtered.map((row, i) => ({ ...row, rank: i + 1 }));
-  }, [baseRows, seasonLeagueAware, horizon, scope, sortConfig]);
+  }, [
+    baseRows,
+    seasonLeagueAware,
+    horizon,
+    scope,
+    sortConfig,
+    friendsOnly,
+    user.id,
+    followingIds,
+  ]);
 
   const sportTabs: { id: SportKey; label: string; comingSoon?: boolean }[] = [
     { id: "football", label: "Football" },
@@ -408,6 +428,13 @@ export default function LeaderboardsPage({
           );
         })}
       </div>
+
+      <FriendsOnlyToggle
+        enabled={friendsOnly}
+        onChange={setFriendsOnly}
+        followingCount={followingIds.length}
+        disabled={followingQuery.isLoading}
+      />
 
       {hasPrivateLeague && setScope && (
         <div className="flex gap-2">

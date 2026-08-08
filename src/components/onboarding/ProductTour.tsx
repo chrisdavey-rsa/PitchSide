@@ -4,7 +4,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ChevronLeft, ChevronRight, Crown, Trophy, X } from "lucide-react";
-import { DoubleBubbleIcon, getPowerUp } from "../../constants/powerups";
+import { DoubleBubbleIcon, getChip } from "../../constants/chips";
 import { useBodyScrollLock } from "../../hooks/useBodyScrollLock";
 
 type Props = {
@@ -95,9 +95,9 @@ function LeaderboardClimb() {
   );
 }
 
-function PowerUpShowcase() {
-  const bubble = getPowerUp("double_bubble");
-  const master = getPowerUp("pitchside_master");
+function ChipShowcase() {
+  const bubble = getChip("double_bubble");
+  const master = getChip("pitchside_master");
   return (
     <div className="flex flex-col sm:flex-row justify-center items-stretch gap-3 sm:gap-4 w-full max-w-xl mx-auto">
       {[bubble, master].map((def) => {
@@ -183,9 +183,9 @@ const SLIDES = [
     ),
   },
   {
-    title: "Deploy Power-Ups",
+    title: "Deploy Chips",
     body: "Arm chips like Double Bubble and PitchSide Master on the fixtures that matter.",
-    visual: <PowerUpShowcase />,
+    visual: <ChipShowcase />,
   },
   {
     title: "Climb Leaderboards",

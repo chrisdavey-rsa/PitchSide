@@ -1,6 +1,6 @@
 import React from "react";
 import { ChevronDown, Lock, Minus, Plus, X } from "lucide-react";
-import { DoubleBubbleIcon, getPowerUp } from "../../constants/powerups";
+import { DoubleBubbleIcon, getChip } from "../../constants/chips";
 
 export type HowToPredictSport = "football" | "rugby" | "formula1" | "golf";
 
@@ -225,7 +225,7 @@ function StepVisual({
 }
 
 function ActiveBoostChipMock() {
-  const def = getPowerUp("double_bubble");
+  const def = getChip("double_bubble");
   const Icon = def?.icon ?? DoubleBubbleIcon;
   return (
     <div
@@ -245,7 +245,7 @@ function ActiveBoostChipMock() {
 }
 
 function ConsumedBoostChipMock() {
-  const def = getPowerUp("double_bubble");
+  const def = getChip("double_bubble");
   const Icon = def?.icon ?? DoubleBubbleIcon;
   return (
     <div
@@ -274,7 +274,7 @@ type Props = {
 };
 
 /**
- * Visual "How to Predict" + "How to Apply a Power-Up" guide.
+ * Visual "How to Predict" + "How to Apply a Chip" guide.
  */
 export default function HowToPredictStepper({
   sport,
@@ -316,7 +316,7 @@ export default function HowToPredictStepper({
 
       <div className="pt-1 border-t border-slate-800/80 space-y-3">
         <h3 className="text-xs font-bold font-display text-white uppercase tracking-wide px-0.5">
-          How to Apply a Power-Up
+          How to Apply a Chip
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-stretch">
           <StepCard

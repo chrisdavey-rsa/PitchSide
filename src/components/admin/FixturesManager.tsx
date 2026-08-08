@@ -17,8 +17,8 @@ import {
 } from '../../supabase';
 import { SportType, Match } from '../../types';
 import { getCompetitions } from '../../competitions';
-import { calculatePoints, settlePredictionWithPowerUp } from '../../utils';
-import type { PowerUpId } from '../../constants/powerups';
+import { calculatePoints, settlePredictionWithChip } from '../../utils';
+import type { ChipId } from '../../constants/chips';
 import { getAvailableSeasons, getLatestSeason } from '../../seasons';
 import AdminOverrideGate from './AdminOverrideGate';
 
@@ -352,37 +352,37 @@ export default function FixturesManager({
           const { data: predsData } = await supabase
             .from('predictions')
             .select(
-              'id, predicted_home_score, predicted_away_score, user_id, match_id, applied_powerup_id',
+              'id, predicted_home_score, predicted_away_score, user_id, match_id, applied_chip_id',
             )
             .eq('match_id', fixture.id);
           if (predsData) {
-            const powerupIds = [
+            const chipIds = [
               ...new Set(
                 predsData
-                  .map((p) => p.applied_powerup_id as string | null)
+                  .map((p) => p.applied_chip_id as string | null)
                   .filter((id): id is string => !!id),
               ),
             ];
-            const powerupTypeById = new Map<string, PowerUpId>();
-            if (powerupIds.length > 0) {
+            const chipTypeById = new Map<string, ChipId>();
+            if (chipIds.length > 0) {
               const { data: chips } = await supabase
-                .from('user_powerups')
-                .select('id, powerup_type')
-                .in('id', powerupIds);
+                .from('user_chips')
+                .select('id, chip_type')
+                .in('id', chipIds);
               for (const chip of chips ?? []) {
-                powerupTypeById.set(chip.id, chip.powerup_type as PowerUpId);
+                chipTypeById.set(chip.id, chip.chip_type as ChipId);
               }
             }
 
             for (const predRow of predsData) {
-              const settled = settlePredictionWithPowerUp(
+              const settled = settlePredictionWithChip(
                 fixture.sport,
                 predRow.predicted_home_score,
                 predRow.predicted_away_score,
                 fixture.homeScore,
                 fixture.awayScore,
-                predRow.applied_powerup_id
-                  ? powerupTypeById.get(predRow.applied_powerup_id) ?? null
+                predRow.applied_chip_id
+                  ? chipTypeById.get(predRow.applied_chip_id) ?? null
                   : null,
               );
               await supabase
@@ -393,8 +393,22 @@ export default function FixturesManager({
                 })
                 .eq('id', predRow.id);
 
+              const isExact =
+                predRow.predicted_home_score === fixture.homeScore &&
+                predRow.predicted_away_score === fixture.awayScore;
+              if (
+                fixture.isGoldenTicket &&
+                isExact &&
+                !settled.isBankerExact &&
+                predRow.user_id
+              ) {
+                await supabase.rpc('increment_golden_tickets', {
+                  p_user_id: predRow.user_id,
+                });
+              }
+
               if (predRow.user_id) {
-                await supabase.rpc('evaluate_powerup_unlocks', {
+                await supabase.rpc('evaluate_chip_unlocks', {
                   p_user_id: predRow.user_id,
                   p_sport_type: fixture.sport,
                   p_season_id: null,

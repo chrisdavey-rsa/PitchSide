@@ -3,14 +3,14 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, X, Zap } from "lucide-react";
 import { getCountryFlag } from "../AccountPortal/data";
 import {
-  dbFetchPlayerPowerupUsage,
+  dbFetchPlayerChipUsage,
   dbFetchPlayerRecentForm,
   formatAccuracy,
   formatStrikeRate,
   safeNum,
   type LeaderboardRecord,
 } from "../../supabase";
-import { getPowerUp } from "../../constants/powerups";
+import { getChip } from "../../constants/chips";
 import { formatPlayerRealName } from "./LeaderboardPlayerLabel";
 import AccuracyBreakdownModal, {
   type AccuracySportTab,
@@ -63,18 +63,18 @@ export default function LeaderboardPlayerProfileModal({
   onClose,
 }: LeaderboardPlayerProfileModalProps) {
   const [sportTab, setSportTab] = useState<ProfileSportTab>("all");
-  const [powerupOpen, setPowerupOpen] = useState(false);
+  const [chipOpen, setChipOpen] = useState(false);
   const [accuracyOpen, setAccuracyOpen] = useState(false);
-  const powerupRef = useRef<HTMLDivElement | null>(null);
+  const chipRef = useRef<HTMLDivElement | null>(null);
 
   const record = useMemo(
     () => records.find((r) => r.playerId === playerId) ?? null,
     [records, playerId],
   );
 
-  const { data: powerupRows = [], isLoading: powerupsLoading } = useQuery({
-    queryKey: ["playerPowerupUsage", playerId],
-    queryFn: () => dbFetchPlayerPowerupUsage(playerId),
+  const { data: chipRows = [], isLoading: chipsLoading } = useQuery({
+    queryKey: ["playerChipUsage", playerId],
+    queryFn: () => dbFetchPlayerChipUsage(playerId),
     enabled: !!playerId,
     staleTime: 60_000,
   });
@@ -95,17 +95,17 @@ export default function LeaderboardPlayerProfileModal({
   }, [recentForm, sportTab]);
 
   useEffect(() => {
-    if (!powerupOpen) return;
+    if (!chipOpen) return;
     const onPointerDown = (e: PointerEvent) => {
       if (
-        powerupRef.current &&
-        !powerupRef.current.contains(e.target as Node)
+        chipRef.current &&
+        !chipRef.current.contains(e.target as Node)
       ) {
-        setPowerupOpen(false);
+        setChipOpen(false);
       }
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPowerupOpen(false);
+      if (e.key === "Escape") setChipOpen(false);
     };
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKey);
@@ -113,7 +113,7 @@ export default function LeaderboardPlayerProfileModal({
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [powerupOpen]);
+  }, [chipOpen]);
 
   const stats = useMemo(() => {
     if (!record) {
@@ -164,24 +164,24 @@ export default function LeaderboardPlayerProfileModal({
     };
   }, [record, sportTab]);
 
-  const filteredPowerups = useMemo(() => {
+  const filteredChips = useMemo(() => {
     const rows =
       sportTab === "all"
-        ? powerupRows
-        : powerupRows.filter((r) => r.sport === sportTab);
+        ? chipRows
+        : chipRows.filter((r) => r.sport === sportTab);
     const byType = new Map<string, number>();
     for (const row of rows) {
       byType.set(
-        row.powerupType,
-        (byType.get(row.powerupType) ?? 0) + row.timesUsed,
+        row.chipType,
+        (byType.get(row.chipType) ?? 0) + row.timesUsed,
       );
     }
     return [...byType.entries()]
       .map(([type, count]) => ({ type, count }))
       .sort((a, b) => b.count - a.count);
-  }, [powerupRows, sportTab]);
+  }, [chipRows, sportTab]);
 
-  const powerupsDeployed = filteredPowerups.reduce((n, r) => n + r.count, 0);
+  const chipsDeployed = filteredChips.reduce((n, r) => n + r.count, 0);
 
   const realName = formatPlayerRealName(firstName, surname);
 
@@ -351,28 +351,28 @@ export default function LeaderboardPlayerProfileModal({
           </div>
 
           <div
-            ref={powerupRef}
+            ref={chipRef}
             className="relative"
-            onMouseEnter={() => setPowerupOpen(true)}
-            onMouseLeave={() => setPowerupOpen(false)}
+            onMouseEnter={() => setChipOpen(true)}
+            onMouseLeave={() => setChipOpen(false)}
           >
             <button
               type="button"
               className="w-full rounded-xl border border-violet-500/30 bg-violet-500/5 px-3 py-3 text-left hover:bg-violet-500/10 transition-colors cursor-pointer"
-              aria-expanded={powerupOpen}
-              aria-controls="powerup-breakdown"
-              onClick={() => setPowerupOpen((v) => !v)}
-              onFocus={() => setPowerupOpen(true)}
+              aria-expanded={chipOpen}
+              aria-controls="chip-breakdown"
+              onClick={() => setChipOpen((v) => !v)}
+              onFocus={() => setChipOpen(true)}
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="inline-flex items-center gap-2">
                   <Zap className="w-3.5 h-3.5 text-violet-300" />
                   <span className="text-[9px] font-mono uppercase tracking-widest text-violet-300/90">
-                    Power-Ups Deployed
+                    Chips Deployed
                   </span>
                 </span>
                 <span className="text-lg font-display font-extrabold text-white tabular-nums">
-                  {powerupsLoading ? "…" : powerupsDeployed}
+                  {chipsLoading ? "…" : chipsDeployed}
                 </span>
               </div>
               <p className="mt-1 text-[10px] font-mono text-slate-500">
@@ -380,21 +380,21 @@ export default function LeaderboardPlayerProfileModal({
               </p>
             </button>
 
-            {powerupOpen && (
+            {chipOpen && (
               <div
-                id="powerup-breakdown"
+                id="chip-breakdown"
                 role="tooltip"
                 className="absolute left-0 right-0 bottom-[calc(100%+0.5rem)] z-10 rounded-xl border border-slate-700 bg-slate-950 p-3 shadow-xl"
               >
-                {filteredPowerups.length === 0 ? (
+                {filteredChips.length === 0 ? (
                   <p className="text-xs text-slate-500 font-sans text-center py-1">
-                    No Power-Ups deployed yet
+                    No Chips deployed yet
                     {sportTab !== "all" ? ` in ${sportTab}` : ""}.
                   </p>
                 ) : (
                   <ul className="space-y-1.5">
-                    {filteredPowerups.map(({ type, count }) => {
-                      const def = getPowerUp(type);
+                    {filteredChips.map(({ type, count }) => {
+                      const def = getChip(type);
                       return (
                         <li
                           key={type}

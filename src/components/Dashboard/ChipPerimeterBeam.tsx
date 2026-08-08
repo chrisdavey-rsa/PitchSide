@@ -15,7 +15,7 @@ const PAD = 1.5;
 const DOT_LEN = 0.8;
 const LOOP_S = 2.8;
 
-export default function PowerUpPerimeterBeam({ color }: Props) {
+export default function ChipPerimeterBeam({ color }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
 
@@ -90,7 +90,7 @@ export default function PowerUpPerimeterBeam({ color }: Props) {
             strokeLinecap="round"
             strokeDasharray={dash}
             strokeDashoffset={0}
-            className="powerup-perimeter-beam"
+            className="chip-perimeter-beam"
             style={{ animationDuration: `${LOOP_S}s` }}
           />
 
@@ -109,7 +109,7 @@ export default function PowerUpPerimeterBeam({ color }: Props) {
             strokeLinecap="round"
             strokeDasharray={dash}
             strokeDashoffset={0}
-            className="powerup-perimeter-beam"
+            className="chip-perimeter-beam"
             style={{ animationDuration: `${LOOP_S}s` }}
           />
         </>

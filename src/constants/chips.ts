@@ -1,5 +1,5 @@
 /**
- * PitchSide universal Power-Up catalog + season-scoped instance model.
+ * PitchSide universal Chip catalog + season-scoped instance model.
  * Canonical source — UI and rules should import from here.
  */
 
@@ -12,19 +12,19 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-/** Sport scope for power-up instances (engine vocabulary). */
-export type PowerUpSportType = "football" | "rugby" | "f1" | "golf";
+/** Sport scope for chip instances (engine vocabulary). */
+export type ChipSportType = "football" | "rugby" | "f1" | "golf";
 
-export type PowerUpId =
+export type ChipId =
   | "double_bubble"
   | "safety_net"
   | "sniper"
   | "banker"
   | "pitchside_master";
 
-export type PowerUpAllocation = "baseline" | "earned";
+export type ChipAllocation = "baseline" | "earned";
 
-export interface PowerUpTheme {
+export interface ChipTheme {
   accentText: string;
   iconText: string;
   border: string;
@@ -32,10 +32,10 @@ export interface PowerUpTheme {
   glow: string;
 }
 
-export type PowerUpIcon = LucideIcon | React.FC<{ className?: string }>;
+export type ChipIcon = LucideIcon | React.FC<{ className?: string }>;
 
-export interface PowerUpDefinition {
-  id: PowerUpId;
+export interface ChipDefinition {
+  id: ChipId;
   /** Marketing name on chips / rules. */
   name: string;
   tagline: string;
@@ -43,13 +43,13 @@ export interface PowerUpDefinition {
   howToEarn: string;
   howToUse: string;
   gameImpact: string;
-  allocation: PowerUpAllocation;
+  allocation: ChipAllocation;
   /** Short unlock criteria shown on locked chip tooltips. */
   unlockCriteria: string;
   /** Extra note (e.g. Banker vs Precision Boost interaction). */
   notes?: string;
-  icon: PowerUpIcon;
-  theme: PowerUpTheme;
+  icon: ChipIcon;
+  theme: ChipTheme;
   /** Premium platinum/gold treatment (PitchSide Master). */
   isPremium?: boolean;
 }
@@ -67,13 +67,13 @@ export function DoubleBubbleIcon({ className = "" }: { className?: string }) {
 }
 
 /**
- * A player's owned / progress-tracked power-up for one sport season.
+ * A player's owned / progress-tracked chip for one sport season.
  * Expires automatically when the linked season `is_active` becomes false.
  */
-export interface UserPowerUpInstance {
+export interface UserChipInstance {
   instanceId: string;
-  powerUpId: PowerUpId;
-  sportType: PowerUpSportType;
+  chipId: ChipId;
+  sportType: ChipSportType;
   sportSeasonId: string;
   /** Whether the player has unlocked this chip for the season. */
   unlocked: boolean;
@@ -87,7 +87,7 @@ export interface UserPowerUpInstance {
   expiresWhenSeasonInactive: true;
 }
 
-export const POWER_UP_IDS: PowerUpId[] = [
+export const CHIP_IDS: ChipId[] = [
   "double_bubble",
   "safety_net",
   "sniper",
@@ -95,7 +95,7 @@ export const POWER_UP_IDS: PowerUpId[] = [
   "pitchside_master",
 ];
 
-export const POWER_UPS: PowerUpDefinition[] = [
+export const CHIPS: ChipDefinition[] = [
   {
     id: "double_bubble",
     name: "Double Bubble",
@@ -105,7 +105,7 @@ export const POWER_UPS: PowerUpDefinition[] = [
     howToEarn:
       "Baseline allocation. One Double Bubble is granted at the start of each active sport season — no streak required.",
     howToUse:
-      "Open your Power-Up wallet, tap Double Bubble, then assign it to an unlocked fixture before kick-off. Once armed, it locks with that prediction.",
+      "Open your Chip wallet, tap Double Bubble, then assign it to an unlocked fixture before kick-off. Once armed, it locks with that prediction.",
     gameImpact:
       "All points earned on the selected fixture are doubled (Perfect Prediction, margin, and outcome bands).",
     allocation: "baseline",
@@ -216,14 +216,14 @@ export const POWER_UPS: PowerUpDefinition[] = [
   },
 ];
 
-export function getPowerUp(id: string): PowerUpDefinition | undefined {
-  return POWER_UPS.find((p) => p.id === id);
+export function getChip(id: string): ChipDefinition | undefined {
+  return CHIPS.find((p) => p.id === id);
 }
 
-/** Map UI sport keys → power-up sportType. */
-export function toPowerUpSportType(
+/** Map UI sport keys → chip sportType. */
+export function toChipSportType(
   sport: "football" | "rugby" | "formula1" | "golf" | "f1" | string | null | undefined,
-): PowerUpSportType {
+): ChipSportType {
   if (sport === "rugby") return "rugby";
   if (sport === "golf") return "golf";
   if (sport === "formula1" || sport === "f1") return "f1";
@@ -236,17 +236,17 @@ export function toPowerUpSportType(
  * Pass `seasonIsActive: false` to force every instance expired.
  */
 export function buildSeasonWallet(options: {
-  sportType: PowerUpSportType;
+  sportType: ChipSportType;
   sportSeasonId: string;
   seasonIsActive?: boolean;
-  /** Override unlock / progress per power-up id. */
+  /** Override unlock / progress per chip id. */
   overrides?: Partial<
     Record<
-      PowerUpId,
-      Pick<UserPowerUpInstance, "unlocked" | "status" | "progressHint" | "armedMatchId">
+      ChipId,
+      Pick<UserChipInstance, "unlocked" | "status" | "progressHint" | "armedMatchId">
     >
   >;
-}): UserPowerUpInstance[] {
+}): UserChipInstance[] {
   const {
     sportType,
     sportSeasonId,
@@ -255,8 +255,8 @@ export function buildSeasonWallet(options: {
   } = options;
 
   const defaults: Record<
-    PowerUpId,
-    Pick<UserPowerUpInstance, "unlocked" | "status" | "progressHint">
+    ChipId,
+    Pick<UserChipInstance, "unlocked" | "status" | "progressHint">
   > = {
     double_bubble: {
       unlocked: true,
@@ -285,14 +285,14 @@ export function buildSeasonWallet(options: {
     },
   };
 
-  return POWER_UP_IDS.map((powerUpId) => {
-    const base = defaults[powerUpId];
+  return CHIP_IDS.map((chipId) => {
+    const base = defaults[chipId];
     const over: Partial<
       Pick<
-        UserPowerUpInstance,
+        UserChipInstance,
         "unlocked" | "status" | "progressHint" | "armedMatchId"
       >
-    > = overrides[powerUpId] ?? {};
+    > = overrides[chipId] ?? {};
     const unlocked = over.unlocked ?? base.unlocked;
     let status = over.status ?? base.status;
 
@@ -301,8 +301,8 @@ export function buildSeasonWallet(options: {
     }
 
     return {
-      instanceId: `${sportType}:${sportSeasonId}:${powerUpId}`,
-      powerUpId,
+      instanceId: `${sportType}:${sportSeasonId}:${chipId}`,
+      chipId,
       sportType,
       sportSeasonId,
       unlocked: seasonIsActive ? unlocked : false,

@@ -91,7 +91,7 @@ Other optimistic paths:
 |------|---------|
 | Tournament opt-in | Local profile update + `dbUpdateTournamentSubscriptions` |
 | Email/push toggles | Immediate `profiles` update + push subscribe RPC |
-| Power-up lock | Confirm modal → prediction write with `applied_powerup_id` |
+| Chip lock | Confirm modal → prediction write with `applied_chip_id` |
 | Admin FT override | FixturesManager → force resettle RPC |
 
 ---
@@ -104,13 +104,13 @@ Live schema (27 tables). Declared FKs from Postgres; logical-only links called o
 
 | Table | PK | Foreign keys / notes |
 |-------|----|----------------------|
-| `profiles` | `id` (text) | Conventionally = `auth.users.id` (no declared FK). Referenced by predictions, league_members, powerups, push_* |
+| `profiles` | `id` (text) | Conventionally = `auth.users.id` (no declared FK). Referenced by predictions, league_members, chips, push_* |
 | `matches` | `id` | `home_team_id` → `teams`; `away_team_id` → `teams` |
-| `predictions` | `id` | `user_id` → `profiles`; `applied_powerup_id` → `user_powerups`; **`match_id` → matches is logical only (no FK)** |
+| `predictions` | `id` | `user_id` → `profiles`; `applied_chip_id` → `user_chips`; **`match_id` → matches is logical only (no FK)** |
 | `leagues` | `id` | Referenced by `league_members`, `sport_seasons.global_league_id` |
 | `league_members` | `(league_id, user_id)` | → `leagues`, → `profiles` |
-| `user_powerups` | `id` | → `profiles`; → `sport_seasons`; `applied_fixture_id` → `matches` |
-| `power_up_wallet` | `id` | → `profiles` |
+| `user_chips` | `id` | → `profiles`; → `sport_seasons`; `applied_fixture_id` → `matches` |
+| `chip_wallet` | `id` | → `profiles` |
 | `archived_players` | `id` | Soft-delete archive blob (no FKs) |
 | `unsubscribed_emails` | `email` | Mailing exclusions |
 

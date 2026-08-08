@@ -20,6 +20,7 @@ import {
 import { UserProfile, SportType } from '../types';
 import PitchSideLogo from './PitchSideLogo';
 import { dbFetchPlayers, isSupabaseConfigured, supabase } from '../supabase';
+import { readPendingInvite } from '../lib/pendingInvite';
 import { NATIONS_LIST } from './AccountPortal/data';
 import CountryFlag from './CountryFlag';
 import { filterTeams } from '../data/supportedTeams';
@@ -133,6 +134,7 @@ export default function AuthFlow({
 
     try {
       if (isSupabaseConfigured() && supabase) {
+        const pendingInvite = readPendingInvite();
         const { error } = await supabase.auth.signUp({
           email: email.trim().toLowerCase(),
           password,
@@ -152,6 +154,9 @@ export default function AuthFlow({
               supported_team: supportedTeam.trim(),
               preferred_sport: preferredSport,
               selected_sports: [preferredSport],
+              ...(pendingInvite?.ref
+                ? { invited_by: pendingInvite.ref }
+                : {}),
             },
           },
         });

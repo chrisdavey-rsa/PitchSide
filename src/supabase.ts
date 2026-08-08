@@ -36,8 +36,8 @@ export type DbArchivedPlayer = Tables<"archived_players">;
 type DbFunctions = Database["public"]["Functions"];
 export type LeagueMemberPredictionRpc =
   DbFunctions["get_league_member_predictions"]["Returns"][number];
-export type PlayerPowerupUsageRpc =
-  DbFunctions["get_player_powerup_usage"]["Returns"][number];
+export type PlayerChipUsageRpc =
+  DbFunctions["get_player_chip_usage"]["Returns"][number];
 
 /** Client-facing archive backup shape (JSON fields parsed from archived_players). */
 export type ArchivedPlayerBackup = {
@@ -118,16 +118,16 @@ export async function testSupabaseConnection(): Promise<{ ok: boolean; error?: s
 
 /** Columns needed to hydrate UserProfile from profiles (no SELECT *). */
 const PROFILE_LIST_COLUMNS =
-  "id, first_name, surname, email, username, dob, phone, nationality, supported_team, preferred_sport, is_admin, is_verified, is_profile_public, created_at, seen_features, selected_sports, favorite_f1_team, favorite_golfer, role, golf_mulligans_available, age_confirmed_13, terms_accepted_at, privacy_accepted_at, subscribed_leagues, golf_coverage_tier, preferred_nation, favorite_teams, weekly_email_opt_in, push_enabled, email_enabled";
+  "id, first_name, surname, email, username, dob, phone, nationality, supported_team, preferred_sport, is_admin, is_verified, is_profile_public, created_at, seen_features, selected_sports, favorite_f1_team, favorite_golfer, role, golf_mulligans_available, age_confirmed_13, terms_accepted_at, privacy_accepted_at, subscribed_leagues, golf_coverage_tier, preferred_nation, favorite_teams, weekly_email_opt_in, push_enabled, email_enabled, friend_activity_opt_in, golden_tickets";
 
 /** Match columns used by mapMatchRow — keep in sync with Match domain model. */
 const MATCH_LIST_COLUMNS =
-  "id, external_fixture_id, competition_id, competition_name, sport, home_team, away_team, actual_home_score, actual_away_score, kickoff_time, status, match_tag, round_name, venue_name, odds_home_win, odds_draw, odds_away_win, base_multiplier, provisional_home_score, provisional_away_score, match_minute, is_visible, is_pitchside_pick";
+  "id, external_fixture_id, competition_id, competition_name, sport, home_team, away_team, actual_home_score, actual_away_score, kickoff_time, status, match_tag, round_name, venue_name, odds_home_win, odds_draw, odds_away_win, base_multiplier, provisional_home_score, provisional_away_score, match_minute, is_visible, is_pitchside_pick, is_golden_ticket";
 
 const ARCHIVED_PLAYER_COLUMNS = "id, deleted_user, predictions, created_at";
 
 const PREDICTION_USER_COLUMNS =
-  "match_id, predicted_home_score, predicted_away_score, submitted, created_at, provisional_points, points_won, sport, applied_powerup_id";
+  "match_id, predicted_home_score, predicted_away_score, submitted, created_at, provisional_points, points_won, sport, applied_chip_id";
 
 export async function dbFetchPlayers(): Promise<UserProfile[]> {
   const MOCK_NICKNAMES_FILTER = [
@@ -191,7 +191,9 @@ export async function dbFetchPlayers(): Promise<UserProfile[]> {
       : undefined,
     pushEnabled: d.push_enabled ?? undefined,
     emailEnabled: d.email_enabled ?? undefined,
+    friendActivityOptIn: d.friend_activity_opt_in ?? undefined,
     weeklyEmailOptIn: d.weekly_email_opt_in ?? undefined,
+    goldenTickets: Number(d.golden_tickets ?? 0),
     isProfilePublic: d.is_profile_public ?? undefined,
     seenFeatures: parseSeenFeatures(d.seen_features),
   }));
@@ -317,8 +319,8 @@ export type PredictionEntry = {
   provisionalPoints?: number;
   /** Settled points after FT (predictions.points_won). */
   pointsWon?: number | null;
-  /** Attached power-up instance id (consumed at lock). */
-  appliedPowerupId?: string | null;
+  /** Attached chip instance id (consumed at lock). */
+  appliedChipId?: string | null;
 };
 
 export type MatchConsensus = {
@@ -368,7 +370,7 @@ export async function dbFetchPredictions(
       created_at?: string | null;
       provisional_points?: number | null;
       points_won?: number | null;
-      applied_powerup_id?: string | null;
+      applied_chip_id?: string | null;
     }) => {
       result[p.match_id] = {
         home: p.predicted_home_score,
@@ -377,7 +379,7 @@ export async function dbFetchPredictions(
         lockedAt: p.submitted ? p.created_at ?? undefined : undefined,
         provisionalPoints: p.provisional_points ?? 0,
         pointsWon: p.points_won != null ? Number(p.points_won) : null,
-        appliedPowerupId: p.applied_powerup_id ?? null,
+        appliedChipId: p.applied_chip_id ?? null,
       };
     });
   }
@@ -392,12 +394,12 @@ export type LeagueSubmittedPredictionRow = {
   home: number;
   away: number;
   submitted: boolean;
-  /** Settled / power-up-adjusted points (0 is valid). */
+  /** Settled / chip-adjusted points (0 is valid). */
   pointsWon: number | null;
-  powerupType?: string | null;
+  chipType?: string | null;
 };
 
-function mapPowerupType(raw: unknown): string | null {
+function mapChipType(raw: unknown): string | null {
   if (typeof raw !== "string" || !raw) return null;
   return raw;
 }
@@ -411,7 +413,7 @@ export async function dbFetchLeagueSubmittedPredictions(
   const { data, error } = await supabase
     .from("predictions")
     .select(
-      "user_id, match_id, sport, predicted_home_score, predicted_away_score, submitted, points_won, applied_powerup_id",
+      "user_id, match_id, sport, predicted_home_score, predicted_away_score, submitted, points_won, applied_chip_id",
     )
     .in("user_id", userIds)
     .eq("submitted", true);
@@ -426,14 +428,14 @@ export async function dbFetchLeagueSubmittedPredictions(
     away: Number(p.predicted_away_score) || 0,
     submitted: true,
     pointsWon: p.points_won != null ? Number(p.points_won) : null,
-    powerupType: null,
+    chipType: null,
   }));
 }
 
 /**
  * Submitted predictions for every member of a league (SECURITY DEFINER RPC).
  * Required because predictions RLS is own-row only.
- * `points_won` is settle+power-up earned points for completed fixtures
+ * `points_won` is settle+chip earned points for completed fixtures
  * (same engine as get_global_leaderboard).
  */
 export async function dbFetchLeagueMemberPredictions(
@@ -465,7 +467,7 @@ export async function dbFetchLeagueMemberPredictions(
     submitted: p.submitted !== false,
     // Include 0 — do not treat as missing.
     pointsWon: p.points_won != null ? Number(p.points_won) : null,
-    powerupType: mapPowerupType(p.powerup_type),
+    chipType: mapChipType(p.chip_type),
   }));
 }
 
@@ -550,7 +552,7 @@ export async function dbSavePrediction(userId: string, matchId: string, sport: S
 }
 
 /**
- * Lock a prediction and optionally consume a user_powerups row (atomic RPC).
+ * Lock a prediction and optionally consume a user_chips row (atomic RPC).
  */
 export async function dbLockPrediction(
   userId: string,
@@ -559,8 +561,8 @@ export async function dbLockPrediction(
   compId: string,
   homeScore: number,
   awayScore: number,
-  powerupId?: string | null,
-): Promise<{ applied_powerup_id: string | null; consumed: boolean }> {
+  chipId?: string | null,
+): Promise<{ applied_chip_id: string | null; consumed: boolean }> {
   if (!supabase) throw new Error("Database not connected.");
 
   // Column is `match_id` (fixture id). Validate before hitting PostgREST/RPC.
@@ -579,7 +581,7 @@ export async function dbLockPrediction(
     p_competition_id: compId || "unknown",
     p_home: Math.max(0, Math.trunc(homeScore)),
     p_away: Math.max(0, Math.trunc(awayScore)),
-    p_powerup_id: powerupId ?? null,
+    p_chip_id: chipId ?? null,
   };
 
   console.info("[dbLockPrediction] upsert lock", {
@@ -589,7 +591,7 @@ export async function dbLockPrediction(
     away_score: payload.p_away,
     sport: payload.p_sport,
     competition_id: payload.p_competition_id,
-    powerup_id: payload.p_powerup_id,
+    chip_id: payload.p_chip_id,
   });
 
   const { data, error } = await supabase.rpc(
@@ -616,14 +618,14 @@ export async function dbLockPrediction(
 
   const row = (data ?? {}) as Record<string, unknown>;
   return {
-    applied_powerup_id: (row.applied_powerup_id as string) ?? null,
+    applied_chip_id: (row.applied_chip_id as string) ?? null,
     consumed: Boolean(row.consumed),
   };
 }
 
-export type UserPowerupRow = {
+export type UserChipRow = {
   id: string;
-  powerup_type: string;
+  chip_type: string;
   sport_type: string;
   sport_season_id: string;
   status: "available" | "used" | "expired";
@@ -632,15 +634,15 @@ export type UserPowerupRow = {
   applied_fixture_id: string | null;
 };
 
-export async function dbFetchUserPowerups(
+export async function dbFetchUserChips(
   userId: string,
   sportType?: string,
-): Promise<UserPowerupRow[]> {
+): Promise<UserChipRow[]> {
   if (!supabase) return [];
   let query = supabase
-    .from("user_powerups")
+    .from("user_chips")
     .select(
-      "id, powerup_type, sport_type, sport_season_id, status, earned_at, used_at, applied_fixture_id",
+      "id, chip_type, sport_type, sport_season_id, status, earned_at, used_at, applied_fixture_id",
     )
     .eq("user_id", userId)
     .order("earned_at", { ascending: false });
@@ -648,19 +650,19 @@ export async function dbFetchUserPowerups(
   if (sportType) {
     query = query.eq(
       "sport_type",
-      sportType as Database["public"]["Enums"]["powerup_sport_type"],
+      sportType as Database["public"]["Enums"]["chip_sport_type"],
     );
   }
 
   const { data, error } = await query;
   if (error) {
-    console.warn("Failed to fetch user_powerups:", error.message);
+    console.warn("Failed to fetch user_chips:", error.message);
     return [];
   }
-  return (data ?? []) as UserPowerupRow[];
+  return (data ?? []) as UserChipRow[];
 }
 
-export async function dbEnsureBaselinePowerups(userId: string): Promise<void> {
+export async function dbEnsureBaselineChips(userId: string): Promise<void> {
   if (!supabase) return;
   const { error } = await supabase.rpc("grant_baseline_double_bubble", {
     p_user_id: userId,
@@ -754,6 +756,7 @@ export function mapMatchRow(
       }) ?? undefined,
     isVisible: row.is_visible !== false,
     isPitchsidePick: row.is_pitchside_pick === true,
+    isGoldenTicket: row.is_golden_ticket === true,
   };
 }
 
@@ -1672,7 +1675,7 @@ export interface LeaderboardRecord {
   /** Completed (FT) predictions only — accuracy & yield denominator. */
   settledPredictionsFootball: number;
   settledPredictionsRugby: number;
-  /** Raw base points (no power-up multipliers) for accuracy %. */
+  /** Raw base points (no chip multipliers) for accuracy %. */
   basePointsFootball: number;
   basePointsRugby: number;
   accuracy: string;
@@ -1729,7 +1732,7 @@ export function safeNum(value: unknown, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-/** Accuracy = (base_points / (settled_predictions × 5)) × 100 — no power-up multipliers. */
+/** Accuracy = (base_points / (settled_predictions × 5)) × 100 — no chip multipliers. */
 export function formatAccuracy(
   basePoints: number,
   settledPredictions: number,
@@ -1737,7 +1740,7 @@ export function formatAccuracy(
   return formatAccuracyFromBasePoints(basePoints, settledPredictions);
 }
 
-/** Strike Rate = total_points / settled_predictions (includes power-up scoring). */
+/** Strike Rate = total_points / settled_predictions (includes chip scoring). */
 export function formatStrikeRate(
   totalPoints: number,
   settledPredictions: number,
@@ -1890,30 +1893,30 @@ export async function dbFetchGlobalLeaderboardHorizon(
   );
 }
 
-export type PlayerPowerupUsageRow = {
-  powerupType: string;
+export type PlayerChipUsageRow = {
+  chipType: string;
   sport: string;
   timesUsed: number;
 };
 
-/** Aggregated power-up deployments for a player's profile modal. */
-export async function dbFetchPlayerPowerupUsage(
+/** Aggregated chip deployments for a player's profile modal. */
+export async function dbFetchPlayerChipUsage(
   playerId: string,
-): Promise<PlayerPowerupUsageRow[]> {
+): Promise<PlayerChipUsageRow[]> {
   if (!supabase) throw new Error("Database not connected.");
   if (!playerId) return [];
 
-  const { data, error } = await supabase.rpc("get_player_powerup_usage", {
+  const { data, error } = await supabase.rpc("get_player_chip_usage", {
     p_player_id: playerId,
   });
 
   if (error) {
-    console.warn("get_player_powerup_usage:", error.message);
+    console.warn("get_player_chip_usage:", error.message);
     return [];
   }
 
-  return (data || []).map((row: PlayerPowerupUsageRpc) => ({
-    powerupType: String(row.powerup_type ?? "unknown"),
+  return (data || []).map((row: PlayerChipUsageRpc) => ({
+    chipType: String(row.chip_type ?? "unknown"),
     sport: String(row.sport ?? "football"),
     timesUsed: Number(row.times_used ?? 0),
   }));

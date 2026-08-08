@@ -1,13 +1,13 @@
 /**
- * PitchSide scoring + power-up override engine.
+ * PitchSide scoring + chip override engine.
  * Keep in sync with SQL:
  *   public.pitchside_football_points
  *   public.pitchside_rugby_points
- *   public.pitchside_apply_powerup
+ *   public.pitchside_apply_chip
  *   public.pitchside_settle_prediction_points
  */
 
-import type { PowerUpId } from "../constants/powerups";
+import type { ChipId } from "../constants/chips";
 import { SportType } from "../types";
 
 export const FOOTBALL_OUTCOME_POINTS = 1;
@@ -19,7 +19,7 @@ export const RUGBY_NEAR_MARGIN_POINTS = 3; // within 7
 export const RUGBY_WIDE_MARGIN_POINTS = 1; // within 10
 export const SAFETY_NET_FLOOR_POINTS = 5;
 
-export type AppliedPowerUp = PowerUpId | null | undefined;
+export type AppliedChip = ChipId | null | undefined;
 
 export interface SettleResult {
   earnedPoints: number;
@@ -74,36 +74,50 @@ export function calculateRugbyPoints(
   return 0;
 }
 
-export function applyPowerUpModifiers(
+/**
+ * Apply chip modifiers after base scoring.
+ * `appliedChip` is the used chip on the prediction (`predictions.applied_chip_id`).
+ *
+ * Chip catalogue mapping (product ↔ engine id):
+ *   double_bubble     → ×2 final points
+ *   insurance         → safety_net (0 → floor)
+ *   precision_boost   → sniper (perfect only ×1.5)
+ *   banker            → max perfect points on correct outcome; flags is_banker_exact
+ *   pitchside_master  → ×3 final points
+ */
+export function applyChipModifiers(
   basePoints: number,
-  appliedPowerup: AppliedPowerUp,
+  appliedChip: AppliedChip,
   opts: { isExact: boolean; outcomeCorrect: boolean },
 ): { earnedPoints: number; isBankerExact: boolean } {
   let points = basePoints;
   let isBankerExact = false;
 
-  if (!appliedPowerup) {
+  if (!appliedChip) {
     return { earnedPoints: points, isBankerExact: false };
   }
 
-  if (appliedPowerup === "banker") {
+  // banker — correct outcome awards Perfect Prediction max points; does not count as a PP milestone
+  if (appliedChip === "banker") {
     if (opts.outcomeCorrect) {
       points = FOOTBALL_EXACT_SCORE_POINTS;
       isBankerExact = true;
     }
-  } else if (appliedPowerup === "sniper") {
+  } else if (appliedChip === "sniper") {
+    // precision_boost — Perfect Prediction only
     if (opts.isExact) {
       points = Math.round(points * 1.5);
     }
   }
 
-  if (appliedPowerup === "double_bubble") {
+  if (appliedChip === "double_bubble") {
     points *= 2;
-  } else if (appliedPowerup === "pitchside_master") {
+  } else if (appliedChip === "pitchside_master") {
     points *= 3;
   }
 
-  if (appliedPowerup === "safety_net" && points === 0) {
+  // insurance (safety_net) — floor only when natural score is 0
+  if (appliedChip === "safety_net" && points === 0) {
     points = SAFETY_NET_FLOOR_POINTS;
   }
 
@@ -116,7 +130,7 @@ export function settlePredictionPoints(
   predictedAway: number,
   actualHome: number,
   actualAway: number,
-  appliedPowerup?: AppliedPowerUp,
+  appliedChip?: AppliedChip,
 ): SettleResult {
   const sportKey =
     sport === SportType.FOOTBALL || sport === "football" ? "football" : "rugby";
@@ -131,7 +145,7 @@ export function settlePredictionPoints(
   const isExact =
     predictedHome === actualHome && predictedAway === actualAway;
 
-  const mod = applyPowerUpModifiers(basePoints, appliedPowerup, {
+  const mod = applyChipModifiers(basePoints, appliedChip, {
     isExact,
     outcomeCorrect,
   });

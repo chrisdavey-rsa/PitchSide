@@ -209,22 +209,22 @@ body {
 }
 
 /*
- * Fixture with an assigned Power-Up — coloured glow on the tile.
- * The travelling white beam is an SVG stroke (see PowerUpPerimeterBeam);
+ * Fixture with an assigned Chip — coloured glow on the tile.
+ * The travelling white beam is an SVG stroke (see ChipPerimeterBeam);
  * dashoffset along pathLength stays linear, so speed does not vary.
  */
-.powerup-assigned-ring {
-  --powerup-ring-color: #38bdf8;
+.chip-assigned-ring {
+  --chip-ring-color: #38bdf8;
   position: relative;
   isolation: isolate;
   overflow: visible !important;
-  border-color: color-mix(in srgb, var(--powerup-ring-color) 85%, transparent) !important;
+  border-color: color-mix(in srgb, var(--chip-ring-color) 85%, transparent) !important;
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--powerup-ring-color) 65%, transparent),
-    0 0 18px color-mix(in srgb, var(--powerup-ring-color) 28%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--chip-ring-color) 65%, transparent),
+    0 0 18px color-mix(in srgb, var(--chip-ring-color) 28%, transparent);
 }
 
-@keyframes powerupPerimeterBeam {
+@keyframes chipPerimeterBeam {
   from {
     stroke-dashoffset: 0;
   }
@@ -234,8 +234,8 @@ body {
   }
 }
 
-.powerup-perimeter-beam {
-  animation-name: powerupPerimeterBeam;
+.chip-perimeter-beam {
+  animation-name: chipPerimeterBeam;
   animation-timing-function: linear;
   animation-iteration-count: infinite;
   animation-duration: 2.8s;

@@ -25,7 +25,7 @@ type HistoryRow = {
   fixture: string;
   prediction: string;
   result: string;
-  /** Base points only (no power-up multipliers) — same basis as Player Profile accuracy. */
+  /** Base points only (no chip multipliers) — same basis as Player Profile accuracy. */
   points: number | null;
   status: "active" | "settled" | "pending";
   matchDate: string;

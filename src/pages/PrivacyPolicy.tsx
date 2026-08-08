@@ -40,7 +40,7 @@ export default function PrivacyPolicy() {
             <ul className="list-disc pl-5 space-y-1 text-slate-400">
               <li>Account data: email, username, name, nationality, preferred sports, optional phone</li>
               <li>Profile preferences and supported team / favourites</li>
-              <li>Prediction history, league memberships, power-up usage, and leaderboard stats</li>
+              <li>Prediction history, league memberships, chip usage, and leaderboard stats</li>
               <li>Technical data: device/browser type, IP address, cookies or similar technologies</li>
               <li>Communications you send to us (e.g. support emails)</li>
             </ul>
